@@ -38,6 +38,49 @@
 5. 漫画前台 + 后台 + 阅读器
 ```
 
+## 1.1 已确认技术栈与运行方式
+
+MVP 推荐使用 Next.js 全栈实现：
+
+```text
+Next.js App Router
+TypeScript
+SQLite
+Drizzle ORM
+better-sqlite3
+Tailwind CSS
+shadcn/ui
+lucide-react
+Vitest
+Playwright
+Sharp
+yauzl 或 unzipper
+```
+
+运行方式：
+
+```text
+1. 本项目按本地自托管应用设计，不按 serverless / Vercel 部署设计。
+2. Next.js 负责页面、API、管理界面和本地文件读取入口。
+3. App Router 用于页面路由。
+4. Route Handlers 用于 REST API、插件接口、图片流接口和文件服务接口。
+5. Server Actions 可用于系统内部表单提交，但不能作为插件对外接口。
+6. SQLite 作为本地数据库。
+7. Drizzle ORM 负责 schema、迁移和类型安全查询。
+8. Sharp 负责封面、缩略图和图片尺寸读取。
+9. zip / cbz 扫描优先使用支持流式或懒加载读取的库，避免扫描时整包解压。
+```
+
+基础配置：
+
+```text
+HOST = 0.0.0.0
+PORT = 3000
+MANGA_ROOT = 一个绝对路径
+DATA_DIR = 系统数据目录
+DATABASE_URL = SQLite 数据库路径
+```
+
 ---
 
 # 2. 总体链路
@@ -65,12 +108,28 @@ OpenList 访问 115 文件
 关键原则是：
 
 ```text
-先入库，再下载。
+先建立业务记录，再下载；但导入和下载可以独立发生。
 ```
 
 也就是说，浏览器插件采集到漫画信息和磁链后，必须先提交给本地服务，由本地服务创建漫画、资源、下载任务等数据库记录，然后再调用 OpenList 添加 115 离线任务。
 
 不能先把磁链丢给 115，再回头猜它属于哪部漫画。
+
+同时，导入和下载必须解耦：
+
+```text
+导入：创建或补充漫画、来源、标签、资源等业务记录。
+下载：围绕已有资源创建下载任务，并在文件落地后匹配回漫画。
+```
+
+这样允许：
+
+```text
+1. 先本地扫描已有漫画，再用浏览器插件补充标签和来源。
+2. 先用浏览器插件采集来源和标签，但暂不下载。
+3. 先导入磁链资源，稍后再决定是否下载。
+4. 下载完成后再匹配到已有漫画。
+```
 
 ---
 
@@ -119,6 +178,21 @@ OpenList 访问 115 文件
 插件不直接操作 OpenList，不直接操作 115，也不直接决定本地文件路径。
 
 插件采集完成后，只负责把数据提交给本地服务。
+
+插件后续优先只兼容：
+
+```text
+Chrome Manifest V3
+```
+
+如果系统启用局域网访问，插件调用写接口时建议支持 `IMPORT_TOKEN`：
+
+```text
+1. token 由系统设置页生成。
+2. 插件保存到 chrome.storage.local。
+3. 请求时放入 X-MangaTest-Token。
+4. token 只用于防止局域网内其他设备随便调用导入接口，不作为完整账号权限系统。
+```
 
 ## 4.2 采集内容
 
@@ -234,7 +308,29 @@ OpenList 临时任务 ID
 重试次数
 ```
 
-## 5.3 推荐 API 能力
+## 5.3 应用路径与服务边界
+
+本项目是一个系统，不拆成独立前台和后台。
+
+推荐路径：
+
+```text
+/                 漫画首页
+/comics           漫画列表
+/comics/:id       漫画详情
+/reader/:id       阅读器
+/admin            管理首页
+/admin/files      文件维护
+/admin/tasks      下载任务，后续阶段实现
+/admin/tags       标签管理
+/settings         系统设置
+```
+
+Route Handlers 负责对外 API、插件接口、页面图片流和文件读取接口。
+
+Server Actions 可以用于系统内部表单提交，但插件、外部工具、下载器回调等应使用显式 API。
+
+## 5.4 推荐 API 能力
 
 本地服务需要提供这些能力：
 
@@ -274,6 +370,18 @@ POST /api/tags/translate
 
 GET /api/reader/:comicId
 获取阅读器所需页面数据
+
+GET /api/pages/:pageId
+读取阅读器单页图片
+
+GET /api/covers/:comicId
+读取漫画封面
+
+GET /api/settings
+读取系统设置
+
+POST /api/settings
+更新系统设置，例如 manga 根目录
 ```
 
 实际接口名称可以后续调整，但能力要保留。
@@ -397,6 +505,36 @@ OpenList 不负责：
 ```
 
 这些都由本地服务和数据库负责。
+
+## 6.5 导入与下载解耦
+
+导入和下载是两个独立动作。
+
+导入包括：
+
+```text
+1. 本地扫描导入：文件已经在本地，系统创建漫画、章节、页面、封面和基础元数据。
+2. 插件元数据导入：浏览器插件提交来源站标题、标签、封面、URL、站点 ID、磁链等信息。
+3. 手动导入：用户手动编辑或补充漫画信息。
+```
+
+下载包括：
+
+```text
+1. 根据 comic_resource 创建 download_task。
+2. 调用内置下载器、OpenList、aria2 或其他 provider。
+3. 下载完成后生成或匹配 local_file。
+4. 再把 local_file 关联回 comic / comic_resource。
+```
+
+重复导入行为：
+
+```text
+1. 如果 API 请求没有指定 duplicate_action 且发现重复，返回冲突结果和候选漫画列表。
+2. duplicate_action = update 时，更新已有漫画的来源、标签或资源。
+3. duplicate_action = ignore 时，不修改已有记录。
+4. duplicate_action = create_separate 时，允许创建独立漫画。
+```
 
 ---
 
@@ -560,7 +698,40 @@ xxx.zip
 
 这样可以避免半成品文件被扫描器误认为已经完成。
 
-## 8.4 本地目录结构
+## 8.4 下载 provider 预留
+
+MVP 不实现下载，但数据库和服务边界要预留下载 provider。
+
+下载 provider 建议：
+
+```text
+builtin
+openlist
+aria2
+manual
+```
+
+内置下载器后续要求：
+
+```text
+1. 使用 .download 临时文件。
+2. 支持 HTTP Range 断点续传。
+3. 保存 ETag 和 Last-Modified。
+4. 服务重启后可以恢复未完成下载。
+5. 下载成功后再重命名为最终文件。
+6. 失败任务保留记录，不硬删除。
+```
+
+aria2 接入原则：
+
+```text
+1. aria2 只作为 provider。
+2. 业务状态仍由本地数据库记录。
+3. provider_task_id 保存 aria2 gid。
+4. aria2 不直接决定漫画归属。
+```
+
+## 8.5 本地目录结构
 
 推荐初期目录结构：
 
@@ -602,6 +773,7 @@ manga/library/{source}/{gallery_id}/
 
 ```text
 扫描本地 manga 目录
+扫描普通目录、zip、cbz
 识别新增漫画
 识别缺失文件
 识别文件变更
@@ -613,7 +785,42 @@ manga/library/{source}/{gallery_id}/
 检测重复文件
 ```
 
-## 9.2 hash 的作用
+## 9.2 MVP 支持格式与扫描规则
+
+MVP 支持：
+
+```text
+普通目录
+zip
+cbz
+```
+
+MVP 图片格式建议支持：
+
+```text
+jpg
+jpeg
+png
+webp
+gif
+```
+
+扫描规则：
+
+```text
+1. 漫画根目录必须是绝对路径。
+2. 根目录下的一个目录、一个 zip、一个 cbz，默认识别为一本漫画。
+3. 扫描到漫画后，默认使用文件名或目录名作为漫画名称。
+4. 文件名解析作者的规则暂不实现，但保留后续扩展入口。
+5. 目录或压缩包内只有图片时，生成一个默认章节。
+6. 目录或压缩包内存在一层或多层图片文件夹时，每个包含图片的文件夹可以生成一个章节。
+7. 如果根目录图片和子目录章节同时存在，根目录图片生成“未分章”章节，子目录继续生成独立章节。
+8. 忽略 __MACOSX、.DS_Store、隐藏文件、非图片文件和空目录。
+9. 页序和章节序使用自然排序，例如 1、2、10，而不是 1、10、2。
+10. 扫描时不强制移动原文件。
+```
+
+## 9.3 hash 的作用
 
 hash 可以理解成文件指纹。
 
@@ -628,13 +835,22 @@ hash 可以理解成文件指纹。
 
 例如文件改名后，只要内容没变，hash 仍然一致，可以自动或半自动修复路径。
 
-## 9.3 缺失文件检测
+文件指纹规则：
+
+```text
+1. local_file 记录 path、file_size、mtime、sha256。
+2. 目录型漫画可记录目录快照 hash，快照由相对路径、大小、mtime 或页面 hash 组合生成。
+3. zip / cbz 优先记录压缩包自身 sha256。
+4. hash 用于重复检测、移动后修复、文件变更检测。
+```
+
+## 9.4 缺失文件检测
 
 数据库里记录了：
 
 ```text
 comic_id
-resource_id
+local_file_id
 local_file_path
 file_hash
 file_size
@@ -667,6 +883,27 @@ local_file_changed
 疑似同一文件，是否修复路径？
 ```
 
+## 9.5 封面选择规则
+
+封面优先级：
+
+```text
+1. 手动上传封面。
+2. 漫画目录或压缩包内名为 cover 的图片。
+3. 第一页图片。
+```
+
+规则：
+
+```text
+1. 手动上传的封面保存到系统数据目录，例如 data/covers/{comic_id}/cover.webp。
+2. 手动上传的封面不要写入漫画原目录或压缩包。
+3. 自动封面可缓存到系统数据目录。
+4. 数据库记录 cover_path、cover_source、cover_updated_at。
+5. cover_source = manual | embedded_cover | first_page。
+6. 如果手动封面被删除，系统可以回退到 embedded_cover 或 first_page。
+```
+
 ---
 
 # 10. 数据库设计
@@ -679,6 +916,7 @@ local_file_changed
 comic
 comic_source
 comic_resource
+resource_local_file
 download_task
 cloud_file
 local_file
@@ -689,8 +927,10 @@ favorite_category
 favorite_item
 reading_progress
 reading_queue
+comic_relation
 chapter
 page
+app_setting
 ```
 
 ## 10.2 comic
@@ -699,15 +939,42 @@ page
 
 ```text
 id
-title
-title_original
-title_translated
+display_title
+original_title
+file_title
+metadata_query_title
 cover_path
+cover_source
+cover_updated_at
 primary_artist
 description
 status
+deleted_at
 created_at
 updated_at
+```
+
+标题字段含义：
+
+```text
+display_title：系统展示名称，默认等于 file_title，可编辑，通常偏中文。
+original_title：原始名称，可能是日文、英文或来源站原名。
+file_title：扫描时从文件名或目录名得到，作为原始文件线索，不随用户编辑改变。
+metadata_query_title：将来提交 API 获取标签时使用的名称，可能需要用日文或来源站名称。
+```
+
+封面字段含义：
+
+```text
+cover_source = manual | embedded_cover | first_page
+```
+
+作者规则：
+
+```text
+1. primary_artist 可以为空。
+2. MVP 不从文件名强行解析作者。
+3. 后续保留作者解析器和人工指定主作者能力。
 ```
 
 ## 10.3 comic_source
@@ -754,7 +1021,41 @@ created_at
 updated_at
 ```
 
-## 10.5 download_task
+resource_type 可以是：
+
+```text
+local
+magnet
+torrent
+http
+openlist
+manual
+```
+
+MVP 的本地扫描可以创建 `resource_type = local` 的 comic_resource，用于把本地文件导入也纳入统一资源模型。
+
+## 10.5 resource_local_file
+
+连接资源和本地文件：
+
+```text
+id
+resource_id
+local_file_id
+match_type
+confidence
+created_at
+```
+
+设计原因：
+
+```text
+1. 一个 comic_resource 可以关联零个、一个或多个 local_file。
+2. 一个 local_file 也可以被多个 comic_resource 候选匹配。
+3. 一个 torrent 可能下载出多个文件，不能假设 resource 和 local_file 永远是一对一。
+```
+
+## 10.6 download_task
 
 记录下载任务：
 
@@ -767,6 +1068,13 @@ tool
 target_cloud_dir
 status
 progress
+bytes_downloaded
+total_bytes
+supports_resume
+temp_file_path
+final_file_path
+etag
+last_modified
 error_message
 retry_count
 created_at
@@ -777,7 +1085,10 @@ completed_at
 provider 可以是：
 
 ```text
+builtin
 openlist
+aria2
+manual
 ```
 
 tool 可以是：
@@ -786,7 +1097,14 @@ tool 可以是：
 115 Cloud
 ```
 
-## 10.6 cloud_file
+download_task 不硬删除，取消或隐藏时标记为：
+
+```text
+canceled
+archived
+```
+
+## 10.7 cloud_file
 
 记录 115 云端文件：
 
@@ -813,17 +1131,20 @@ torrent_file_list
 manual
 ```
 
-## 10.7 local_file
+## 10.8 local_file
 
 记录本地文件：
 
 ```text
 id
-resource_id
+comic_id
 local_file_path
 file_name
 file_size
 file_hash
+mtime
+file_type
+directory_snapshot_hash
 page_count
 cover_path
 status
@@ -831,7 +1152,17 @@ created_at
 updated_at
 ```
 
-## 10.8 tag
+file_type 可以是：
+
+```text
+directory
+zip
+cbz
+```
+
+local_file 是磁盘实体，不等同于 comic。comic 是系统内展示和管理的一本漫画，local_file 是一个真实目录或压缩包。
+
+## 10.9 tag
 
 标签表保存英文 canonical 标签：
 
@@ -854,7 +1185,36 @@ name = sole female
 canonical = female:sole female
 ```
 
-## 10.9 tag_translation
+没有 namespace 的标签可以归入：
+
+```text
+misc
+```
+
+## 10.10 comic_tag
+
+漫画和标签的关联表：
+
+```text
+id
+comic_id
+tag_id
+source
+confidence
+created_at
+```
+
+source 可以是：
+
+```text
+manual
+scan
+plugin
+api
+merged_child
+```
+
+## 10.11 tag_translation
 
 标签翻译表：
 
@@ -869,9 +1229,11 @@ source
 updated_at
 ```
 
-前台默认显示中文，后台保留英文原文。
+前台默认显示中文。中文翻译缺失时，显示 canonical 或英文 name。
 
-## 10.10 favorite_category
+翻译不改变 canonical。标签别名用于搜索和展示，不改变原始标签记录。
+
+## 10.12 favorite_category
 
 收藏分类表：
 
@@ -884,7 +1246,7 @@ created_at
 updated_at
 ```
 
-## 10.11 favorite_item
+## 10.13 favorite_item
 
 收藏条目表：
 
@@ -899,7 +1261,7 @@ note
 
 每个收藏分类拥有独立的手动排序。
 
-## 10.12 reading_progress
+## 10.14 reading_progress
 
 阅读进度表：
 
@@ -914,7 +1276,7 @@ status
 last_read_at
 ```
 
-## 10.13 reading_queue
+## 10.15 reading_queue
 
 阅读队列表：
 
@@ -934,6 +1296,102 @@ updated_at
 ```
 
 用于支持从收藏分类、搜索结果、作者页进入后的连续阅读。
+
+## 10.16 chapter
+
+阅读章节表：
+
+```text
+id
+comic_id
+source_local_file_id
+title
+sort_order
+source_path
+page_count
+created_at
+updated_at
+```
+
+章节来源：
+
+```text
+1. 一个目录或压缩包内只有图片时，生成一个默认章节。
+2. 一个目录或压缩包内有多个图片文件夹时，每个图片文件夹生成一个章节。
+3. 其他漫画也可以通过 comic_relation 挂载成当前漫画的章节来源。
+```
+
+## 10.17 page
+
+阅读页表：
+
+```text
+id
+chapter_id
+source_local_file_id
+source_path
+page_index
+width
+height
+file_size
+created_at
+updated_at
+```
+
+page 的 source_path 可以指向：
+
+```text
+1. 普通目录下的相对图片路径。
+2. zip / cbz 内的相对图片路径。
+```
+
+## 10.18 comic_relation
+
+用于把其他漫画作为当前漫画的章节或关联内容：
+
+```text
+id
+parent_comic_id
+child_comic_id
+relation_type
+sort_order
+hide_child_from_library
+tag_merge_mode
+created_at
+updated_at
+```
+
+字段含义：
+
+```text
+relation_type = chapter
+hide_child_from_library = true 时，子漫画不再作为独立漫画显示在普通列表中。
+tag_merge_mode = none | copy_once | dynamic_union
+```
+
+推荐默认：
+
+```text
+tag_merge_mode = dynamic_union
+hide_child_from_library = true
+```
+
+## 10.19 app_setting
+
+系统设置表：
+
+```text
+key
+value
+updated_at
+```
+
+第一阶段至少需要保存：
+
+```text
+manga_root
+data_dir
+```
 
 ---
 
@@ -1058,13 +1516,25 @@ artist:xxx female:suit -male:xxx language:chinese
 ```text
 查看
 编辑
-删除
+删除漫画记录
 重新扫描
 重新匹配
 重新生成封面
 重新生成缩略图
 修复路径
 批量操作
+```
+
+删除语义必须区分数据库记录、系统缓存和真实漫画文件：
+
+```text
+1. 默认软删除 comic，不删除硬盘文件。
+2. 删除 comic 时可以删除 reading_progress。
+3. download_task 默认不删除，只标记 archived 或 canceled。
+4. local_file 默认不删除，只解除展示关系或保留为孤立文件记录。
+5. 删除真实文件必须是单独操作，UI 必须二次确认，并显示将删除的绝对路径。
+6. 系统生成的封面、缩略图属于缓存，可以重新生成。
+7. 手动上传封面属于用户数据，删除前需要确认。
 ```
 
 ## 12.3 下载任务管理
@@ -1150,6 +1620,18 @@ artist:xxx female:suit -male:xxx language:chinese
 轻点显示 / 隐藏 UI
 当前页码显示
 当前阅读百分比
+```
+
+实现建议：
+
+```text
+1. 阅读器通过 page 记录读取图片，不直接遍历文件系统。
+2. 普通目录图片按 source_path 读取。
+3. zip / cbz 图片通过 source_local_file_id + source_path 从压缩包读取。
+4. 图片响应由 /api/pages/:pageId 提供。
+5. 阅读进度在滚动停止后节流保存，例如 1 秒内最多保存一次。
+6. 阅读器退出或页面隐藏时主动保存一次进度。
+7. 大图按浏览器原生懒加载和 IntersectionObserver 控制预加载。
 ```
 
 ## 13.3 缩略图滚动条
@@ -1324,6 +1806,17 @@ language:chinese
 
 前台通过翻译表显示中文。
 
+规则：
+
+```text
+1. canonical 标签使用 namespace:name。
+2. 没有 namespace 的标签可以使用 misc:name。
+3. canonical 永远保存英文或来源站原始标签。
+4. 中文翻译缺失时，前台显示 canonical 或英文 name。
+5. 翻译不改变 canonical。
+6. 标签别名用于搜索和展示，不改变原始标签记录。
+```
+
 ## 15.2 标签来源
 
 标签来源包括：
@@ -1348,6 +1841,14 @@ E-Hentai API
 只显示中文
 只显示英文
 中英双显
+```
+
+其他漫画作为章节合并到当前漫画时，标签合并模式可以是：
+
+```text
+none：不合并标签。
+copy_once：建立关系时把子漫画标签复制到父漫画，之后不自动同步。
+dynamic_union：展示父漫画时动态合并子漫画标签并去重，不改变原始标签记录。
 ```
 
 ---
@@ -1449,13 +1950,32 @@ torrent hash
 安全策略：
 
 ```text
-后台需要登录
-插件调用本地服务需要 API Token
-默认只允许 localhost 访问
-外网访问需要手动开启
+MVP 不做用户登录系统
+允许监听局域网 IP
+默认面向可信局域网使用
+外网访问需要手动开启，且后续必须补充认证
+插件或外部工具调用写接口时建议使用 IMPORT_TOKEN
 OpenList token / 115 token / cookie 不暴露给前台
 敏感配置加密或至少不明文展示
 关键操作记录日志
+```
+
+日志策略：
+
+```text
+1. 可以记录来源 URL。
+2. 可以记录本地文件路径。
+3. 不记录完整 magnet。
+4. 如需排查 magnet，只记录 hash、长度或脱敏后的前后片段。
+5. 不在前台暴露 OpenList token、115 cookie 或其他敏感配置。
+```
+
+危险操作：
+
+```text
+1. 删除真实硬盘文件必须二次确认。
+2. 删除真实硬盘文件时必须显示绝对路径。
+3. 批量物理删除不进入 MVP。
 ```
 
 ---
@@ -1473,14 +1993,19 @@ OpenList token / 115 token / cookie 不暴露给前台
 功能：
 
 ```text
+设置绝对路径形式的 manga 根目录
 本地 manga 目录扫描
+普通目录 / zip / cbz 扫描
+章节和页面入库
+封面自动选择
 漫画列表
 漫画详情
 垂直无缝阅读器
 阅读进度保存
 基础标签
 基础搜索
-后台漫画管理
+后台基础编辑
+基础文件维护
 ```
 
 完成标准：
@@ -1491,6 +2016,20 @@ OpenList token / 115 token / cookie 不暴露给前台
 可以进入详情页
 可以垂直无缝阅读
 可以保存阅读进度
+修改 display_title 后 file_title 不变化
+删除漫画记录时本地原文件不会被删除
+```
+
+第一阶段暂不做：
+
+```text
+浏览器插件
+OpenList / 115
+aria2
+自动下载
+用户登录系统
+rar / cbr / 7z / pdf
+收藏分类连续阅读队列
 ```
 
 ---
@@ -1507,6 +2046,7 @@ OpenList token / 115 token / cookie 不暴露给前台
 
 ```text
 编辑标题
+编辑 original_title / metadata_query_title
 编辑标签
 编辑作者
 修改封面
@@ -1516,6 +2056,8 @@ OpenList token / 115 token / cookie 不暴露给前台
 修复路径
 批量操作
 标签翻译表
+手动上传封面
+删除语义和软删除恢复
 ```
 
 完成标准：
@@ -1544,6 +2086,8 @@ OpenList token / 115 token / cookie 不暴露给前台
 插件采集磁链 / 种子链接
 插件提交本地服务
 本地服务先入库
+插件元数据可以关联到已有本地扫描漫画
+重复导入时允许更新、忽略、另存为独立漫画
 前台显示已导入状态
 ```
 
@@ -1575,6 +2119,7 @@ OpenList token / 115 token / cookie 不暴露给前台
 下载到本地 manga 目录
 更新 local_file_path
 下载完成后自动扫描入库
+保留 aria2 provider 接入边界
 ```
 
 完成标准：
@@ -1650,15 +2195,18 @@ OpenList token / 115 token / cookie 不暴露给前台
 最小可用版本建议只做这些：
 
 ```text
-1. 本地服务
+1. Next.js 本地自托管应用
 2. SQLite 数据库
-3. 本地 manga 目录扫描
-4. 漫画列表
-5. 漫画详情
-6. 垂直无缝阅读器
-7. 阅读进度保存
-8. 后台基础编辑
-9. 标签英文存储 + 中文显示
+3. 绝对路径形式的 manga 根目录设置
+4. 普通目录 / zip / cbz 扫描
+5. 漫画列表
+6. 漫画详情
+7. 垂直无缝阅读器
+8. 阅读进度保存
+9. 后台基础编辑
+10. 标签英文存储 + 中文显示
+11. 封面自动选择和手动上传封面
+12. 缺失文件检测和路径修复提示
 ```
 
 第二批再做：
@@ -1666,10 +2214,13 @@ OpenList token / 115 token / cookie 不暴露给前台
 ```text
 1. 浏览器插件
 2. 插件导入漫画元数据
-3. OpenList 添加 115 离线任务
-4. 云端目录扫描
-5. 本地下载
-6. 下载任务中心
+3. 插件元数据关联已有本地漫画
+4. 重复导入处理：更新 / 忽略 / 另存
+5. OpenList 添加 115 离线任务
+6. 云端目录扫描
+7. 本地下载
+8. 下载任务中心
+9. aria2 provider
 ```
 
 第三批再做：
@@ -1683,6 +2234,47 @@ OpenList token / 115 token / cookie 不暴露给前台
 6. 缩略图滚动条
 ```
 
+MVP 必须准备测试夹具：
+
+```text
+1. 单目录单章节漫画。
+2. 多子目录多章节漫画。
+3. zip 单章节漫画。
+4. cbz 多章节漫画。
+5. 带 cover 图片的漫画。
+6. 没有 cover 图片的漫画。
+7. 文件名包含中文、日文、空格、括号、数字序号的漫画。
+8. 缺失文件场景。
+9. 重复文件 hash 场景。
+10. 坏 zip 场景。
+```
+
+自动测试范围：
+
+```text
+1. 扫描器单元测试。
+2. 自然排序测试。
+3. 封面优先级测试。
+4. 标题字段默认值测试。
+5. 数据库约束和迁移测试。
+6. API 集成测试。
+7. 阅读进度保存测试。
+```
+
+端到端验收：
+
+```text
+1. 在设置页配置漫画根目录。
+2. 点击扫描。
+3. 漫画列表出现测试漫画。
+4. 详情页显示标题、封面、章节、页数。
+5. 阅读器可以垂直阅读。
+6. 退出后再次进入可以恢复阅读进度。
+7. 手动修改 display_title 后，file_title 不变化。
+8. 手动上传封面后，封面优先级高于 cover 文件和第一页。
+9. 删除漫画记录时，本地原文件不会被删除。
+```
+
 ---
 
 # 21. 项目关键原则
@@ -1691,7 +2283,7 @@ OpenList token / 115 token / cookie 不暴露给前台
 
 ```text
 1. 本地数据库是核心，不依赖 OpenList 保存业务历史。
-2. 先入库，再下载，避免磁链和漫画信息断链。
+2. 导入与下载解耦：可以先导入元数据，也可以先扫描本地文件，下载只是资源获取方式之一。
 3. OpenList 只作为 115 工具层，不参与漫画业务逻辑。
 4. 标签保存英文 canonical，前台通过翻译表显示中文。
 5. 插件负责采集最准确的网页信息，本地服务负责业务处理。
@@ -1700,6 +2292,7 @@ OpenList token / 115 token / cookie 不暴露给前台
 8. 阅读器只做垂直无缝阅读，集中把这个模式做好。
 9. 收藏分类不仅是收藏夹，也是连续阅读队列来源。
 10. 后台必须重视异常处理、缺失文件、重复文件和路径修复。
+11. 删除漫画记录默认不删除真实硬盘文件。
 ```
 
 ---
