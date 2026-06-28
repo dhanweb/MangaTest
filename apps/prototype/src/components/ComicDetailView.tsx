@@ -2,36 +2,28 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import {
+  ActionIcon,
+  Box,
+  Flex,
+  Group,
+  Stack,
+  Text,
+  SimpleGrid,
+  Popover,
+} from "@mantine/core";
 import { Edit3, Heart, Play, Star } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { CoverBlock } from "@/components/SiteHeader";
+import {
+  AppBadge,
+  AppButton,
+  AppInput,
+  AppLink,
+  AppModal,
+  AppSelect,
+  AppTextarea,
+  useAppModal,
+} from "@/components/ui/app-components";
 import { type Comic, type ComicStatus, statusOptions, tagGroups } from "@/lib/mock-data";
 
 type EditableComic = Pick<
@@ -65,7 +57,7 @@ export function ComicDetailView({ comic }: { comic: Comic }) {
   const [savedComic, setSavedComic] = useState<EditableComic>(() => createDraft(comic));
   const [draftComic, setDraftComic] = useState<EditableComic>(() => createDraft(comic));
   const [favorite, setFavorite] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, { open: openDialog, close: closeDialog }] = useAppModal(false);
   const firstChapter = comic.chapters[0];
 
   function updateDraft<F extends keyof EditableComic>(field: F, value: EditableComic[F]) {
@@ -87,243 +79,356 @@ export function ComicDetailView({ comic }: { comic: Comic }) {
     });
   }
 
-  function handleDialogOpenChange(open: boolean) {
-    if (open) setDraftComic(savedComic);
-    setDialogOpen(open);
+  function handleOpen() {
+    setDraftComic(savedComic);
+    openDialog();
   }
 
   function saveDraft() {
     setSavedComic(draftComic);
-    setDialogOpen(false);
+    closeDialog();
   }
+
+  const statisticGrid = [
+    { value: comic.episodes, label: "总话数" },
+    { value: comic.pages, label: "总页数" },
+    { value: comic.format, label: "格式" },
+    { value: comic.fileSize, label: "文件大小" },
+  ];
 
   return (
     <>
-      <section className="detail-hero">
+      <Flex direction={{ base: "column", sm: "row" }} gap={28} mb={42}>
         <CoverBlock title={`第1页 / 共${comic.pages}页`} color={comic.color} />
-        <div className="pt-0.5">
-          <p className="m-0 mb-1 font-extrabold" style={{ color: "var(--ink-muted)" }}>
+        <Box style={{ flex: 1 }}>
+          <Text size="xs" fw={800} c="ink.5" mb={4}>
             {savedComic.status === "tagged" ? "Tagged" : savedComic.source}
-          </p>
-          <h1 className="m-0 mt-0.5 text-[34px] leading-[1.15]" style={{ color: "var(--pink)" }}>
+          </Text>
+          <Text component="h1" size="34px" fw={700} lh="1.15" c="pink.5" mb={4} mt={0}>
             {savedComic.title}
-          </h1>
-          <p className="text-[var(--ink-muted)]">{savedComic.originalTitle}</p>
+          </Text>
+          <Text size="sm" c="ink.5" mb="md">{savedComic.originalTitle}</Text>
 
-          <div className="stat-grid">
-            <div><strong>{comic.episodes}</strong><span>总话数</span></div>
-            <div><strong>{comic.pages}</strong><span>总页数</span></div>
-            <div><strong>{comic.format}</strong><span>格式</span></div>
-            <div><strong>{comic.fileSize}</strong><span>文件大小</span></div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {savedComic.tags.map((tag) => (
-              <Badge variant="outline" key={tag}>{tag}</Badge>
+          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" my="lg">
+            {statisticGrid.map((stat) => (
+              <Box
+                key={stat.label}
+                style={{
+                  display: "grid",
+                  placeItems: "center",
+                  minHeight: 70,
+                  border: "1px solid var(--mantine-color-pink-2)",
+                  borderRadius: 10,
+                  background: "white",
+                }}
+              >
+                <Text fw={700} size="lg" c="pink.5">{stat.value}</Text>
+                <Text size="xs" c="ink.5">{stat.label}</Text>
+              </Box>
             ))}
-          </div>
+          </SimpleGrid>
 
-          <p className="mb-7 mt-6 text-[var(--ink)]">{savedComic.note}</p>
+          <Group gap={8} mb="xl" wrap="wrap">
+            {savedComic.tags.map((tag) => (
+              <AppBadge key={tag}>{tag}</AppBadge>
+            ))}
+          </Group>
 
-          <div className="flex flex-wrap gap-[10px] mt-7">
-            <Link
-              href={`/reader/${comic.id}`}
-              className="inline-flex items-center justify-center gap-[7px] min-h-[38px] px-[14px] rounded-[10px] font-extrabold text-white shadow-[0_7px_14px_rgba(239,59,145,0.24)] no-underline"
-              style={{ background: "var(--pink)", borderColor: "var(--pink)" }}
-            >
+          {savedComic.note && <Text size="sm" mb="xl" c="ink.7">{savedComic.note}</Text>}
+
+          <Group gap={10} mt={28}>
+            <AppLink href={`/reader/${comic.id}`} variant="filled">
               <Play size={16} />
               继续 {firstChapter?.title ?? "阅读"}
-            </Link>
-            <Button
-              type="button"
-              variant={favorite ? "secondary" : "outline"}
+            </AppLink>
+            <AppButton
+              variant={favorite ? "light" : "outline"}
+              color="pink"
               onClick={() => setFavorite((cur) => !cur)}
+              leftSection={<Heart size={16} />}
             >
-              <Heart data-icon="inline-start" />
               {favorite ? "已收藏 (2)" : "收藏"}
-            </Button>
-            <Dialog open={dialogOpen} onOpenChange={handleDialogOpenChange}>
-              <DialogTrigger render={<Button type="button" variant="outline" />}>
-                <Edit3 data-icon="inline-start" />
-                编辑信息
-              </DialogTrigger>
-              <ComicEditDialog
-                draftComic={draftComic}
-                comic={comic}
-                onTagAdd={addDraftTagFromGroup}
-                onTagRemove={removeDraftTag}
-                onSave={saveDraft}
-                onUpdate={updateDraft}
-              />
-            </Dialog>
-          </div>
-        </div>
-      </section>
+            </AppButton>
+            <AppButton
+              variant="outline"
+              onClick={handleOpen}
+              leftSection={<Edit3 size={16} />}
+            >
+              编辑信息
+            </AppButton>
+          </Group>
+        </Box>
+      </Flex>
 
-      <section>
-        <h2 className="mb-[14px]">章节列表</h2>
-        <div className="chapter-list">
+      {/* Chapter list */}
+      <Box component="section">
+        <Text component="h2" size="lg" fw={700} mb="md">章节列表</Text>
+        <Stack gap={10}>
           {comic.chapters.map((chapter, index) => (
-            <Link href={`/reader/${comic.id}?chapter=${chapter.id}`} key={chapter.id}>
-              <strong>{comic.episodes - index}</strong>
-              <span>
-                <b>{chapter.title}</b>
-                <small>{chapter.pageCount} 页 · {chapter.addedAt} 添加</small>
-              </span>
-              <Star size={18} />
-            </Link>
+            <Box
+              key={chapter.id}
+              component={Link}
+              href={`/reader/${comic.id}?chapter=${chapter.id}`}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "40px minmax(0, 1fr) 22px",
+                gap: 16,
+                alignItems: "center",
+                minHeight: 68,
+                padding: "0 14px",
+                borderRadius: 14,
+                background: "white",
+                textDecoration: "none",
+                color: "inherit",
+                transition: "background 160ms ease, box-shadow 160ms ease",
+              }}
+              className="chapter-link-hover"
+            >
+              <Box
+                style={{
+                  display: "grid",
+                  width: 40,
+                  height: 40,
+                  placeItems: "center",
+                  borderRadius: 10,
+                  background: "var(--mantine-color-pink-5)",
+                  color: "white",
+                  fontSize: 17,
+                  fontWeight: 700,
+                }}
+              >
+                {comic.episodes - index}
+              </Box>
+              <Box style={{ minWidth: 0 }}>
+                <Text fw={700} size="sm">{chapter.title}</Text>
+                <Text size="xs" c="ink.5" mt={4}>{chapter.pageCount} 页 · {chapter.addedAt} 添加</Text>
+              </Box>
+              <Star size={18} style={{ color: "var(--mantine-color-ink-5)" }} />
+            </Box>
           ))}
-        </div>
-      </section>
+        </Stack>
+      </Box>
+
+      {/* Edit Dialog */}
+      <AppModal opened={dialogOpen} onClose={closeDialog} title="编辑漫画信息">
+        <ComicEditForm
+          comic={comic}
+          draft={draftComic}
+          onTagAdd={addDraftTagFromGroup}
+          onTagRemove={removeDraftTag}
+          onUpdate={updateDraft}
+        />
+        <Group justify="flex-end" mt="md">
+          <AppButton variant="outline" onClick={closeDialog}>取消</AppButton>
+          <AppButton onClick={saveDraft}>保存更改</AppButton>
+        </Group>
+      </AppModal>
     </>
   );
 }
 
-function ComicEditDialog({
+function ComicEditForm({
   comic,
-  draftComic,
+  draft,
   onTagAdd,
   onTagRemove,
-  onSave,
   onUpdate,
 }: {
   comic: Comic;
-  draftComic: EditableComic;
+  draft: EditableComic;
   onTagAdd: (groupLabel: string) => void;
   onTagRemove: (tag: string) => void;
-  onSave: () => void;
   onUpdate: <F extends keyof EditableComic>(field: F, value: EditableComic[F]) => void;
 }) {
   const classifiedTags = tagGroups
     .map((group) => ({
       ...group,
-      selectedTags: draftComic.tags.filter((tag) => tag.startsWith(`${group.label.toLowerCase()}:`)),
+      selectedTags: draft.tags.filter((tag) => tag.startsWith(`${group.label.toLowerCase()}:`)),
     }))
     .filter((group) => group.selectedTags.length > 0);
 
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  function confirmDelete() {
+    if (deleteTarget) {
+      onTagRemove(deleteTarget);
+      setDeleteTarget(null);
+    }
+  }
+
   return (
-    <DialogContent className="sm:max-w-3xl">
-      <DialogHeader>
-        <DialogTitle>编辑漫画信息</DialogTitle>
-        <DialogDescription>{comic.fileTitle}</DialogDescription>
-      </DialogHeader>
+    <Stack gap="md">
+      <Text size="xs" c="ink.5">{comic.fileTitle}</Text>
 
-      <div className="grid gap-4 overflow-y-auto max-h-[60vh]">
-        <FieldGroup>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Field>
-              <FieldLabel htmlFor="comic-title">标题</FieldLabel>
-              <Input
-                id="comic-title"
-                value={draftComic.title}
-                onChange={(e) => onUpdate("title", e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="comic-original-title">原始标题</FieldLabel>
-              <Input
-                id="comic-original-title"
-                value={draftComic.originalTitle}
-                onChange={(e) => onUpdate("originalTitle", e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="comic-artist">作者</FieldLabel>
-              <Input
-                id="comic-artist"
-                value={draftComic.artist}
-                onChange={(e) => onUpdate("artist", e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="comic-group">组名</FieldLabel>
-              <Input
-                id="comic-group"
-                value={draftComic.group}
-                onChange={(e) => onUpdate("group", e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="comic-source">来源</FieldLabel>
-              <Input
-                id="comic-source"
-                value={draftComic.source}
-                onChange={(e) => onUpdate("source", e.target.value)}
-              />
-            </Field>
-            <Field>
-              <FieldLabel>状态</FieldLabel>
-              <Select
-                value={draftComic.status}
-                onValueChange={(v) => onUpdate("status", v as ComicStatus)}
-              >
-                <SelectTrigger className="w-full bg-white data-[size=default]:h-9" aria-label="漫画状态">
-                  <SelectValue placeholder="选择状态" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {statusOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-          </div>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+        <AppInput
+          label="标题"
+          value={draft.title}
+          onChange={(e) => onUpdate("title", e.target.value)}
+        />
+        <AppInput
+          label="原始标题"
+          value={draft.originalTitle}
+          onChange={(e) => onUpdate("originalTitle", e.target.value)}
+        />
+        <AppInput
+          label="作者"
+          value={draft.artist}
+          onChange={(e) => onUpdate("artist", e.target.value)}
+        />
+        <AppInput
+          label="组名"
+          value={draft.group}
+          onChange={(e) => onUpdate("group", e.target.value)}
+        />
+        <AppInput
+          label="来源"
+          value={draft.source}
+          onChange={(e) => onUpdate("source", e.target.value)}
+        />
+        <AppSelect
+          label="状态"
+          value={draft.status}
+          onChange={(value) => onUpdate("status", (value ?? "ready") as ComicStatus)}
+          data={statusOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
+        />
+      </SimpleGrid>
 
-          <Field>
-            <FieldLabel htmlFor="comic-local-path">本地路径</FieldLabel>
-            <Input
-              id="comic-local-path"
-              value={draftComic.localPath}
-              onChange={(e) => onUpdate("localPath", e.target.value)}
-            />
-            <FieldDescription>显示当前记录关联的本地文件位置。</FieldDescription>
-          </Field>
+      <AppInput
+        label="本地路径"
+        value={draft.localPath}
+        onChange={(e) => onUpdate("localPath", e.target.value)}
+        description="显示当前记录关联的本地文件位置。"
+      />
+      <AppTextarea
+        label="备注"
+        value={draft.note}
+        onChange={(e) => onUpdate("note", e.target.value)}
+        minRows={2}
+      />
 
-          <Field>
-            <FieldLabel htmlFor="comic-note">备注</FieldLabel>
-            <Textarea
-              id="comic-note"
-              value={draftComic.note}
-              onChange={(e) => onUpdate("note", e.target.value)}
-            />
-          </Field>
-
-          <section>
-            <h3 className="m-0 text-[15px]" style={{ color: "#8f526e" }}>归类标签</h3>
-            <div className="classified-tag-panel mt-2">
+      {classifiedTags.length > 0 && (
+        <Box>
+          <Text component="h3" size="sm" fw={700} mb="sm" c="#8f526e">归类标签</Text>
+          <Box
+            p="md"
+            style={{
+              border: "1px dashed #ffb8d5",
+              borderRadius: 10,
+              background: "#fff4fa",
+            }}
+          >
+            <Stack gap="sm">
               {classifiedTags.map((group) => (
-                <div className="classified-tag-row" key={group.label}>
-                  <strong>{group.label}:</strong>
-                  <div className="flex flex-wrap gap-[7px] min-w-0">
+                <Group key={group.label} gap={10} wrap="nowrap" align="flex-start">
+                  <Text size="sm" fw={700} c="#b77792" w={100} ta="right" pt={4}>
+                    {group.label}:
+                  </Text>
+                  <Group gap={7} wrap="wrap" style={{ flex: 1 }}>
                     {group.selectedTags.map((tag) => (
-                      <button className="tag-chip" key={tag} type="button" onClick={() => onTagRemove(tag)}>
-                        {tagLabel(tag)} <span aria-hidden="true">x</span>
-                      </button>
+                      <Box
+                        key={tag}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          borderRadius: 7,
+                          border: "1px solid var(--mantine-color-pink-2)",
+                          background: "white",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {/* Clicking the tag body = edit (placeholder) */}
+                        <AppButton
+                          variant="transparent"
+                          size="xs"
+                          onClick={() => {
+                            /* TODO: open tag editor */
+                          }}
+                          styles={{
+                            root: {
+                              minHeight: 26,
+                              padding: "0 9px",
+                              color: "var(--mantine-color-pink-5)",
+                              fontSize: 12,
+                              fontWeight: 900,
+                              transition: "background 160ms ease",
+                              "&:hover": { background: "var(--mantine-color-pink-1)" },
+                            },
+                          }}
+                        >
+                          {tagLabel(tag)}
+                        </AppButton>
+                        {/* Clicking X = delete with popover confirm */}
+                        <Popover
+                          opened={deleteTarget === tag}
+                          onChange={(opened) => {
+                            if (!opened) setDeleteTarget(null);
+                          }}
+                          position="bottom-end"
+                          withArrow
+                          shadow="md"
+                        >
+                          <Popover.Target>
+                            <ActionIcon
+                              variant="transparent"
+                              color="gray"
+                              size={26}
+                              onClick={() => setDeleteTarget(deleteTarget === tag ? null : tag)}
+                              aria-label={`删除标签 ${tagLabel(tag)}`}
+                              styles={{
+                                root: {
+                                  borderLeft: "1px solid var(--mantine-color-pink-2)",
+                                  borderRadius: 0,
+                                  fontSize: 12,
+                                  fontWeight: 700,
+                                  color: "var(--mantine-color-ink-5)",
+                                },
+                              }}
+                            >
+                              x
+                            </ActionIcon>
+                          </Popover.Target>
+                          <Popover.Dropdown>
+                            <Box style={{ maxWidth: 200 }}>
+                              <Text size="xs" mb="sm" fw={500}>
+                                确定删除「{tagLabel(tag)}」？
+                              </Text>
+                              <Group gap="xs" justify="flex-end">
+                                <AppButton variant="outline" size="xs" onClick={() => setDeleteTarget(null)}>
+                                  取消
+                                </AppButton>
+                                <AppButton size="xs" onClick={confirmDelete}>
+                                  确认
+                                </AppButton>
+                              </Group>
+                            </Box>
+                          </Popover.Dropdown>
+                        </Popover>
+                      </Box>
                     ))}
-                    <button
-                      className="tag-chip-add"
-                      type="button"
+                    <ActionIcon
+                      variant="subtle"
+                      color="pink"
+                      size={28}
                       aria-label={`添加 ${group.label} 标签`}
                       onClick={() => onTagAdd(group.label)}
+                      styles={{
+                        root: {
+                          border: "1px dashed var(--mantine-color-pink-2)",
+                          "&:hover": { background: "var(--mantine-color-pink-1)" },
+                        },
+                      }}
                     >
                       +
-                    </button>
-                  </div>
-                </div>
+                    </ActionIcon>
+                  </Group>
+                </Group>
               ))}
-            </div>
-          </section>
-        </FieldGroup>
-      </div>
+            </Stack>
+          </Box>
+        </Box>
+      )}
 
-      <DialogFooter>
-        <DialogClose render={<Button type="button" variant="outline" />}>
-          取消
-        </DialogClose>
-        <Button type="button" onClick={onSave}>保存更改</Button>
-      </DialogFooter>
-    </DialogContent>
+    </Stack>
   );
 }

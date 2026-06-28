@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { Box, Container, Text } from "@mantine/core";
 import { ArrowLeft } from "lucide-react";
 import { ComicDetailView } from "@/components/ComicDetailView";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -15,16 +16,20 @@ export default function ComicDetailPage() {
     return (
       <>
         <SiteHeader active="library" />
-        <main className="w-[min(1200px,calc(100%-32px))] mx-auto py-8">
-          <Link href="/" className="inline-flex items-center gap-1.5 mb-[22px] text-[var(--ink)]">
+        <Container size={1200} px={16} py={32}>
+          <Box
+            component={Link}
+            href="/"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 22, color: "var(--mantine-color-ink-7)", textDecoration: "none" }}
+          >
             <ArrowLeft size={16} />
             返回列表
-          </Link>
-          <section className="py-12 rounded-[14px] bg-white">
-            <h1>没有找到这本漫画</h1>
-            <p>原型数据里暂时没有这个漫画 ID。</p>
-          </section>
-        </main>
+          </Box>
+          <Box py={48} style={{ borderRadius: 14, background: "white", textAlign: "center" }}>
+            <Text component="h1" size="xl" fw={700}>没有找到这本漫画</Text>
+            <Text size="sm" c="ink.5">原型数据里暂时没有这个漫画 ID。</Text>
+          </Box>
+        </Container>
       </>
     );
   }
@@ -32,14 +37,17 @@ export default function ComicDetailPage() {
   return (
     <>
       <SiteHeader active="library" />
-      <main className="w-[min(1200px,calc(100%-32px))] mx-auto py-8 pb-16">
-        <Link href="/" className="inline-flex items-center gap-1.5 mb-[22px] text-[var(--ink)]">
+      <Container size={1200} px={16} py={30} pb={64}>
+        <Box
+          component={Link}
+          href="/"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 22, color: "var(--mantine-color-ink-7)", textDecoration: "none", fontSize: 14 }}
+        >
           <ArrowLeft size={16} />
           返回列表
-        </Link>
-
+        </Box>
         <ComicDetailView comic={comic} />
-      </main>
+      </Container>
     </>
   );
 }
