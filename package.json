@@ -1,0 +1,13 @@
+{
+  "name": "mangatest",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:prototype": "npm run dev -w apps/prototype",
+    "build:prototype": "npm run build -w apps/prototype",
+    "lint:prototype": "npm run lint -w apps/prototype"
+  }
+}

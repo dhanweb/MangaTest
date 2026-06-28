@@ -29,8 +29,10 @@
 
 ## Design Rules
 
-- This is a local library and management tool, not a marketing site.
-- Prefer dense, calm, readable layouts over decorative landing-page style.
+- The public-facing experience should feel like a normal manga website first: browse, discover, open details, and read.
+- Admin and file-maintenance features are secondary and should not dominate the default homepage or primary navigation.
+- This is also a local library management system, but the visual prototype should not look like a pure management dashboard.
+- Prefer calm, readable manga-site layouts over decorative landing-page style or operations-heavy dashboard style.
 - Avoid unnecessary gradients, glow effects, floating decoration, and oversized hero sections.
 - Reader UI should stay quiet and not compete with comic pages.
 - Use realistic mock data in prototypes so layout pressure is visible early.
