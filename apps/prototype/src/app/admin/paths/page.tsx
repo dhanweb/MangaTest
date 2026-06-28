@@ -24,14 +24,14 @@ export default function PathsPage() {
         </Box>
       </Box>
 
-      <Box component="label" style={{ display: "grid", gap: 8, marginBottom: 22 }} fw={800} c="#8f526e">
+      <Box component="label" style={{ display: "grid", gap: 8, marginBottom: 16 }} fw={800} c="#8f526e">
         添加新路径
         <Text component="span" size="xs" c="ink.5" fw={400}>每行一个路径，支持本地目录和网络共享路径 (UNC)</Text>
         <Box
           component="textarea"
-          placeholder={"D:\\Comics\\Manga\nE:\\Downloads\\Comics\n\\\\NAS\\Comics"}
+          rows={3}
+          placeholder="例如本地漫画目录或 NAS 共享文件夹的绝对路径，每行一个"
           style={{
-            minHeight: 98,
             resize: "vertical",
             padding: "13px 16px",
             border: "1px solid var(--mantine-color-pink-2)",
@@ -43,7 +43,7 @@ export default function PathsPage() {
         />
       </Box>
 
-      <Box style={{ display: "flex", justifyContent: "flex-end", marginTop: -26, marginBottom: 18 }}>
+      <Box style={{ display: "flex", justifyContent: "flex-end", marginBottom: 18 }}>
         <AppButton leftSection={<Plus size={16} />}>添加</AppButton>
       </Box>
 

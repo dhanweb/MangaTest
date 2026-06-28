@@ -109,6 +109,36 @@
   button, a {
     transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease, opacity 160ms ease;
   }
+
+  /* --- global scrollbar --- */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #f39ac4 #fff4fa;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #fff4fa;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    min-height: 48px;
+    border: 2px solid #fff4fa;
+    border-radius: 999px;
+    background: #f39ac4;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--pink);
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: #fff4fa;
+  }
 }
 
 /* ---------- Site header ---------- */
