@@ -65,7 +65,7 @@ export default function HomePage() {
             <Search size={18} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索漫画名称、作者或标签..." />
           </label>
-          <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)} items={sortOptions}>
+          <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)}>
             <SelectTrigger className="w-full min-w-[180px] border-[var(--pink-line)] bg-white data-[size=default]:h-[42px]" aria-label="排序方式">
               <SelectValue placeholder="排序方式" />
             </SelectTrigger>

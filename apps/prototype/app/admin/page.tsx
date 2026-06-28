@@ -148,7 +148,7 @@ function SettingSelect({ title, note, value, options }: { title: string; note: s
         <strong>{title}</strong>
         <small>{note}</small>
       </span>
-      <Select defaultValue={value} items={options.map((option) => ({ label: option, value: option }))}>
+      <Select defaultValue={value}>
         <SelectTrigger className="w-full min-w-[150px] data-[size=default]:h-[38px]" aria-label={title}>
           <SelectValue placeholder={title} />
         </SelectTrigger>

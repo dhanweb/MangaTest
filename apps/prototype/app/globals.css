@@ -35,8 +35,6 @@
   --ring: rgba(239, 59, 145, 0.32);
   --radius: 0.625rem;
   --reader: var(--reader-bg);
-  --background: var(--page);
-  --foreground: var(--ink);
   --chart-1: #ef3b91;
   --chart-2: #ff7bb9;
   --chart-3: #b35d82;
@@ -50,6 +48,8 @@
   --sidebar-accent-foreground: var(--pink);
   --sidebar-border: var(--pink-line);
   --sidebar-ring: rgba(239, 59, 145, 0.32);
+  --background: var(--page);
+  --foreground: var(--ink);
 }
 
 @theme inline {
@@ -99,11 +99,14 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: #f39ac4 #fff4fa;
+  scrollbar-width: thin;
 }
 
 html {
   background: var(--page);
   color: var(--ink);
+  scrollbar-gutter: stable;
 }
 
 body {
@@ -115,6 +118,30 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #fff4fa;
+}
+
+::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 2px solid #fff4fa;
+  border-radius: 999px;
+  background: #f39ac4;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--pink);
+}
+
+::-webkit-scrollbar-corner {
+  background: #fff4fa;
 }
 
 button,
@@ -495,6 +522,9 @@ svg {
 .detail-actions a,
 .detail-actions button,
 .pink-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 7px;
   min-height: 38px;
   padding: 0 14px;
@@ -511,6 +541,75 @@ svg {
   background: var(--pink);
   color: white;
   box-shadow: 0 7px 14px rgba(239, 59, 145, 0.24);
+}
+
+.classified-tags {
+  display: grid;
+  gap: 10px;
+}
+
+.classified-tags h3 {
+  margin: 0;
+  color: #8f526e;
+  font-size: 15px;
+}
+
+.classified-tag-panel {
+  display: grid;
+  gap: 9px;
+  padding: 16px 18px;
+  border: 1px dashed #ffb8d5;
+  border-radius: 10px;
+  background: #fff4fa;
+}
+
+.classified-tag-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.classified-tag-row strong {
+  padding-top: 4px;
+  color: #b77792;
+  text-align: right;
+}
+
+.classified-tag-row div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.tag-chip,
+.tag-chip-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  border: 1px solid var(--pink-line);
+  border-radius: 7px;
+  background: white;
+  color: var(--pink);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.tag-chip {
+  gap: 5px;
+  padding: 0 9px;
+}
+
+.tag-chip span {
+  color: var(--pink-text);
+}
+
+.tag-chip-add {
+  width: 26px;
+  border-style: dashed;
+  padding: 0;
 }
 
 .chapter-section h2 {
@@ -591,6 +690,8 @@ svg {
 
   .tag-filter-row button:hover,
   .tag-manager-row button:hover,
+  .tag-chip:hover,
+  .tag-chip-add:hover,
   .detail-actions a:hover,
   .detail-actions button:hover,
   .path-item button:hover,
@@ -1054,12 +1155,14 @@ svg {
   .path-item,
   .admin-row,
   .tag-manager-row,
+  .classified-tag-row,
   .setting-row,
   .add-category span {
     grid-template-columns: 1fr;
   }
 
-  .tag-manager-row strong {
+  .tag-manager-row strong,
+  .classified-tag-row strong {
     text-align: left;
   }
 
