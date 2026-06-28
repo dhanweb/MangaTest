@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ComicWeb Visual Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <button class="brand" type="button" data-target="home" aria-label="返回漫画库">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 4h10a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2z" />
+            <path d="M6 4v14a2 2 0 0 0 2 2" />
+            <path d="M10 8h4" />
+            <path d="M10 12h5" />
+          </svg>
+          <strong>ComicWeb</strong>
+        </button>
+
+        <nav class="main-nav" aria-label="主导航">
+          <button class="nav-item is-active" type="button" data-target="home">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z" /><path d="M9 7h6" /><path d="M9 11h6" /></svg>
+            <span>漫画库</span>
+          </button>
+          <button class="nav-item" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+            <span>收藏</span>
+          </button>
+          <a class="nav-item" href="./admin.html">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /><path d="m4.9 4.9 2.1 2.1" /><path d="m17 17 2.1 2.1" /><path d="m4.9 19.1 2.1-2.1" /><path d="m17 7 2.1-2.1" /></svg>
+            <span>管理</span>
+          </a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <section id="home" class="view is-active" aria-labelledby="library-title">
+        <div class="page-wrap">
+          <div class="page-title">
+            <h1 id="library-title">漫画库</h1>
+            <p>浏览本地漫画收藏，使用标签筛选你想看的内容</p>
+          </div>
+
+          <div class="search-row">
+            <label class="search-box">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+              <input type="search" placeholder="搜索漫画名称或标签..." />
+            </label>
+
+            <label class="sort-box" aria-label="排序">
+              <select>
+                <option>recent</option>
+                <option>title</option>
+                <option>pages</option>
+                <option>date added</option>
+              </select>
+            </label>
+          </div>
+
+          <section class="tag-panel" aria-label="标签快捷搜索">
+            <div class="tag-content">
+              <div class="tag-group">
+                <strong>Language:</strong>
+                <button type="button">translated</button>
+                <button type="button">english</button>
+                <button type="button">chinese</button>
+                <button type="button">korean</button>
+              </div>
+              <div class="tag-group">
+                <strong>Female:</strong>
+                <button type="button">beauty mark</button>
+                <button type="button">big breasts</button>
+                <button type="button">schoolgirl uniform</button>
+                <button type="button">drunk</button>
+                <button type="button">ahegao</button>
+                <button type="button">big ass</button>
+              </div>
+              <div class="tag-group">
+                <strong>Category:</strong>
+                <button type="button">manga</button>
+                <button type="button">doujinshi</button>
+              </div>
+              <div class="tag-group">
+                <strong>Male:</strong>
+                <button type="button">sole male</button>
+                <button type="button">teacher</button>
+                <button type="button">virginity</button>
+              </div>
+              <div class="tag-group">
+                <strong>Other:</strong>
+                <button type="button">mosaic censorship</button>
+                <button type="button">tankoubon</button>
+                <button type="button">uncensored</button>
+                <button type="button">rough translation</button>
+              </div>
+              <div class="tag-group">
+                <strong>Parody:</strong>
+                <button type="button">original</button>
+              </div>
+              <div class="tag-group">
+                <strong>Artist:</strong>
+                <button type="button">unknown</button>
+                <button type="button">mashiro shirako</button>
+                <button type="button">gen</button>
+              </div>
+              <div class="tag-group">
+                <strong>Date Added:</strong>
+                <button type="button">2026/6/13</button>
+              </div>
+              <div class="tag-group">
+                <strong>Group:</strong>
+                <button type="button">enji</button>
+              </div>
+            </div>
+            <button class="collapse-tags" type="button" aria-expanded="true">收起 ↑</button>
+          </section>
+
+          <div class="result-count">共 10 本</div>
+
+          <section class="comic-grid" aria-label="漫画列表">
+            <article class="comic-card">
+              <button class="cover-card" type="button" data-target="detail" aria-label="查看 标签已审核样例">
+                <span class="episode-badge">41话</span>
+                <span class="format-badge">CBR</span>
+              </button>
+              <h2>标签已审核样例</h2>
+              <p>gen · 120 话 · 1480 页</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-a" type="button" data-target="detail" aria-label="查看 夏日补完计划">
+                <span class="episode-badge">120话</span>
+                <span class="format-badge">RAR</span>
+              </button>
+              <h2>夏日补完计划</h2>
+              <p>mashiro shirako · translated</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-b" type="button" data-target="detail" aria-label="查看 旧馆记录">
+                <span class="episode-badge">78话</span>
+                <span class="format-badge">CBZ</span>
+              </button>
+              <h2>旧馆记录</h2>
+              <p>unknown · chinese</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-c" type="button" data-target="detail" aria-label="查看 标签整理中">
+                <span class="episode-badge">56话</span>
+                <span class="format-badge">图片</span>
+              </button>
+              <h2>标签整理中</h2>
+              <p>local scan · 671 页</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-d" type="button" data-target="detail" aria-label="查看 粉色书架">
+                <span class="episode-badge">34话</span>
+                <span class="format-badge">ZIP</span>
+              </button>
+              <h2>粉色书架</h2>
+              <p>original · 408 页</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-e" type="button" data-target="detail" aria-label="查看 夜间短篇集">
+                <span class="episode-badge">22话</span>
+                <span class="format-badge">CBZ</span>
+              </button>
+              <h2>夜间短篇集</h2>
+              <p>short stories · ready</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-f" type="button" data-target="detail" aria-label="查看 目录扫描样例">
+                <span class="episode-badge">18话</span>
+                <span class="format-badge">目录</span>
+              </button>
+              <h2>目录扫描样例</h2>
+              <p>D:\MangaLibrary\sample</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-g" type="button" data-target="detail" aria-label="查看 收藏夹样例">
+                <span class="episode-badge">63话</span>
+                <span class="format-badge">RAR</span>
+              </button>
+              <h2>收藏夹样例</h2>
+              <p>favorite · tagged</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-h" type="button" data-target="detail" aria-label="查看 最近入库样例">
+                <span class="episode-badge">9话</span>
+                <span class="format-badge">ZIP</span>
+              </button>
+              <h2>最近入库样例</h2>
+              <p>2026/6/13 · new</p>
+            </article>
+            <article class="comic-card">
+              <button class="cover-card cover-alt-i" type="button" data-target="detail" aria-label="查看 待补标签样例">
+                <span class="episode-badge">11话</span>
+                <span class="format-badge">CBR</span>
+              </button>
+              <h2>待补标签样例</h2>
+              <p>missing tags · local</p>
+            </article>
+          </section>
+        </div>
+      </section>
+
+      <section id="detail" class="view" aria-labelledby="detail-title">
+        <div class="detail-wrap">
+          <button class="back-link" type="button" data-target="home">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            <span>返回列表</span>
+          </button>
+
+          <section class="detail-main">
+            <aside class="preview-cover" aria-label="漫画封面预览">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M16 13H8" /><path d="M16 17H8" /></svg>
+              <strong>第1页 / 共12页</strong>
+            </aside>
+
+            <article class="detail-info">
+              <h1 id="detail-title">标签已审核样例</h1>
+              <p class="status-text">Tagged</p>
+
+              <div class="stats-grid">
+                <div>
+                  <strong>120</strong>
+                  <span>总话数</span>
+                </div>
+                <div>
+                  <strong>1480</strong>
+                  <span>总页数</span>
+                </div>
+                <div>
+                  <strong>RAR</strong>
+                  <span>格式</span>
+                </div>
+                <div>
+                  <strong>10.71 GB</strong>
+                  <span>文件大小</span>
+                </div>
+              </div>
+
+              <div class="detail-tags" aria-label="漫画标签">
+                <span><b>category</b> manga</span>
+                <span><b>female</b> big breasts</span>
+                <span><b>male</b> sole male</span>
+                <span><b>other</b> mosaic censorship</span>
+                <span><b>other</b> tankoubon</span>
+                <span><b>language</b> translated</span>
+                <span><b>parody</b> original</span>
+                <span><b>artist</b> gen</span>
+              </div>
+
+              <p class="description">已通过外部 API 获取完整标签。</p>
+
+              <div class="detail-actions">
+                <button class="primary-action" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 11 7-11 7z" /></svg>
+                  <span>继续 第1话</span>
+                </button>
+                <button class="favorite-action is-saved" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z" /></svg>
+                  <span>已收藏 (2)</span>
+                </button>
+                <button class="edit-action" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                  <span>编辑信息</span>
+                </button>
+              </div>
+            </article>
+          </section>
+
+          <section class="chapter-section" aria-labelledby="chapter-title">
+            <h2 id="chapter-title">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z" /><path d="M9 7h6" /></svg>
+              <span>章节列表</span>
+            </h2>
+
+            <div class="chapter-list">
+              <button type="button">
+                <strong>120</strong>
+                <span>
+                  <b>第120话 - 第120话</b>
+                  <small>52 页 · 2026-06-13 添加</small>
+                </span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+              </button>
+              <button type="button">
+                <strong>119</strong>
+                <span>
+                  <b>第119话 - 第119话</b>
+                  <small>12 页 · 2026-06-13 添加</small>
+                </span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+              </button>
+              <button type="button">
+                <strong>118</strong>
+                <span>
+                  <b>第118话 - 第118话</b>
+                  <small>12 页 · 2026-06-13 添加</small>
+                </span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+              </button>
+              <button type="button">
+                <strong>117</strong>
+                <span>
+                  <b>第117话 - 第117话</b>
+                  <small>12 页 · 2026-06-13 添加</small>
+                </span>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.9 5.9 6.5.9-4.7 4.6 1.1 6.5-5.8-3-5.8 3 1.1-6.5-4.7-4.6 6.5-.9z" /></svg>
+              </button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
