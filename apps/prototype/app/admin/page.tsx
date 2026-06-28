@@ -4,6 +4,14 @@ import { useState } from "react";
 import { Folder, Library, Plus, RefreshCcw, Settings, Tag, X } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
 import { comics, settingsTabs, tagGroups } from "@/lib/mock-data";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 
 type AdminPanel = "paths" | "comics" | "tags" | "settings";
 
@@ -116,9 +124,9 @@ function SettingsPanel({ activeTab, onTabChange }: { activeTab: (typeof settings
           <>
             <SettingSwitch title="自动扫描" note="启动时自动扫描所有漫画路径" checked />
             <SettingSwitch title="阅读进度记录" note="自动记录每本漫画的阅读进度" checked />
-            <SettingSelect title="默认阅读模式" note="选择打开漫画时的默认阅读方式" value="滚动模式" />
+            <SettingSelect title="默认阅读模式" note="选择打开漫画时的默认阅读方式" value="滚动模式" options={["滚动模式", "分页模式", "双页模式"]} />
             <SettingSwitch title="图片预加载" note="阅读时提前加载后续页面" />
-            <SettingSelect title="每页显示数量" note="漫画列表每页显示的漫画数" value="20" />
+            <SettingSelect title="每页显示数量" note="漫画列表每页显示的漫画数" value="20" options={["20", "40", "80"]} />
           </>
         ) : null}
         {activeTab === "阅读设置" ? ["向上滚动 ↑", "向下滚动 ↓", "翻下一屏 Space", "返回详情 Esc", "显示工具栏 Tab"].map((item) => <SettingKey item={item} key={item} />) : null}
@@ -133,8 +141,29 @@ function SettingSwitch({ title, note, checked = false }: { title: string; note: 
   return <label className="setting-row"><span><strong>{title}</strong><small>{note}</small></span><input type="checkbox" defaultChecked={checked} /></label>;
 }
 
-function SettingSelect({ title, note, value }: { title: string; note: string; value: string }) {
-  return <label className="setting-row"><span><strong>{title}</strong><small>{note}</small></span><select defaultValue={value}><option>{value}</option><option>分页模式</option></select></label>;
+function SettingSelect({ title, note, value, options }: { title: string; note: string; value: string; options: string[] }) {
+  return (
+    <div className="setting-row">
+      <span>
+        <strong>{title}</strong>
+        <small>{note}</small>
+      </span>
+      <Select defaultValue={value} items={options.map((option) => ({ label: option, value: option }))}>
+        <SelectTrigger className="w-full min-w-[150px] data-[size=default]:h-[38px]" aria-label={title}>
+          <SelectValue placeholder={title} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {options.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 function SettingKey({ item }: { item: string }) {

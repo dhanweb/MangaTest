@@ -21,11 +21,13 @@
 
 ## Tech Decisions
 
-- The final web app uses Next.js App Router, TypeScript, SQLite, Drizzle ORM, Tailwind CSS, shadcn/ui, lucide-react, Vitest, Playwright, Sharp, and a zip/cbz reader such as `yauzl` or `unzipper`.
+- The interactive prototype and final web app use Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui, and lucide-react for UI work.
+- The final web app also uses SQLite, Drizzle ORM, Vitest, Playwright, Sharp, and a zip/cbz reader such as `yauzl` or `unzipper`.
 - The final app is local self-hosted software, not a serverless/Vercel-first deployment.
 - The Chrome extension targets Manifest V3 first.
 - MVP supports local directories, `.zip`, and `.cbz` only.
 - The manga root is configured as an absolute path.
+- Configure shared Tailwind theme variables early, including primary pink, backgrounds, borders, muted text, card surfaces, and reader colors.
 
 ## Design Rules
 
@@ -38,6 +40,9 @@
 - Use realistic mock data in prototypes so layout pressure is visible early.
 - Use icons for compact actions where appropriate; avoid emoji as UI icons.
 - Keep card radius modest and avoid nested cards.
+- Use shadcn/ui components first for reusable or stateful UI such as dialogs, alert dialogs, sheets, dropdown menus, select menus, tabs, popovers, tooltips, switches, inputs, tables, badges, and cards.
+- Avoid over-wrapping shadcn components. Prefer direct composition and thin domain components only when they remove repeated manga-specific structure.
+- Use Tailwind semantic tokens and CSS variables for colors and surfaces instead of page-local hardcoded color values.
 
 ## Product Boundaries
 

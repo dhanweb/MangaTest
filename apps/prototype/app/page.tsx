@@ -5,8 +5,22 @@ import { Search } from "lucide-react";
 import { ComicCard } from "@/components/ComicCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { comics, tagGroups } from "@/lib/mock-data";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
 
 type SortMode = "recent" | "title" | "progress";
+
+const sortOptions: Array<{ label: string; value: SortMode }> = [
+  { label: "recent", value: "recent" },
+  { label: "title", value: "title" },
+  { label: "progress", value: "progress" }
+];
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -51,11 +65,20 @@ export default function HomePage() {
             <Search size={18} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索漫画名称、作者或标签..." />
           </label>
-          <select value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)} aria-label="排序方式">
-            <option value="recent">recent</option>
-            <option value="title">title</option>
-            <option value="progress">progress</option>
-          </select>
+          <Select value={sortMode} onValueChange={(value) => setSortMode(value as SortMode)} items={sortOptions}>
+            <SelectTrigger className="w-full min-w-[180px] border-[var(--pink-line)] bg-white data-[size=default]:h-[42px]" aria-label="排序方式">
+              <SelectValue placeholder="排序方式" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {sortOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </section>
 
         <section className="tag-filter-panel" aria-label="标签快捷搜索">
