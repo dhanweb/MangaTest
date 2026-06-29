@@ -2,7 +2,7 @@
 
 import { ActionIcon, Box, Text } from "@mantine/core";
 import { Plus, Tag } from "lucide-react";
-import { AppButton, AppInput } from "@/components/ui/app-components";
+import { AppBadge, AppButton, AppInput } from "@/components/ui/app-components";
 import { tagGroups } from "@/lib/mock-data";
 
 export default function TagsPage() {
@@ -30,23 +30,44 @@ export default function TagsPage() {
               borderBottom: "1px solid #fde6ef",
             }}
           >
-            <Text ta="right" fw={900} c="#b77792" size="sm">{group.label}:</Text>
-            <Box style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            <Text ta="right" fw={900} c="#8d5a6e" size="sm">{group.label}:</Text>
+            <Box style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
               {group.values.map((tag) => (
-                <AppButton key={tag} variant="outline" size="xs">
-                  {tag} x
-                </AppButton>
+                <AppBadge
+                  key={tag}
+                  size="lg"
+                  rightSection={
+                    <Box
+                      component="span"
+                      className="tag-x-hover"
+                      style={{
+                        cursor: "pointer",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: "var(--mantine-color-ink-5)",
+                        transition: "color 160ms ease",
+                      }}
+                    >
+                      x
+                    </Box>
+                  }
+                  styles={{
+                    root: {
+                      cursor: "default",
+                      fontSize: 13,
+                      fontWeight: 800,
+                      textTransform: "none",
+                    },
+                  }}
+                >
+                  {tag}
+                </AppBadge>
               ))}
               <ActionIcon
-                variant="subtle"
+                variant="outline"
                 color="pink"
                 size={28}
-                styles={{
-                  root: {
-                    border: "1px dashed var(--mantine-color-pink-2)",
-                    "&:hover": { background: "var(--mantine-color-pink-1)" },
-                  },
-                }}
+                className="add-chip-hover"
               >
                 +
               </ActionIcon>

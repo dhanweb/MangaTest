@@ -12,7 +12,7 @@
   --pink-text: #b56b8a;
   --page: #fff7fb;
   --ink: #261928;
-  --ink-muted: #9b6f86;
+  --ink-muted: #8b6d82;
   --reader-bg: #15111d;
 
   --background: var(--page);
@@ -743,5 +743,16 @@
   .pink-button:hover {
     background: var(--pink-strong) !important;
     box-shadow: 0 9px 18px rgba(239, 59, 145, 0.3);
+  }
+
+  /* --- tag chip x --- */
+  .tag-x-hover:hover {
+    color: var(--pink) !important;
+  }
+
+  /* --- add chip button --- */
+  .add-chip-hover:hover {
+    background: var(--pink-soft);
+    border-color: var(--pink);
   }
 }

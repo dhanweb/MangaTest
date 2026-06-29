@@ -24,7 +24,7 @@ export default function PathsPage() {
         </Box>
       </Box>
 
-      <Box component="label" style={{ display: "grid", gap: 8, marginBottom: 16 }} fw={800} c="#8f526e">
+      <Box component="label" style={{ display: "grid", gap: 8, marginBottom: 16 }} fw={800} c="#7a5470">
         添加新路径
         <Text component="span" size="xs" c="ink.5" fw={400}>每行一个路径，支持本地目录和网络共享路径 (UNC)</Text>
         <Box

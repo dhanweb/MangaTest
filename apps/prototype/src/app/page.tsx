@@ -102,7 +102,7 @@ export default function HomePage() {
               key={group.label}
               style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "flex-start", padding: "8px 0" }}
             >
-              <Text component="strong" size="13px" ta="right" c="#b77792" fw={700}>
+              <Text component="strong" size="13px" ta="right" c="#8d5a6e" fw={700}>
                 {group.label}:
               </Text>
               <Group gap={8} wrap="wrap">

@@ -47,7 +47,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   gap: 12,
                   minHeight: 52,
                   padding: "0 28px",
-                  color: isActive ? "var(--mantine-color-pink-5)" : "#6f4560",
+                  color: isActive ? "var(--mantine-color-pink-5)" : "#5a3b4e",
                   fontWeight: 800,
                   fontSize: 14,
                   textDecoration: "none",

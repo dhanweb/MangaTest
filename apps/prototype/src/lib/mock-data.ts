@@ -340,6 +340,87 @@ export const comics: Comic[] = [
   },
 ];
 
+// --- Generated mock comics for pagination testing ---
+const extraArtists = ["mashiro shirako", "gen", "unknown", "sakura yuki", "tanaka rei", "kuroda aki", "watanabe jun", "ito haruka"];
+const extraGroups = ["enji", "unknown", "manual", "old", "new"];
+const extraFormats = ["CBZ", "ZIP", "RAR", "DIR"] as const;
+const extraStatuses: ComicStatus[] = ["ready", "tagged", "ready", "ready", "tagged", "ready", "ready", "missing_cover", "ready", "local_file_missing"];
+const extraSources = ["E-Hentai", "Local Scan", "DLsite", "Fanza", "ComicMarket"];
+const extraTagSets = [
+  ["category:manga", "language:chinese", "parody:original"],
+  ["category:doujinshi", "female:schoolgirl uniform", "language:translated"],
+  ["category:manga", "female:drunk", "other:mosaic censorship", "language:korean"],
+  ["category:doujinshi", "male:sole male", "language:english", "other:uncensored"],
+  ["category:manga", "female:big breasts", "female:ahegao", "language:translated", "parody:original"],
+  ["category:doujinshi", "male:teacher", "language:chinese", "other:rough translation"],
+  ["category:manga", "female:beauty mark", "language:english"],
+  ["category:doujinshi", "male:virginity", "other:tankoubon", "language:translated"],
+  ["category:manga", "female:schoolgirl uniform", "female:drunk", "language:chinese"],
+  ["category:doujinshi", "other:uncensored", "language:korean", "parody:original"],
+];
+const extraNotes = [
+  "", "", "", "等待 OCR 处理。", "", "封面需要重新生成。",
+  "", "分章信息待确认。", "", "", "标签来自外部 API。",
+];
+
+const comicNames = [
+  ["幻影城", "Phantom Castle"], ["深海迷宫", "Deep Sea Labyrinth"], ["赤月传说", "Red Moon Legend"],
+  ["镜中少女", "Mirror Maiden"], ["暗黑教室", "Dark Classroom"], ["绯色之吻", "Scarlet Kiss"],
+  ["时空旅人", "Time Traveler"], ["雪国奇谭", "Snow Country Tale"], ["禁断花园", "Forbidden Garden"],
+  ["银翼骑士", "Silver Wing Knight"], ["迷宮华尔兹", "Labyrinth Waltz"], ["夜想曲", "Nocturne"],
+  ["星屑幻想", "Stardust Fantasy"], ["魔女之家", "Witch House"], ["鋼鉄乙女", "Steel Maiden"],
+  ["雨夜怪谈", "Rainy Night Tale"], ["黄昏图书馆", "Twilight Library"], ["狂気楽園", "Mad Paradise"],
+  ["影法師", "Shadow Figure"], ["純情中毒", "Pure Addiction"], ["白昼夢", "Daydream"],
+  ["桜花抄", "Sakura Notes"], ["電脳迷宮", "Cyber Labyrinth"], ["罪と罰", "Crime & Punishment"],
+  ["猫耳喫茶", "Cat Ear Cafe"], ["月光譚", "Moonlight Story"], ["泡沫恋歌", "Bubble Love Song"],
+  ["煉獄学園", "Purgatory Academy"], ["終末少女", "Apocalypse Girl"],
+];
+
+function makeComic(index: number): Comic {
+  const name = comicNames[index % comicNames.length];
+  const artist = extraArtists[index % extraArtists.length];
+  const group = extraGroups[index % extraGroups.length];
+  const format = extraFormats[index % extraFormats.length];
+  const status = extraStatuses[index % extraStatuses.length];
+  const pages = 80 + Math.floor(Math.random() * 1200);
+  const episodes = 1 + Math.floor(Math.random() * 40);
+  const day = 1 + (index % 28);
+  const month = 1 + (index % 6);
+  const year = 2026;
+
+  return {
+    id: `mock-${String(index + 1).padStart(2, "0")}`,
+    title: name[0],
+    originalTitle: name[1],
+    fileTitle: `[${artist}] ${name[1]}.${format.toLowerCase()}`,
+    artist,
+    group,
+    format,
+    fileSize: `${(80 + Math.random() * 5000).toFixed(0)} MB`,
+    pages,
+    episodes,
+    status,
+    addedAt: `${year}/${month}/${day}`,
+    lastReadAt: Math.random() > 0.3 ? `${year}/${month}/${Math.min(day + Math.floor(Math.random() * 5), 28)}` : "未阅读",
+    progress: Math.floor(Math.random() * 100),
+    source: extraSources[index % extraSources.length],
+    localPath: `D:\\Comics\\Manga\\${name[1].replace(/\s/g, "_")}.${format.toLowerCase()}`,
+    tags: extraTagSets[index % extraTagSets.length],
+    chapters: Array.from({ length: Math.min(episodes, 8) }, (_, i) => ({
+      id: `mock-${index}-${episodes - i}`,
+      title: `第${episodes - i}话`,
+      pageCount: 8 + Math.floor(Math.random() * 30),
+      addedAt: `${year}-${String(month).padStart(2, "0")}-${String(Math.min(day + i, 28)).padStart(2, "0")}`,
+    })),
+    note: extraNotes[index % extraNotes.length],
+    color: coverColors[3 + (index % 7)],
+  };
+}
+
+for (let i = 0; i < 29; i++) {
+  comics.push(makeComic(i));
+}
+
 export function getComic(id: string): Comic | undefined {
   return comics.find((comic) => comic.id === id);
 }

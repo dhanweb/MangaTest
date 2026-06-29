@@ -43,7 +43,7 @@ export default function SettingsPage() {
                 borderBottom: activeTab === tab ? "2px solid var(--mantine-color-pink-5)" : "2px solid transparent",
                 borderRadius: 0,
                 background: "transparent",
-                color: activeTab === tab ? "var(--mantine-color-pink-5)" : "#9a6078",
+                color: activeTab === tab ? "var(--mantine-color-pink-5)" : "#7a4d60",
                 transition: "color 160ms ease, border-color 160ms ease",
                 "&:hover": { background: "var(--mantine-color-pink-1)" },
               },

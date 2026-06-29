@@ -309,7 +309,7 @@ function ComicEditForm({
 
       {classifiedTags.length > 0 && (
         <Box>
-          <Text component="h3" size="sm" fw={700} mb="sm" c="#8f526e">归类标签</Text>
+          <Text component="h3" size="sm" fw={700} mb="sm" c="#7a5470">归类标签</Text>
           <Box
             p="md"
             style={{
@@ -321,7 +321,7 @@ function ComicEditForm({
             <Stack gap="sm">
               {classifiedTags.map((group) => (
                 <Group key={group.label} gap={10} wrap="nowrap" align="flex-start">
-                  <Text size="sm" fw={700} c="#b77792" w={100} ta="right" pt={4}>
+                  <Text size="sm" fw={700} c="#8d5a6e" w={100} ta="right" pt={4}>
                     {group.label}:
                   </Text>
                   <Group gap={7} wrap="wrap" style={{ flex: 1 }}>
