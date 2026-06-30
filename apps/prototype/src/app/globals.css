@@ -207,50 +207,154 @@
 
 /* ---------- Reader ---------- */
 .reader-shell {
-  @apply min-h-screen text-white;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  color: white;
   background: var(--reader-bg);
 }
 
 .reader-toolbar {
-  @apply sticky top-0 z-10 grid gap-[14px] items-center min-h-[58px] px-5 border-b;
+  z-index: 10;
+  display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 58px;
+  padding: 0 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(21, 17, 29, 0.94);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  transition: transform 0.18s ease;
+  flex-shrink: 0;
+  transition: margin-top 0.18s ease, opacity 0.18s ease;
 }
 
 .reader-toolbar.is-hidden {
-  transform: translateY(-100%);
+  margin-top: -58px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .reader-toolbar a,
 .reader-toolbar button {
-  @apply inline-flex items-center gap-[6px] min-h-[34px] px-[10px] rounded-lg text-white;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: white;
   background: rgba(255, 255, 255, 0.08);
 }
 
 .reader-toolbar div {
-  @apply grid min-w-0;
+  display: grid;
+  min-width: 0;
 }
 
 .reader-toolbar span {
-  @apply text-xs;
+  font-size: 12px;
   color: #c9b9cf;
 }
 
+.reader-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* ---- left thumbnail rail ---- */
+.reader-thumb-rail {
+  width: 88px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 6px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  transition: width 0.18s ease, opacity 0.18s ease, padding 0.18s ease;
+}
+
+.reader-thumb-rail.is-hidden {
+  width: 0;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  overflow: hidden;
+}
+
+.reader-thumb-btn {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  min-height: 42px;
+  padding: 4px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #9689a0;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  flex-shrink: 0;
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.reader-thumb-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #d9c8df;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.reader-thumb-btn.is-active {
+  background: var(--pink) !important;
+  border-color: var(--pink-strong) !important;
+  color: white !important;
+  box-shadow: 0 0 10px rgba(239, 59, 145, 0.5);
+  transform: scale(1.05);
+  font-size: 12px;
+}
+
+/* ---- pages content ---- */
+.reader-pages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 14px 48px;
+}
+
+.reader-pages > .mock-page,
+.reader-pages > .reader-divider {
+  width: min(760px, 100%);
+}
+
 .reader-edge-toggle {
-  @apply fixed right-0 z-15 w-[14px] h-[80px] rounded-l-lg;
+  position: fixed;
+  right: 0;
+  z-index: 15;
+  width: 14px;
+  height: 80px;
+  border-radius: 8px 0 0 8px;
   top: 45%;
   background: var(--pink);
 }
 
-.reader-pages {
-  @apply grid gap-3 mx-auto px-[14px] py-7;
-  width: min(760px, 100%);
+.reader-back-link:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
 }
 
 .mock-page {
-  @apply grid place-items-center min-h-[820px] rounded text-[#241629];
+  display: grid;
+  place-items: center;
+  min-height: 820px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: #241629;
   background: #f8f3f7;
 }
 
@@ -260,23 +364,15 @@
 }
 
 .reader-divider {
-  @apply grid place-items-center gap-[5px] min-h-[74px] rounded-[10px] text-[#d9c8df];
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-height: 74px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  color: #d9c8df;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
-}
-
-.thumb-rail {
-  @apply fixed right-[18px] grid gap-2;
-  top: 120px;
-}
-
-.thumb-rail button {
-  @apply w-[34px] h-[34px] rounded-lg text-white;
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.thumb-rail button.is-active {
-  background: var(--pink);
 }
 
 /* ---------- Admin ---------- */
@@ -552,8 +648,8 @@
     @apply text-left;
   }
 
-  .thumb-rail {
-    @apply hidden;
+  .reader-thumb-rail {
+    display: none;
   }
 }
 
@@ -721,7 +817,7 @@
   /* --- reader --- */
   .reader-toolbar a:hover,
   .reader-toolbar button:hover,
-  .thumb-rail button:hover {
+  .reader-thumb-btn:hover {
     background: rgba(255, 255, 255, 0.18);
   }
 
@@ -729,7 +825,7 @@
     background: var(--pink-strong);
   }
 
-  .thumb-rail button.is-active:hover {
+  .reader-thumb-btn.is-active:hover {
     background: var(--pink-strong);
   }
 
