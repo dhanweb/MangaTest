@@ -93,7 +93,7 @@ export const comics: Comic[] = [
     tags: ["category:manga", "female:big breasts", "male:sole male", "other:mosaic censorship", "language:translated", "parody:original"],
     chapters: Array.from({ length: 6 }, (_, i) => ({
       id: `tagged-${120 - i}`,
-      title: `第${120 - i}话 - 第${120 - i}话`,
+      title: `第${120 - i}话`,
       pageCount: i === 0 ? 52 : 12,
       addedAt: "2026-06-13",
     })),
@@ -477,29 +477,6 @@ export interface TagItem {
   canonical: string;
   translation: string;
   comicCount: number;
-}
-
-/** namespace → Chinese display label */
-export const NAMESPACE_LABELS: Record<string, string> = {
-  language: "语言",
-  female: "女性",
-  male: "男性",
-  category: "类型",
-  other: "其他",
-  artist: "作者",
-  group: "社团",
-  parody: "原作",
-};
-
-/** "中文 (english)" label helper for Select options */
-export function namespaceOptionLabel(ns: string): string {
-  const cn = NAMESPACE_LABELS[ns];
-  return cn ? `${cn} (${ns})` : ns;
-}
-
-/** Resolve namespace → Chinese label, fallback to raw key */
-export function namespaceLabel(ns: string): string {
-  return NAMESPACE_LABELS[ns] ?? ns;
 }
 
 export const allTags: TagItem[] = [

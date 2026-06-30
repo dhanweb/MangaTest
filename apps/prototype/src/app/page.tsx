@@ -7,6 +7,7 @@ import { ComicCard } from "@/components/ComicCard";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AppButton, AppSelect } from "@/components/ui/app-components";
 import { comics, sortOptions, tagGroups, type SortMode } from "@/lib/mock-data";
+import { namespaceLabel, canonicalTag, tagLabel } from "@/lib/tag-utils";
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -18,7 +19,7 @@ export default function HomePage() {
     const next = comics.filter((comic) => {
       const text = [comic.title, comic.originalTitle, comic.artist, comic.fileTitle, comic.tags.join(" ")].join(" ").toLowerCase();
       return (!q || text.includes(q))
-        && selectedTags.every((tag) => comic.tags.some((t) => t.includes(tag)));
+        && selectedTags.every((ct) => comic.tags.includes(ct));
     });
     return next.toSorted((a, b) => {
       if (sortMode === "title") return a.title.localeCompare(b.title, "zh-Hans-CN");
@@ -100,22 +101,29 @@ export default function HomePage() {
           {tagGroups.map((group) => (
             <Box
               key={group.label}
-              style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "flex-start", padding: "8px 0" }}
+              style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "8px 0" }}
             >
               <Text component="strong" size="13px" ta="right" c="#8d5a6e" fw={700}>
-                {group.label}:
+                {namespaceLabel(group.label.toLowerCase())}:
               </Text>
               <Group gap={8} wrap="wrap">
-                {group.values.map((tag) => {
-                  const isSelected = selectedTags.includes(tag);
+                {group.values.map((value) => {
+                  const ctag = canonicalTag(group.label.toLowerCase(), value);
+                  const isSelected = selectedTags.includes(ctag);
                   return (
                     <AppButton
-                      key={tag}
+                      key={ctag}
                       variant={isSelected ? "filled" : "outline"}
                       size="xs"
-                      onClick={() => setSelectedTags(isSelected ? selectedTags.filter((t) => t !== tag) : [...selectedTags, tag])}
+                      onClick={() =>
+                        setSelectedTags(
+                          isSelected
+                            ? selectedTags.filter((t) => t !== ctag)
+                            : [...selectedTags, ctag],
+                        )
+                      }
                     >
-                      {tag}
+                      {tagLabel(ctag)}
                     </AppButton>
                   );
                 })}

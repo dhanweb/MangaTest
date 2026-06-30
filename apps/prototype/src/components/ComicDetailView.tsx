@@ -12,7 +12,7 @@ import {
   SimpleGrid,
   Popover,
 } from "@mantine/core";
-import { Edit3, Heart, Play, Star } from "lucide-react";
+import { ChevronRight, Edit3, Heart, Play } from "lucide-react";
 import { CoverBlock } from "@/components/SiteHeader";
 import {
   AppBadge,
@@ -25,6 +25,7 @@ import {
   useAppModal,
 } from "@/components/ui/app-components";
 import { type Comic, type ComicStatus, statusOptions, tagGroups } from "@/lib/mock-data";
+import { tagLabel } from "@/lib/tag-utils";
 
 type EditableComic = Pick<
   Comic,
@@ -45,18 +46,11 @@ function createDraft(comic: Comic): EditableComic {
   };
 }
 
-function tagValue(groupLabel: string, value: string) {
-  return `${groupLabel.toLowerCase()}:${value}`;
-}
-
-function tagLabel(tag: string) {
-  return tag.includes(":") ? tag.split(":").slice(1).join(":") : tag;
-}
-
 export function ComicDetailView({ comic }: { comic: Comic }) {
   const [savedComic, setSavedComic] = useState<EditableComic>(() => createDraft(comic));
   const [draftComic, setDraftComic] = useState<EditableComic>(() => createDraft(comic));
   const [favorite, setFavorite] = useState(true);
+  const [sortNewest, setSortNewest] = useState(true);
   const [dialogOpen, { open: openDialog, close: closeDialog }] = useAppModal(false);
   const firstChapter = comic.chapters[0];
 
@@ -73,7 +67,7 @@ export function ComicDetailView({ comic }: { comic: Comic }) {
     if (!group) return;
     setDraftComic((cur) => {
       const next = group.values
-        .map((v) => tagValue(group.label, v))
+        .map((v) => `${group.label.toLowerCase()}:${v}`)
         .find((t) => !cur.tags.includes(t));
       return next ? { ...cur, tags: [...cur.tags, next] } : cur;
     });
@@ -130,7 +124,7 @@ export function ComicDetailView({ comic }: { comic: Comic }) {
 
           <Group gap={8} mb="xl" wrap="wrap">
             {savedComic.tags.map((tag) => (
-              <AppBadge key={tag}>{tag}</AppBadge>
+              <AppBadge key={tag}>{tagLabel(tag)}</AppBadge>
             ))}
           </Group>
 
@@ -162,50 +156,74 @@ export function ComicDetailView({ comic }: { comic: Comic }) {
 
       {/* Chapter list */}
       <Box component="section">
-        <Text component="h2" size="lg" fw={700} mb="md">章节列表</Text>
-        <Stack gap={10}>
-          {comic.chapters.map((chapter, index) => (
-            <Box
-              key={chapter.id}
-              component={Link}
-              href={`/reader/${comic.id}?chapter=${chapter.id}`}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "40px minmax(0, 1fr) 22px",
-                gap: 16,
-                alignItems: "center",
-                minHeight: 68,
-                padding: "0 14px",
-                borderRadius: 14,
-                background: "white",
-                textDecoration: "none",
-                color: "inherit",
-                transition: "background 160ms ease, box-shadow 160ms ease",
-              }}
-              className="chapter-link-hover"
-            >
+        <Group justify="space-between" mb="md" align="center">
+          <Text component="h2" size="lg" fw={700}>章节列表 · {comic.chapters.length} 话</Text>
+          <AppButton
+            variant="subtle"
+            size="xs"
+            onClick={() => setSortNewest((v) => !v)}
+            styles={{
+              root: {
+                fontWeight: 700,
+                fontSize: 12,
+                color: "var(--mantine-color-ink-5)",
+              },
+            }}
+          >
+            {sortNewest ? "最新优先 ↑" : "最早优先 ↓"}
+          </AppButton>
+        </Group>
+        <Stack gap={6}>
+          {(sortNewest ? [...comic.chapters] : [...comic.chapters].reverse()).map((chapter, index) => {
+            const chapterNum = sortNewest ? comic.episodes - index : index + 1;
+            return (
               <Box
+                key={chapter.id}
+                component={Link}
+                href={`/reader/${comic.id}?chapter=${chapter.id}`}
                 style={{
                   display: "grid",
-                  width: 40,
-                  height: 40,
-                  placeItems: "center",
-                  borderRadius: 10,
-                  background: "var(--mantine-color-pink-5)",
-                  color: "white",
-                  fontSize: 17,
-                  fontWeight: 700,
+                  gridTemplateColumns: "44px minmax(0, 1fr) 18px",
+                  gap: 14,
+                  alignItems: "center",
+                  minHeight: 58,
+                  padding: "10px 16px",
+                  borderRadius: 12,
+                  background: "white",
+                  textDecoration: "none",
+                  color: "inherit",
+                  transition: "background 160ms ease, box-shadow 160ms ease",
                 }}
+                className="chapter-link-hover"
               >
-                {comic.episodes - index}
+                <Box
+                  style={{
+                    display: "grid",
+                    width: 44,
+                    height: 32,
+                    placeItems: "center",
+                    borderRadius: 8,
+                    background: index === 0 && sortNewest ? "var(--mantine-color-pink-5)" : "#f0e6ee",
+                    color: index === 0 && sortNewest ? "white" : "#7a5b7e",
+                    fontSize: 14,
+                    fontWeight: 800,
+                    transition: "background 160ms ease, color 160ms ease",
+                  }}
+                >
+                  {chapterNum}
+                </Box>
+                <Box style={{ minWidth: 0 }}>
+                  <Text fw={600} size="sm" style={{ lineHeight: 1.3 }}>
+                    {chapter.title}
+                  </Text>
+                  <Text size="xs" c="ink.5" mt={2}>
+                    {chapter.pageCount} 页 · {chapter.addedAt}
+                  </Text>
+                </Box>
+                <ChevronRight size={15} style={{ color: "var(--mantine-color-ink-3)", flexShrink: 0 }} />
               </Box>
-              <Box style={{ minWidth: 0 }}>
-                <Text fw={700} size="sm">{chapter.title}</Text>
-                <Text size="xs" c="ink.5" mt={4}>{chapter.pageCount} 页 · {chapter.addedAt} 添加</Text>
-              </Box>
-              <Star size={18} style={{ color: "var(--mantine-color-ink-5)" }} />
-            </Box>
-          ))}
+            );
+          })}
         </Stack>
       </Box>
 

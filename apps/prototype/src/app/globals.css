@@ -335,26 +335,17 @@
   color: var(--ink-muted);
 }
 
-.chapter-list {
-  @apply grid gap-[10px];
+.chapter-link-hover {
+  border-bottom: 1px solid #fde6ef;
 }
 
-.chapter-list a {
-  @apply grid gap-4 items-center min-h-[68px] px-[14px] rounded-xl bg-white;
-  grid-template-columns: 40px minmax(0, 1fr) 22px;
+.chapter-link-hover:last-child {
+  border-bottom: none;
 }
 
-.chapter-list a > strong {
-  @apply grid w-10 h-10 place-items-center rounded-[9px] text-white;
-  background: var(--pink);
-}
-
-.chapter-list span {
-  @apply grid min-w-0;
-}
-
-.chapter-list small {
-  color: var(--ink-muted);
+.chapter-link-hover:hover {
+  background: #fff4fa !important;
+  box-shadow: 0 4px 16px rgba(239, 59, 145, 0.1);
 }
 
 /* ---------- Tag filter ---------- */
@@ -634,9 +625,13 @@
   }
 
   /* --- chapter list --- */
-  .chapter-list a:hover {
-    background: var(--pink-soft);
-    box-shadow: 0 8px 24px rgba(239, 59, 145, 0.08);
+  .chapter-link-hover {
+    border-bottom-color: rgba(239, 59, 145, 0.15);
+  }
+
+  .chapter-link-hover:hover {
+    background: rgba(239, 59, 145, 0.08) !important;
+    box-shadow: 0 4px 16px rgba(239, 59, 145, 0.12);
   }
 
   /* --- detail actions --- */

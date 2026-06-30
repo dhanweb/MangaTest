@@ -15,10 +15,12 @@ import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import {
-  allTags,
   NAMESPACE_LABELS,
   namespaceLabel,
   namespaceOptionLabel,
+} from "@/lib/tag-utils";
+import {
+  allTags,
   type TagItem,
 } from "@/lib/mock-data";
 
