@@ -6,7 +6,6 @@ import { Play } from "lucide-react";
 import type { Comic } from "@/lib/mock-data";
 import { statusLabel } from "@/lib/mock-data";
 import { CoverBlock } from "./SiteHeader";
-import { AppBadge } from "@/components/ui/app-components";
 
 export function ComicCard({ comic }: { comic: Comic }) {
   const isProblem = comic.status === "missing_cover" || comic.status === "local_file_missing";

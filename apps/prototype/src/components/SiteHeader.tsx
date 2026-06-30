@@ -4,7 +4,6 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { Box, Group } from "@mantine/core";
 import { BookOpen, Heart, Library, Settings } from "lucide-react";
-import { AppLink } from "@/components/ui/app-components";
 
 interface SiteHeaderProps {
   active?: "library" | "favorites" | "admin";

@@ -13,6 +13,11 @@ export default function ReaderPage() {
   const comic = getComic(params.id);
   const [toolbarVisible, setToolbarVisible] = useState(true);
 
+  const pages = useMemo(
+    () => (comic ? Array.from({ length: Math.min(comic.pages, 18) }, (_, i) => i + 1) : []),
+    [comic],
+  );
+
   if (!comic) {
     return (
       <Box component="main" className="reader-shell" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -20,11 +25,6 @@ export default function ReaderPage() {
       </Box>
     );
   }
-
-  const pages = useMemo(
-    () => Array.from({ length: Math.min(comic.pages, 18) }, (_, i) => i + 1),
-    [comic.pages],
-  );
 
   return (
     <Box component="main" className="reader-shell">

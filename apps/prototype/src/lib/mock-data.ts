@@ -421,6 +421,167 @@ for (let i = 0; i < 29; i++) {
   comics.push(makeComic(i));
 }
 
+export interface ScanPath {
+  id: string;
+  path: string;
+  description: string;
+  status: "ok" | "missing" | "scanning";
+  comicCount: number;
+  lastScanAt: string;
+  addedAt: string;
+}
+
+export const scanPaths: ScanPath[] = [
+  {
+    id: "path-1",
+    path: "D:\\Comics\\Manga",
+    description: "主漫画库",
+    status: "ok",
+    comicCount: 156,
+    lastScanAt: "2026/6/30 09:15",
+    addedAt: "2026/5/1",
+  },
+  {
+    id: "path-2",
+    path: "E:\\Downloads\\Comics",
+    description: "下载待整理",
+    status: "ok",
+    comicCount: 89,
+    lastScanAt: "2026/6/29 22:40",
+    addedAt: "2026/5/15",
+  },
+  {
+    id: "path-3",
+    path: "\\\\NAS-Media\\shared\\comics",
+    description: "NAS 共享漫画",
+    status: "scanning",
+    comicCount: 0,
+    lastScanAt: "—",
+    addedAt: "2026/6/28",
+  },
+  {
+    id: "path-4",
+    path: "F:\\Backup\\OldComics",
+    description: "旧盘备份（已断开）",
+    status: "missing",
+    comicCount: 0,
+    lastScanAt: "2026/6/15 14:20",
+    addedAt: "2026/3/10",
+  },
+];
+
+export interface TagItem {
+  id: string;
+  namespace: string;
+  name: string;
+  canonical: string;
+  translation: string;
+  comicCount: number;
+}
+
+/** namespace → Chinese display label */
+export const NAMESPACE_LABELS: Record<string, string> = {
+  language: "语言",
+  female: "女性",
+  male: "男性",
+  category: "类型",
+  other: "其他",
+  artist: "作者",
+  group: "社团",
+  parody: "原作",
+};
+
+/** "中文 (english)" label helper for Select options */
+export function namespaceOptionLabel(ns: string): string {
+  const cn = NAMESPACE_LABELS[ns];
+  return cn ? `${cn} (${ns})` : ns;
+}
+
+/** Resolve namespace → Chinese label, fallback to raw key */
+export function namespaceLabel(ns: string): string {
+  return NAMESPACE_LABELS[ns] ?? ns;
+}
+
+export const allTags: TagItem[] = [
+  { id: "t1", namespace: "language", name: "translated", canonical: "language:translated", translation: "已翻译", comicCount: 85 },
+  { id: "t2", namespace: "language", name: "chinese", canonical: "language:chinese", translation: "中文", comicCount: 142 },
+  { id: "t3", namespace: "language", name: "english", canonical: "language:english", translation: "英文", comicCount: 63 },
+  { id: "t4", namespace: "language", name: "korean", canonical: "language:korean", translation: "韩文", comicCount: 12 },
+  { id: "t5", namespace: "female", name: "big breasts", canonical: "female:big breasts", translation: "巨乳", comicCount: 98 },
+  { id: "t6", namespace: "female", name: "schoolgirl uniform", canonical: "female:schoolgirl uniform", translation: "水手服", comicCount: 67 },
+  { id: "t7", namespace: "female", name: "beauty mark", canonical: "female:beauty mark", translation: "泪痣", comicCount: 34 },
+  { id: "t8", namespace: "female", name: "drunk", canonical: "female:drunk", translation: "醉酒", comicCount: 21 },
+  { id: "t9", namespace: "female", name: "ahegao", canonical: "female:ahegao", translation: "阿黑颜", comicCount: 44 },
+  { id: "t10", namespace: "male", name: "sole male", canonical: "male:sole male", translation: "单男主", comicCount: 76 },
+  { id: "t11", namespace: "male", name: "teacher", canonical: "male:teacher", translation: "教师", comicCount: 18 },
+  { id: "t12", namespace: "male", name: "virginity", canonical: "male:virginity", translation: "童贞", comicCount: 29 },
+  { id: "t13", namespace: "category", name: "manga", canonical: "category:manga", translation: "漫画", comicCount: 156 },
+  { id: "t14", namespace: "category", name: "doujinshi", canonical: "category:doujinshi", translation: "同人志", comicCount: 89 },
+  { id: "t15", namespace: "other", name: "mosaic censorship", canonical: "other:mosaic censorship", translation: "马赛克", comicCount: 112 },
+  { id: "t16", namespace: "other", name: "tankoubon", canonical: "other:tankoubon", translation: "单行本", comicCount: 31 },
+  { id: "t17", namespace: "other", name: "uncensored", canonical: "other:uncensored", translation: "无修正", comicCount: 47 },
+  { id: "t18", namespace: "other", name: "rough translation", canonical: "other:rough translation", translation: "机翻", comicCount: 15 },
+  { id: "t19", namespace: "artist", name: "gen", canonical: "artist:gen", translation: "gen", comicCount: 40 },
+  { id: "t20", namespace: "artist", name: "mashiro shirako", canonical: "artist:mashiro shirako", translation: "mashiro shirako", comicCount: 28 },
+  { id: "t21", namespace: "artist", name: "unknown", canonical: "artist:unknown", translation: "未知作者", comicCount: 167 },
+  { id: "t22", namespace: "group", name: "enji", canonical: "group:enji", translation: "enji", comicCount: 35 },
+  { id: "t23", namespace: "parody", name: "original", canonical: "parody:original", translation: "原创", comicCount: 178 },
+];
+
+export interface FileIssue {
+  id: string;
+  comicId: string;
+  comicTitle: string;
+  issueType: "missing" | "changed" | "duplicate" | "orphan";
+  filePath: string;
+  expectedSize: string;
+  detail: string;
+  detectedAt: string;
+}
+
+export const fileIssues: FileIssue[] = [
+  {
+    id: "fi-1",
+    comicId: "missing-file",
+    comicTitle: "本地文件缺失样例",
+    issueType: "missing",
+    filePath: "F:\\Backup\\OldComics\\Missing Local File.cbz",
+    expectedSize: "1.2 GB",
+    detail: "文件路径不存在，可能是磁盘已断开连接或文件被删除。",
+    detectedAt: "2026/6/30 08:00",
+  },
+  {
+    id: "fi-2",
+    comicId: "sample-02",
+    comicTitle: "旧馆记录",
+    issueType: "changed",
+    filePath: "D:\\Comics\\Manga\\Old Building Records.cbz",
+    expectedSize: "671 MB",
+    detail: "文件大小已变更（671 MB → 712 MB），可能是文件被替换或修改。",
+    detectedAt: "2026/6/29 22:15",
+  },
+  {
+    id: "fi-3",
+    comicId: "sample-04",
+    comicTitle: "粉色书架",
+    issueType: "duplicate",
+    filePath: "D:\\Comics\\Manga\\Pink Bookshelf.cbz",
+    expectedSize: "1.08 GB",
+    detail: "在 D:\\Downloads 发现相同 hash 的文件，疑似重复。",
+    detectedAt: "2026/6/28 14:30",
+  },
+  {
+    id: "fi-4",
+    comicId: "sample-05",
+    comicTitle: "夜间短篇集",
+    issueType: "orphan",
+    filePath: "D:\\Comics\\Manga\\night_shorts_temp.cbz",
+    expectedSize: "512 MB",
+    detail: "数据库无对应记录，可能是临时下载文件或手动放入的文件。",
+    detectedAt: "2026/6/27 11:00",
+  },
+];
+
 export function getComic(id: string): Comic | undefined {
   return comics.find((comic) => comic.id === id);
 }

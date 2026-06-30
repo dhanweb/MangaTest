@@ -1,31 +1,33 @@
 "use client";
 
 import { useState } from "react";
-import { Box, Text } from "@mantine/core";
+import { Box, Group, Stack, Text } from "@mantine/core";
 import { Settings } from "lucide-react";
-import { AppButton, AppSelect, AppSwitch } from "@/components/ui/app-components";
-import { settingsTabs } from "@/lib/mock-data";
+import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
 
-type SettingsTab = (typeof settingsTabs)[number];
+type SettingsTab = (typeof TABS)[number];
+
+const TABS = ["常规设置", "阅读设置", "扫描设置", "安全设置"] as const;
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
-      <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 22 }}>
-        <Settings size={22} />
+      <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
+        <Settings size={22} style={{ flexShrink: 0, marginTop: 1 }} />
         <Box>
           <Text component="h1" size="20px" fw={700} mb={4}>系统设置</Text>
-          <Text size="sm" c="ink.5">本地自托管配置按用途分组，原型只展示模拟选项。</Text>
+          <Text size="sm" c="ink.5">配置漫画库根目录、阅读行为、扫描规则和安全选项。</Text>
         </Box>
       </Box>
 
+      {/* Tabs */}
       <Box
-        style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18, borderBottom: "1px solid #fde6ef" }}
+        style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 20, borderBottom: "1px solid #fde6ef" }}
         role="tablist"
       >
-        {settingsTabs.map((tab) => (
+        {TABS.map((tab) => (
           <AppButton
             key={tab}
             variant="transparent"
@@ -36,7 +38,7 @@ export default function SettingsPage() {
             styles={{
               root: {
                 minHeight: 40,
-                padding: "0 16px",
+                padding: "0 18px",
                 fontWeight: 900,
                 fontSize: 14,
                 border: "none",
@@ -54,83 +56,29 @@ export default function SettingsPage() {
         ))}
       </Box>
 
+      {/* Tab content */}
       <Box>
-        {activeTab === "常规设置" && (
-          <>
-            <SettingSwitch label="自动扫描" note="启动时自动扫描所有漫画路径" defaultChecked />
-            <SettingSwitch label="阅读进度记录" note="自动记录每本漫画的阅读进度" defaultChecked />
-            <SettingSelect label="默认阅读模式" note="选择打开漫画时的默认阅读方式" defaultValue="滚动模式" options={["滚动模式", "分页模式", "双页模式"]} />
-            <SettingSwitch label="图片预加载" note="阅读时提前加载后续页面" />
-            <SettingSelect label="每页显示数量" note="漫画列表每页显示的漫画数" defaultValue="20" options={["20", "40", "80"]} />
-          </>
-        )}
-
-        {activeTab === "阅读设置" && (
-          <>
-            {["向上滚动 ↑", "向下滚动 ↓", "翻下一屏 Space", "返回详情 Esc", "显示工具栏 Tab"].map((item) => {
-              const [title, key] = item.split(" ");
-              return (
-                <Box
-                  key={item}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0, 1fr) auto",
-                  gap: 18,
-                  alignItems: "center",
-                  minHeight: 68,
-                  padding: "12px 0",
-                  borderBottom: "1px solid #fde6ef",
-                }}
-              >
-                <Box>
-                  <Text fw={600} size="15px">{title}</Text>
-                  <Text size="xs" c="ink.5">点击按键输入框后按下新的快捷键即可修改</Text>
-                </Box>
-                <Box
-                  component="kbd"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minWidth: 60,
-                    minHeight: 36,
-                    padding: "0 12px",
-                    border: "1px solid var(--mantine-color-pink-2)",
-                    borderRadius: 8,
-                    background: "white",
-                    fontFamily: "var(--mantine-font-family-monospace)",
-                    fontWeight: 900,
-                  }}
-                >
-                  {key}
-                </Box>
-              </Box>
-            );
-          })}
-          </>
-        )}
-
-        {activeTab === "扫描设置" && (
-          <>
-            {["支持格式：zip / cbz / 目录", "忽略目录：__MACOSX, .DS_Store", "封面优先级：cover.* 优先"].map((item) => (
-              <SettingText key={item} label={item} />
-            ))}
-          </>
-        )}
-
-        {activeTab === "安全设置" && (
-          <>
-            {["导入令牌：已隐藏", "写接口保护：开启", "日志脱敏：开启"].map((item) => (
-              <SettingText key={item} label={item} />
-            ))}
-          </>
-        )}
+        {activeTab === "常规设置" && <GeneralSettings />}
+        {activeTab === "阅读设置" && <ReaderSettings />}
+        {activeTab === "扫描设置" && <ScanSettings />}
+        {activeTab === "安全设置" && <SecuritySettings />}
       </Box>
     </Box>
   );
 }
 
-function SettingSwitch({ label, note, defaultChecked = false }: { label: string; note: string; defaultChecked?: boolean }) {
+function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <Box mb="lg">
+      <Text fw={700} size="sm" c="#3a2034" mb="xs">{title}</Text>
+      <Stack gap={0} style={{ border: "1px solid #fde6ef", borderRadius: 10, overflow: "hidden" }}>
+        {children}
+      </Stack>
+    </Box>
+  );
+}
+
+function SettingsRow({ label, note, children }: { label: string; note?: string; children: React.ReactNode }) {
   return (
     <Box
       style={{
@@ -138,64 +86,209 @@ function SettingSwitch({ label, note, defaultChecked = false }: { label: string;
         gridTemplateColumns: "minmax(0, 1fr) auto",
         gap: 18,
         alignItems: "center",
-        minHeight: 68,
-        padding: "12px 0",
-        borderBottom: "1px solid #fde6ef",
-        cursor: "default",
-      }}
-    >
-      <Box>
-        <Text fw={600} size="15px" c="#3a2034">{label}</Text>
-        <Text size="xs" c="ink.5">{note}</Text>
-      </Box>
-      <AppSwitch defaultChecked={defaultChecked} aria-label={label} />
-    </Box>
-  );
-}
-
-function SettingSelect({ label, note, defaultValue, options }: { label: string; note: string; defaultValue: string; options: string[] }) {
-  return (
-    <Box
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: 18,
-        alignItems: "center",
-        minHeight: 68,
-        padding: "12px 0",
-        borderBottom: "1px solid #fde6ef",
-      }}
-    >
-      <Box>
-        <Text fw={600} size="15px" c="#3a2034">{label}</Text>
-        <Text size="xs" c="ink.5">{note}</Text>
-      </Box>
-      <AppSelect
-        defaultValue={defaultValue}
-        data={options.map((o) => ({ value: o, label: o }))}
-        aria-label={label}
-      />
-    </Box>
-  );
-}
-
-function SettingText({ label }: { label: string }) {
-  return (
-    <Box
-      style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: 18,
-        alignItems: "center",
-        minHeight: 68,
-        padding: "12px 0",
+        minHeight: 60,
+        padding: "12px 18px",
         borderBottom: "1px solid #fde6ef",
       }}
     >
       <Box>
         <Text fw={600} size="15px">{label}</Text>
-        <Text size="xs" c="ink.5">原型配置项，后续接入真实设置存储</Text>
+        {note && <Text size="xs" c="ink.5" mt={2}>{note}</Text>}
       </Box>
+      <Box style={{ minWidth: 180, display: "flex", justifyContent: "flex-end" }}>{children}</Box>
     </Box>
+  );
+}
+
+function GeneralSettings() {
+  return (
+    <>
+      <SettingsGroup title="路径配置">
+        <SettingsRow label="漫画根目录" note="所有漫画文件的存放根路径，必须是绝对路径。">
+          <AppInput defaultValue="D:\Comics\Manga" style={{ width: 280 }} />
+        </SettingsRow>
+        <SettingsRow label="数据目录" note="系统元数据、封面缓存、缩略图存放位置。">
+          <AppInput defaultValue="D:\Comics\data" style={{ width: 280 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="服务配置">
+        <SettingsRow label="监听地址" note="本地服务绑定的 IP 地址。">
+          <AppInput defaultValue="0.0.0.0" style={{ width: 280 }} />
+        </SettingsRow>
+        <SettingsRow label="端口号" note="HTTP 服务端口，修改后需重启。">
+          <AppInput defaultValue="3000" style={{ width: 120 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="自动化">
+        <SettingsRow label="启动时自动扫描" note="服务启动后自动扫描所有漫画路径。">
+          <AppSwitch defaultChecked aria-label="自动扫描" />
+        </SettingsRow>
+        <SettingsRow label="定时扫描" note="按 cron 表达式定时扫描目录变更。">
+          <AppInput defaultValue="0 */6 * * *" style={{ width: 180 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <Group justify="flex-end" mt="md">
+        <AppButton>保存常规设置</AppButton>
+      </Group>
+    </>
+  );
+}
+
+function ReaderSettings() {
+  return (
+    <>
+      <SettingsGroup title="阅读行为">
+        <SettingsRow label="默认阅读模式" note="打开漫画后的阅读方式。">
+          <AppSelect
+            defaultValue="滚动模式"
+            data={["滚动模式", "分页模式"].map((v) => ({ value: v, label: v }))}
+          />
+        </SettingsRow>
+        <SettingsRow label="图片预加载" note="提前加载后续页面图片以减少等待。">
+          <AppSwitch defaultChecked aria-label="图片预加载" />
+        </SettingsRow>
+        <SettingsRow label="阅读进度记录" note="自动记录每本漫画的阅读位置。">
+          <AppSwitch defaultChecked aria-label="阅读进度" />
+        </SettingsRow>
+        <SettingsRow label="预加载距离" note="距离底部多少像素时开始预加载下一章节。">
+          <AppInput defaultValue="3000" style={{ width: 120 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="快捷键">
+        {[
+          ["向上滚动", "↑ / W"],
+          ["向下滚动", "↓ / S"],
+          ["显示/隐藏工具栏", "T"],
+          ["返回详情页", "Esc"],
+        ].map(([label, key]) => (
+          <SettingsRow key={label} label={label}>
+            <Box
+              component="kbd"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 60,
+                minHeight: 32,
+                padding: "0 10px",
+                border: "1px solid var(--mantine-color-pink-2)",
+                borderRadius: 7,
+                background: "white",
+                fontFamily: "var(--mantine-font-family-monospace)",
+                fontWeight: 700,
+                fontSize: 13,
+              }}
+            >
+              {key}
+            </Box>
+          </SettingsRow>
+        ))}
+      </SettingsGroup>
+
+      <Group justify="flex-end" mt="md">
+        <AppButton>保存阅读设置</AppButton>
+      </Group>
+    </>
+  );
+}
+
+function ScanSettings() {
+  return (
+    <>
+      <SettingsGroup title="文件扫描">
+        <SettingsRow label="支持格式" note="当前支持的漫画文件格式。">
+          <Box style={{ display: "flex", gap: 6 }}>
+            {["ZIP", "CBZ", "目录"].map((fmt) => (
+              <Box
+                key={fmt}
+                component="span"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  height: 28,
+                  padding: "0 10px",
+                  borderRadius: 7,
+                  fontWeight: 700,
+                  fontSize: 12,
+                  background: "#e4f9ed",
+                  color: "#00894a",
+                }}
+              >
+                {fmt}
+              </Box>
+            ))}
+          </Box>
+        </SettingsRow>
+        <SettingsRow label="忽略目录" note="扫描时自动忽略的目录或文件。">
+          <AppInput defaultValue="__MACOSX, .DS_Store, .thumb" style={{ width: 280 }} />
+        </SettingsRow>
+        <SettingsRow label="封面优先级" note="自动选择封面的优先级策略。">
+          <AppSelect
+            defaultValue="cover.* 优先"
+            data={[
+              { value: "cover", label: "cover.* 文件优先" },
+              { value: "first", label: "第一页优先" },
+            ]}
+          />
+        </SettingsRow>
+        <SettingsRow label="扫描后生成缩略图" note="扫描完成后自动生成缩略图缓存。">
+          <AppSwitch defaultChecked aria-label="生成缩略图" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="文件校验">
+        <SettingsRow label="计算文件 hash" note="扫描时计算 SHA-256 用于重复检测和路径修复。">
+          <AppSwitch defaultChecked aria-label="计算 hash" />
+        </SettingsRow>
+        <SettingsRow label="自动修复路径" note="检测到文件移动后自动更新数据库路径。">
+          <AppSwitch defaultChecked aria-label="自动修复路径" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <Group justify="flex-end" mt="md">
+        <AppButton>保存扫描设置</AppButton>
+      </Group>
+    </>
+  );
+}
+
+function SecuritySettings() {
+  return (
+    <>
+      <SettingsGroup title="接口保护">
+        <SettingsRow label="导入令牌" note="浏览器插件调用写接口时需携带此令牌。">
+          <AppInput defaultValue="manga-import-token-xxxx" style={{ width: 260 }} />
+        </SettingsRow>
+        <SettingsRow label="写接口保护" note="启用后非本机 IP 的写操作需令牌验证。">
+          <AppSwitch defaultChecked aria-label="写接口保护" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="日志与隐私">
+        <SettingsRow label="磁链脱敏" note="日志中不记录完整 magnet 链接。">
+          <AppSwitch defaultChecked aria-label="磁链脱敏" />
+        </SettingsRow>
+        <SettingsRow label="敏感配置隐藏" note="前台不暴露 OpenList token、115 cookie 等配置。">
+          <AppSwitch defaultChecked aria-label="敏感配置隐藏" />
+        </SettingsRow>
+        <SettingsRow label="操作日志" note="记录关键操作：删除、路径修改、导入来源。">
+          <AppSwitch defaultChecked aria-label="操作日志" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="局域网访问">
+        <SettingsRow label="允许局域网 IP" note="允许同局域网内其他设备访问本服务。">
+          <AppSwitch defaultChecked aria-label="局域网访问" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <Group justify="flex-end" mt="md">
+        <AppButton>保存安全设置</AppButton>
+      </Group>
+    </>
   );
 }

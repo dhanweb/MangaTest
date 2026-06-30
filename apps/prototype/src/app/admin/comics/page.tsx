@@ -1,10 +1,22 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Box, Group, Pagination, Select, Table, Text, TextInput } from "@mantine/core";
+import {
+  Box,
+  Group,
+  Modal,
+  Pagination,
+  Select,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+} from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 import { Library, Search } from "lucide-react";
-import { AppButton } from "@/components/ui/app-components";
-import { comics, statusLabel, type ComicStatus } from "@/lib/mock-data";
+import { AppButton, AppInput, AppSelect, AppTextarea } from "@/components/ui/app-components";
+import { comics, statusLabel, statusOptions, type Comic } from "@/lib/mock-data";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "10 条/页" },
@@ -16,6 +28,8 @@ export default function ComicsPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [search, setSearch] = useState("");
+  const [opened, { open, close }] = useDisclosure(false);
+  const [editTarget, setEditTarget] = useState<Comic | null>(null);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -30,6 +44,11 @@ export default function ComicsPage() {
   const total = filtered.length;
   const totalPages = Math.ceil(total / limit);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
+
+  const openEdit = (comic: Comic) => {
+    setEditTarget(comic);
+    open();
+  };
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
@@ -110,7 +129,7 @@ export default function ComicsPage() {
                   </Box>
                 </Table.Td>
                 <Table.Td>
-                  <AppButton variant="outline" size="xs">
+                  <AppButton variant="outline" size="xs" onClick={() => openEdit(comic)}>
                     编辑
                   </AppButton>
                 </Table.Td>
@@ -157,6 +176,45 @@ export default function ComicsPage() {
           />
         )}
       </Group>
+
+      {/* Edit Modal */}
+      <Modal
+        opened={opened}
+        onClose={close}
+        title="编辑漫画"
+        size="xl"
+        styles={{
+          title: { fontWeight: 700, fontSize: "18px" },
+          header: { borderBottom: "1px solid var(--mantine-color-pink-1)" },
+        }}
+      >
+        {editTarget && (
+          <Stack gap="md" py="sm">
+            <Text size="xs" c="ink.5" ff="monospace">{editTarget.fileTitle}</Text>
+
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+              <AppInput label="标题" defaultValue={editTarget.title} />
+              <AppInput label="原始标题" defaultValue={editTarget.originalTitle} />
+              <AppInput label="作者" defaultValue={editTarget.artist} />
+              <AppInput label="组名" defaultValue={editTarget.group} />
+              <AppInput label="来源" defaultValue={editTarget.source} />
+              <AppSelect
+                label="状态"
+                defaultValue={editTarget.status}
+                data={statusOptions.map((opt) => ({ value: opt.value, label: opt.label }))}
+              />
+            </SimpleGrid>
+
+            <AppInput label="本地路径" defaultValue={editTarget.localPath} />
+            <AppTextarea label="备注" defaultValue={editTarget.note} minRows={2} />
+
+            <Group justify="flex-end" mt="sm">
+              <AppButton variant="outline" onClick={close}>取消</AppButton>
+              <AppButton onClick={close}>保存更改</AppButton>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
     </Box>
   );
 }

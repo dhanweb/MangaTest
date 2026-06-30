@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ActionIcon,
   Badge as MantineBadge,
   Button as MantineButton,
   Modal as MantineModal,
@@ -188,12 +187,12 @@ export function AppSwitch(props: AppSwitchProps) {
 }
 
 /* ========== AppModal ========== */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AppModalProps = {
   opened: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   [key: string]: any;
 };
 

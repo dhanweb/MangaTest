@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Box, Text } from "@mantine/core";
-import { Folder, Library, Settings, Tag } from "lucide-react";
+import { Box } from "@mantine/core";
+import { Folder, Library, Settings, Tag, Wrench } from "lucide-react";
 import { SiteHeader } from "@/components/SiteHeader";
 
 const navItems = [
   { href: "/admin/paths", icon: Folder, label: "漫画路径" },
   { href: "/admin/comics", icon: Library, label: "漫画管理" },
+  { href: "/admin/files", icon: Wrench, label: "文件维护" },
   { href: "/admin/tags", icon: Tag, label: "标签管理" },
   { href: "/admin/settings", icon: Settings, label: "系统设置" },
 ];
