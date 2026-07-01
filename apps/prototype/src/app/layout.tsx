@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import "@mantine/core/styles.css";
 import "./globals.css";
+import { PinnedActions } from "@/components/PinnedActions";
 import { Providers } from "@/lib/theme";
 
 const geistSans = Geist({
@@ -18,7 +19,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="zh-CN" className={geistSans.variable}>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <PinnedActions />
+        </Providers>
       </body>
     </html>
   );
