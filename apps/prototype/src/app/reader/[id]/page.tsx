@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
 import { useParams } from "next/navigation";
 import { Box } from "@mantine/core";
 import { ArrowLeft, Eye, Settings } from "lucide-react";
@@ -24,82 +24,171 @@ export default function ReaderPage() {
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pagesContainerRef = useRef<HTMLDivElement>(null);
   const thumbRailRef = useRef<HTMLDivElement>(null);
-  const manualNavRef = useRef(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activePageRef = useRef(activePage);
+  const programmaticScrollRef = useRef(false);
+  const releaseProgrammaticScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentAnimationRef = useRef<number | null>(null);
+  const thumbAnimationRef = useRef<number | null>(null);
 
-  // --- Click thumbnail → scroll to page (immediate highlight, suppress scroll events) ---
-  const scrollToPage = useCallback((pageNum: number) => {
-    manualNavRef.current = true;
-    setActivePage(pageNum);
+  useEffect(() => {
+    activePageRef.current = activePage;
+  }, [activePage]);
 
-    // scroll thumb into view immediately
-    const thumb = thumbRailRef.current?.querySelector(`[data-page="${pageNum}"]`);
-    thumb?.scrollIntoView({ block: "center", behavior: "instant" });
+  const cancelScrollFrame = useCallback((frameRef: MutableRefObject<number | null>) => {
+    if (frameRef.current === null) return;
 
-    // scroll content to target page
-    const el = pageRefs.current.get(pageNum);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-
-    // re-enable scroll sync after smooth scroll finishes (~600ms)
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      manualNavRef.current = false;
-    }, 700);
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
   }, []);
 
-  // --- Content scroll → update active thumbnail (debounced when scrolling fast) ---
+  const animateScrollTop = useCallback((
+    element: HTMLElement,
+    targetTop: number,
+    duration: number,
+    frameRef: MutableRefObject<number | null>,
+    onDone?: () => void,
+  ) => {
+    cancelScrollFrame(frameRef);
+
+    const maxTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    const target = Math.max(0, Math.min(targetTop, maxTop));
+    const start = element.scrollTop;
+    const change = target - start;
+
+    if (duration <= 0 || Math.abs(change) < 1) {
+      element.scrollTop = target;
+      onDone?.();
+      return;
+    }
+
+    const startTime = performance.now();
+    const easeOut = (value: number) => 1 - Math.pow(1 - value, 3);
+
+    const step = (now: number) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      element.scrollTop = start + change * easeOut(progress);
+
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(step);
+        return;
+      }
+
+      frameRef.current = null;
+      onDone?.();
+    };
+
+    frameRef.current = requestAnimationFrame(step);
+  }, [cancelScrollFrame]);
+
+  const centerThumbnail = useCallback((pageNum: number, animation = true) => {
+    const rail = thumbRailRef.current;
+    const thumb = rail?.querySelector<HTMLElement>(`[data-page="${pageNum}"]`);
+    if (!rail || !thumb) return;
+
+    const railRect = rail.getBoundingClientRect();
+    const thumbRect = thumb.getBoundingClientRect();
+    const thumbCenter = thumbRect.top - railRect.top + thumbRect.height / 2;
+    const targetTop = rail.scrollTop + thumbCenter - rail.clientHeight / 2;
+    animateScrollTop(rail, targetTop, animation ? 260 : 0, thumbAnimationRef);
+  }, [animateScrollTop]);
+
+  const setCurrentPage = useCallback((pageNum: number) => {
+    if (activePageRef.current === pageNum) return;
+
+    activePageRef.current = pageNum;
+    setActivePage(pageNum);
+    centerThumbnail(pageNum);
+  }, [centerThumbnail]);
+
+  const findCurrentPage = useCallback(() => {
+    const container = pagesContainerRef.current;
+    if (!container) return activePageRef.current;
+
+    const pageElements = container.querySelectorAll<HTMLElement>(".mock-page");
+    const availableScroll = Math.max(0, container.scrollHeight - container.clientHeight);
+    const centerOffset = Math.min(availableScroll, container.clientHeight) / 2;
+    const scrollTop = container.scrollTop;
+    let focusLine = scrollTop + container.clientHeight / 2;
+
+    if (centerOffset > 0) {
+      if (scrollTop < centerOffset) {
+        focusLine = scrollTop + centerOffset * (scrollTop / centerOffset);
+      } else if (scrollTop + centerOffset > availableScroll) {
+        focusLine = scrollTop + centerOffset + centerOffset * (1 - (availableScroll - scrollTop) / centerOffset);
+      } else {
+        focusLine = scrollTop + centerOffset;
+      }
+    }
+
+    let closest = activePageRef.current;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    for (const pageElement of pageElements) {
+      const pageNum = Number(pageElement.dataset.page);
+      const top = pageElement.offsetTop;
+      const bottom = top + pageElement.offsetHeight;
+
+      if (top <= focusLine && bottom >= focusLine) {
+        return pageNum;
+      }
+
+      const distance = Math.abs(top + pageElement.offsetHeight / 2 - focusLine);
+      if (distance < closestDistance) {
+        closest = pageNum;
+        closestDistance = distance;
+      }
+    }
+
+    return closest;
+  }, []);
+
+  // --- Click thumbnail -> center content page, then let natural scroll sync resume ---
+  const scrollToPage = useCallback((pageNum: number) => {
+    const container = pagesContainerRef.current;
+    const pageElement = pageRefs.current.get(pageNum);
+    if (!container || !pageElement) return;
+
+    programmaticScrollRef.current = true;
+    if (releaseProgrammaticScrollRef.current) clearTimeout(releaseProgrammaticScrollRef.current);
+
+    setCurrentPage(pageNum);
+    centerThumbnail(pageNum);
+
+    const targetTop = pageElement.offsetTop - (container.clientHeight - pageElement.offsetHeight) / 2;
+    animateScrollTop(container, targetTop, 360, contentAnimationRef, () => {
+      releaseProgrammaticScrollRef.current = setTimeout(() => {
+        programmaticScrollRef.current = false;
+      }, 80);
+    });
+  }, [animateScrollTop, centerThumbnail, setCurrentPage]);
+
+  const handleThumbKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>, pageNum: number) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    event.preventDefault();
+    scrollToPage(pageNum);
+  }, [scrollToPage]);
+
+  // --- Content scroll -> decide the current page, then keep thumbnail rail centered ---
   useEffect(() => {
     const container = pagesContainerRef.current;
     if (!container) return;
 
-    let rafId: number | null = null;
-
-    function findClosestPage(): number {
-      const children = container!.querySelectorAll(".mock-page");
-      let closest = 1;
-      let minDist = Infinity;
-      const viewCenter = window.innerHeight / 2;
-
-      children.forEach((el) => {
-        const rect = el.getBoundingClientRect();
-        const dist = Math.abs(rect.top + rect.height / 2 - viewCenter);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = Number((el as HTMLElement).dataset.page);
-        }
-      });
-      return closest;
-    }
-
     function onScroll() {
-      if (manualNavRef.current) return;
-
-      // Thumb rail: track in real-time, throttled via rAF
-      if (!rafId) {
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          if (manualNavRef.current) return;
-          const closest = findClosestPage();
-          const thumb = thumbRailRef.current?.querySelector(`[data-page="${closest}"]`);
-          thumb?.scrollIntoView({ block: "center", behavior: "instant" });
-        });
-      }
-
-      // Highlight: debounced — only after scroll settles
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        if (manualNavRef.current) return;
-        setActivePage(findClosestPage());
-      }, 150);
+      if (programmaticScrollRef.current) return;
+      setCurrentPage(findCurrentPage());
     }
 
     container.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+
     return () => {
       container.removeEventListener("scroll", onScroll);
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      if (rafId) cancelAnimationFrame(rafId);
+      if (releaseProgrammaticScrollRef.current) clearTimeout(releaseProgrammaticScrollRef.current);
+      cancelScrollFrame(contentAnimationRef);
+      cancelScrollFrame(thumbAnimationRef);
     };
-  }, []);
+  }, [cancelScrollFrame, findCurrentPage, setCurrentPage]);
 
   if (!comic) {
     return (
@@ -191,14 +280,21 @@ export default function ReaderPage() {
         >
           {pages.map((p) => (
             <Box
-              component="button"
+              component="div"
               key={p}
-              type="button"
+              role="button"
+              tabIndex={0}
               data-page={p}
               className={`reader-thumb-btn${p === activePage ? " is-active" : ""}`}
+              aria-current={p === activePage ? "page" : undefined}
+              aria-label={`跳转到第 ${p} 页`}
               onClick={() => scrollToPage(p)}
+              onKeyDown={(event) => handleThumbKeyDown(event, p)}
             >
-              {p}
+              <div className="reader-thumb-index">{p}</div>
+              <div className="reader-thumb-sheet" aria-hidden="true">
+                <div className="reader-thumb-sheet-label">PAGE {String(p).padStart(2, "0")}</div>
+              </div>
             </Box>
           ))}
         </Box>
