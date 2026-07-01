@@ -24,52 +24,81 @@ export default function ReaderPage() {
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pagesContainerRef = useRef<HTMLDivElement>(null);
   const thumbRailRef = useRef<HTMLDivElement>(null);
+  const manualNavRef = useRef(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- Content scroll → update active thumbnail ---
+  // --- Click thumbnail → scroll to page (immediate highlight, suppress scroll events) ---
+  const scrollToPage = useCallback((pageNum: number) => {
+    manualNavRef.current = true;
+    setActivePage(pageNum);
+
+    // scroll thumb into view immediately
+    const thumb = thumbRailRef.current?.querySelector(`[data-page="${pageNum}"]`);
+    thumb?.scrollIntoView({ block: "center", behavior: "instant" });
+
+    // scroll content to target page
+    const el = pageRefs.current.get(pageNum);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    // re-enable scroll sync after smooth scroll finishes (~600ms)
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      manualNavRef.current = false;
+    }, 700);
+  }, []);
+
+  // --- Content scroll → update active thumbnail (debounced when scrolling fast) ---
   useEffect(() => {
     const container = pagesContainerRef.current;
     if (!container) return;
 
-    let ticking = false;
-    function onScroll() {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(() => {
-        const children = container!.querySelectorAll(".mock-page");
-        if (children.length === 0) { ticking = false; return; }
+    let rafId: number | null = null;
 
-        let closest = 1;
-        let minDist = Infinity;
-        const viewCenter = window.innerHeight / 2;
+    function findClosestPage(): number {
+      const children = container!.querySelectorAll(".mock-page");
+      let closest = 1;
+      let minDist = Infinity;
+      const viewCenter = window.innerHeight / 2;
 
-        children.forEach((el) => {
-          const rect = el.getBoundingClientRect();
-          const elCenter = rect.top + rect.height / 2;
-          const dist = Math.abs(elCenter - viewCenter);
-          if (dist < minDist) {
-            minDist = dist;
-            closest = Number((el as HTMLElement).dataset.page);
-          }
-        });
-
-        setActivePage(closest);
-
-        // auto-scroll thumb rail
-        const thumb = thumbRailRef.current?.querySelector(`[data-page="${closest}"]`);
-        thumb?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-
-        ticking = false;
+      children.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        const dist = Math.abs(rect.top + rect.height / 2 - viewCenter);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = Number((el as HTMLElement).dataset.page);
+        }
       });
+      return closest;
+    }
+
+    function onScroll() {
+      if (manualNavRef.current) return;
+
+      // Thumb rail: track in real-time, throttled via rAF
+      if (!rafId) {
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          if (manualNavRef.current) return;
+          const closest = findClosestPage();
+          const thumb = thumbRailRef.current?.querySelector(`[data-page="${closest}"]`);
+          thumb?.scrollIntoView({ block: "center", behavior: "instant" });
+        });
+      }
+
+      // Highlight: debounced — only after scroll settles
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        if (manualNavRef.current) return;
+        setActivePage(findClosestPage());
+      }, 150);
     }
 
     container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-  }, []);
-
-  // --- Click thumbnail → scroll to page ---
-  const scrollToPage = useCallback((pageNum: number) => {
-    const el = pageRefs.current.get(pageNum);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return () => {
+      container.removeEventListener("scroll", onScroll);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, []);
 
   if (!comic) {
