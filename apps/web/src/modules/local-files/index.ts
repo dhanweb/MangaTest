@@ -6,3 +6,5 @@ export interface PageSource {
   internalPath: string;
   archiveIndex: number | null;
 }
+
+export * from "./path-safety";

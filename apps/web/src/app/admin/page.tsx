@@ -1,10 +1,26 @@
+import Link from "next/link";
+
 const adminItems = [
-  "manga root 设置",
-  "手动扫描",
-  "缺失文件",
-  "疑似重复",
-  "缓存状态",
-  "备份导出",
+  {
+    title: "manga root 设置",
+    description: "配置一个或多个漫画根目录，第一阶段只实现子项为漫画。",
+    href: "/admin/paths",
+  },
+  {
+    title: "系统设置",
+    description: "监听地址、缓存目录、缓存上限、备份导出和阅读偏好。",
+    href: "/admin/settings",
+  },
+  {
+    title: "手动扫描",
+    description: "下一步接入 scan session，记录新增、缺失、疑似重复和可恢复项目。",
+    href: "/admin/paths",
+  },
+  {
+    title: "缓存状态",
+    description: "后续展示封面、reader 缩略图、压缩包文件列表和最近页面缓存。",
+    href: "/admin/settings",
+  },
 ];
 
 export default function AdminPage() {
@@ -19,9 +35,10 @@ export default function AdminPage() {
       </header>
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {adminItems.map((item) => (
-          <div key={item} className="rounded-lg border border-border bg-card p-4 shadow-sm">
-            <h2 className="font-black">{item}</h2>
-          </div>
+          <Link key={item.title} className="grid gap-2 rounded-lg border border-border bg-card p-4 shadow-sm hover:border-primary hover:bg-secondary" href={item.href}>
+            <h2 className="font-black">{item.title}</h2>
+            <p className="text-sm leading-6 text-muted-foreground">{item.description}</p>
+          </Link>
         ))}
       </section>
     </main>
