@@ -12,3 +12,4 @@ export interface LibraryComicSummary {
 export * from "./manga-roots";
 export * from "./manga-roots.repository";
 export * from "./scan-sessions";
+export * from "./scan-sessions.repository";

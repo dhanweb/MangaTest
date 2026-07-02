@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
+import { createScanSessionRepository } from "@/modules/library/scan-sessions.repository";
 
 export interface SaveMangaRootState {
   status: "idle" | "success" | "error";
@@ -30,4 +31,15 @@ export async function saveMangaRootAction(_state: SaveMangaRootState, formData: 
       message: error instanceof Error ? error.message : "保存漫画根目录失败。",
     };
   }
+}
+
+export async function createScanSessionAction(formData: FormData) {
+  const mangaRootId = String(formData.get("mangaRootId") ?? "");
+
+  if (!mangaRootId) {
+    return;
+  }
+
+  await createScanSessionRepository().createQueued(mangaRootId);
+  revalidatePath("/admin/paths");
 }
