@@ -16,6 +16,50 @@ MangaTest 是一个本地自托管的个人漫画库系统。
 - 删除漫画记录不等于删除真实文件。
 - 真实文件删除必须是单独、显式、确认过绝对路径的操作。
 
+### 1.1 已确认业务决策
+
+漫画与章节：
+
+- 默认每个漫画根目录下的子目录或压缩包是一本文本漫画。
+- 后台支持把漫画合并为另一本漫画的章节。
+- 合并必须可逆，不通过物理移动文件实现。
+- 被合并为章节的漫画默认不出现在前台首页，后台可以筛选查看。
+- 章节允许没有标题，单章节漫画不强行显示“第 1 章”。
+- 章节默认自然排序，后台可手动拖拽并保存 `sort_order`。
+
+本地文件与版本：
+
+- 一个 `comic` 可以关联多个 `local_file`。
+- 多个本地版本先简单展示，reader 默认读取主 `local_file`。
+- 首次扫描只有一个文件时自动设为主文件，多个文件时后台可切换主文件。
+- 路径修复 MVP 只修改数据库路径，不移动真实文件。
+- 软删除或隐藏记录后，重新扫描同一路径时保持隐藏，并在扫描结果里提示可恢复。
+
+标题、标签和作者：
+
+- 标题字段至少包含 `display_title`、`file_title`、`original_title`、`metadata_query_title`、`sort_title`。
+- `display_title` 是用户展示名，插件再次导入不得覆盖。
+- 作者作为普通标签处理，例如 `artist:xxx`、`group:xxx`，不单独建作者表。
+- MVP 标签绑定在 `comic` 上，数据库预留 `chapter` 标签关系。
+- 标签 namespace 允许任意值，UI 内置常见分类排序。
+- 中文翻译缺失时显示英文 canonical，并给“未翻译”弱提示。
+- 大小写和空格规范化可以自动处理，真正同义词合并必须后台确认。
+- 用户手动编辑标签后，插件再次导入不得覆盖用户编辑，只能保留为来源标签或候选标签。
+
+前台与后台：
+
+- 前台首页默认只展示本地可读漫画。
+- 缺文件、不可读、remote-only、隐藏内容放在后台查看。
+- 前台漫画详情不显示完整本地路径，完整路径放后台。
+- 前台保留低调管理入口，但不让管理能力主导漫画网站体验。
+
+安全与访问：
+
+- 默认只监听 `127.0.0.1`。
+- 未来允许配置局域网访问，但开启非本机监听后，写 API 必须使用 token。
+- 页面图片读取必须通过 `pageId`，前端不得传任意路径。
+- 数据库可以保存完整资源链接，日志和 UI 默认脱敏 magnet / 私有资源 URL。
+
 ## 2. 架构思想
 
 项目参考 NestJS 的模块化思想，但不强行引入 NestJS。
@@ -68,15 +112,25 @@ Core 不包含漫画业务规则。
 
 职责：
 
-- 扫描配置好的漫画根目录
+- 扫描配置好的一个或多个漫画根目录
 - 识别目录、zip、cbz
 - 创建 comic、local_file、chapter、page 基础记录
 - 提供漫画列表、详情页、基础搜索和标签筛选所需数据
 - 提供缺封面、缺文件、未阅读、阅读中等展示状态
+- 保存扫描批次 `scan_session`，记录新增、缺失、疑似重复、可恢复项目
+- 支持后台把一个 comic 合并为另一个 comic 的 chapter
+- 支持后台恢复已合并或已隐藏的记录
 
 Library 不关心漫画元数据从哪里来，也不关心下载怎么发生。
 
 它只关心：当前本地库里有什么漫画，能不能展示和阅读。
+
+扫描规则：
+
+- MVP 支持多个 manga root。
+- 每个 root 预留 `scan_mode`，但第一阶段只实现“子项为漫画”。
+- 启动时不自动扫描，MVP 先由后台手动触发扫描。
+- 重复扫描默认新建记录，并在后台提示疑似重复，不自动合并。
 
 ### 3.3 Tags 模块
 
@@ -107,6 +161,15 @@ Library、Metadata Ingest、Admin 都可以使用 Tags。
 
 Reader 不负责扫描文件，也不负责下载。
 
+阅读体验决策：
+
+- 阅读进度绑定 `comic + chapter + page`。
+- `comic` 保存 last_read 快照，便于首页和详情页继续阅读。
+- 进度保存使用节流策略，并在页面卸载时补一次。
+- 桌面端默认显示缩略图侧边栏，移动端默认隐藏，可手动打开。
+- MVP 支持方向键、空格、Home、End。
+- MVP 做隐藏顶部栏/侧边栏的沉浸模式，不调用浏览器全屏 API。
+
 ### 3.5 Local Files 模块
 
 Local Files 负责磁盘事实和文件维护。
@@ -118,12 +181,49 @@ Local Files 负责磁盘事实和文件维护。
 - 检测缺失文件
 - 检测文件变更
 - 修复 local_file 路径
-- 生成或重新生成封面、缩略图
 - 计算基础文件信息
+- 保存 size、mtime 和可选 hash
+- 对 zip/cbz 先缓存文件列表，再按需抽取目标图片
+- 对目录和压缩包都生成统一的 page source 描述
 
 Library 可以调用 Local Files 的扫描结果，但不要把所有文件维护逻辑塞进 Library。
 
-### 3.6 Metadata Ingest 模块
+文件读取决策：
+
+- zip/cbz 不完整解压。
+- 先缓存压缩包文件列表。
+- 读到目标页面时再按需抽取图片。
+- 最近访问页面可以缓存，提高下一次阅读速度。
+- 页面实体保存 `local_file_id + internal_path/page_index` 等来源信息，不把真实路径暴露给前端。
+
+### 3.6 Media Assets 模块
+
+Media Assets 负责应用生成的图片资产。
+
+职责：
+
+- 从本地漫画目录、zip、cbz 中提取封面
+- 生成列表封面缩略图
+- 生成 reader 缩略图导航需要的页面预览图
+- 管理缩略图缓存、失效和重新生成
+- 统一图片尺寸、格式和质量策略
+- 管理缓存 lastAccess
+- 根据大小上限和过期时间清理缓存
+
+Media Assets 可以被 Library、Reader、Admin 调用，但它不负责扫描入库，也不负责判断漫画业务状态。
+
+缩略图与缓存决策：
+
+- 不全量生成 reader 缩略图。
+- 按当前页和可视区域附近懒生成。
+- UI 先显示固定尺寸占位。
+- 缓存命中时立即显示，未命中时后台补图。
+- 缩略图缓存 key 必须包含图片路径或 sha、尺寸、用途类型。
+- 生成任务必须进入队列，避免滚动时瞬间并发爆炸。
+- 缓存清理使用大小上限和过期时间双策略。
+- 后台预留“重新生成封面/缩略图”任务入口，MVP 可以只实现重新生成封面。
+
+### 3.7 Metadata Ingest 模块
 
 这是浏览器插件提交数据时命中的后端模块。
 
@@ -148,7 +248,13 @@ Library 可以调用 Local Files 的扫描结果，但不要把所有文件维�
 
 Metadata Ingest 不直接登录 OpenList，不直接提交 115 离线下载。
 
-### 3.7 Downloads 模块
+导入决策：
+
+- 插件提交 metadata 时允许不带 magnet，只带来源 URL、标题、标签、封面。
+- 如果没有本地漫画匹配，可以创建 remote-only / missing-local 状态的 comic。
+- remote-only 默认不进入普通首页，只在后台或待下载筛选里展示。
+
+### 3.8 Downloads 模块
 
 Downloads 负责资源获取。
 
@@ -167,7 +273,14 @@ OpenList、115、内置 HTTP 下载、aria2 都应该是 Downloads 的 provider 
 
 OpenList 登录、OpenList token、115 离线任务、云端目录扫描都属于 Downloads 或它的 provider 子模块，不属于 Metadata Ingest。
 
-### 3.8 Admin 模块
+下载决策：
+
+- Downloads 只消费 `comic_resource`，不直接理解标签和漫画展示规则。
+- 下载完成后触发 Local Files / Library 重新扫描。
+- 下载目标默认是 `manga root/下载入库/标题/`，后台允许修改目标目录。
+- 下载任务失败默认手动重试，自动重试次数后续可配置。
+
+### 3.9 Admin 模块
 
 Admin 是管理界面和管理 API 的组合层。
 
@@ -182,7 +295,7 @@ Admin 是管理界面和管理 API 的组合层。
 
 Admin 页面可以调用各业务模块，但不要把业务规则写进 Admin。
 
-### 3.9 Search 模块
+### 3.10 Search 模块
 
 Search 可以晚一点做成独立模块。
 
@@ -197,7 +310,23 @@ Search 可以晚一点做成独立模块。
 - 阅读状态筛选
 - 排序
 
-### 3.10 Browser Extension App
+### 3.11 Collections 模块
+
+Collections 是后续阅读组织模块。
+
+第一阶段不做。
+
+后续职责：
+
+- 收藏分类
+- 阅读队列
+- 连续阅读当前分类
+- 自动下一本
+- 队列快照
+
+不建议第一阶段把它命名为 Favorite，因为后续它不只表达收藏，还会表达阅读队列和专题集合。
+
+### 3.12 Browser Extension App
 
 浏览器插件是独立 app。
 
@@ -207,22 +336,67 @@ Search 可以晚一点做成独立模块。
 
 ## 4. 目录结构
 
-推荐目录：
+推荐使用折中目录：保留上面的模块边界，同时吸收更具体的 Next.js 路由分组、worker、script、component 目录。
 
 ```text
 apps/
   web/
     src/
       app/
-        page.tsx
-        comics/[id]/page.tsx
-        reader/[id]/page.tsx
-        admin/page.tsx
+        (site)/
+          page.tsx
+          comics/
+            page.tsx
+            [id]/
+              page.tsx
+          reader/
+            [comicId]/
+              page.tsx
+          collections/
+            [collectionId]/
+              page.tsx
+        admin/
+          page.tsx
+          comics/
+            page.tsx
+          files/
+            page.tsx
+          tags/
+            page.tsx
+          downloads/
+            page.tsx
+          settings/
+            page.tsx
         api/
-          import/route.ts
-          downloads/route.ts
-          reader/[comicId]/route.ts
-          pages/[pageId]/route.ts
+          metadata/
+            import/
+              route.ts
+          comics/
+            route.ts
+            [id]/
+              route.ts
+          reader/
+            [comicId]/
+              route.ts
+          pages/
+            [pageId]/
+              route.ts
+          tags/
+            route.ts
+          local-files/
+            scan/
+              route.ts
+          downloads/
+            route.ts
+            [id]/
+              retry/
+                route.ts
+          providers/
+            openlist/
+              test/
+                route.ts
+        layout.tsx
+        globals.css
       modules/
         core/
           config.ts
@@ -230,12 +404,17 @@ apps/
           errors.ts
           logger.ts
           events.ts
+          settings.ts
         library/
           domain/
           application/
           infrastructure/
           ui/
         local-files/
+          domain/
+          application/
+          infrastructure/
+        media-assets/
           domain/
           application/
           infrastructure/
@@ -265,11 +444,30 @@ apps/
           application/
         search/
           application/
+        collections/
+          domain/
+          application/
+          infrastructure/
       server/
         container.ts
         repositories.ts
+        response.ts
+        auth.ts
+      workers/
+        local-scan.worker.ts
+        download.worker.ts
+        cloud-scan.worker.ts
       components/
+        ui/
+        comic/
+        reader/
+        admin/
       styles/
+      lib/
+        path.ts
+        file.ts
+        hash.ts
+        utils.ts
   extension/
     src/
       content/
@@ -287,6 +485,10 @@ packages/
       api-contracts.ts
   ui/
   mock-data/
+scripts/
+  scan-local.ts
+  seed.ts
+  test-openlist.ts
 docs/
   plan.md
 ```
@@ -301,9 +503,70 @@ ui/              该模块专用 React 组件
 api/             该模块专用请求解析和响应 DTO
 ```
 
-## 5. 模块交互示例
+目录边界说明：
 
-### 5.1 本地扫描
+- `app/(site)` 是漫画网站前台，不放管理逻辑。
+- `app/admin` 是后台入口，只做管理编排和展示。
+- `app/api` 只负责请求解析、鉴权、调用模块 service、返回响应。
+- `modules/library` 是本地漫画库模块，不再额外建立平级 `comic` 模块；`comic` 是核心实体名，不是独立业务边界。
+- `modules/metadata-ingest` 不命名为 `import`，避免和本地扫描入库混淆。
+- `modules/downloads/providers/openlist` 是 provider adapter，不建立平级 `modules/openlist`。
+- `modules/media-assets` 比单独 `thumbnail` 更宽，既覆盖封面，也覆盖 reader 缩略图。
+- `modules/collections` 先预留，不进入 MVP。
+- `workers` 只承载后台任务入口，业务逻辑仍调用对应 module service。
+- `scripts` 用于开发、维护和一次性任务，不承载线上业务规则。
+- 不使用 `prisma/`，数据库 schema 按 Drizzle 放在 core 或各模块 infrastructure 中。
+- 不把真实漫画库固定放在项目内的 `storage/manga`；manga root 必须是用户配置的绝对路径。
+- 应用生成的缓存、缩略图、临时文件可以放在配置化的 `.data` 目录或用户指定目录。
+
+## 5. 数据模型草案
+
+第一阶段先设计最小但可扩展的 schema，避免后续从单 root、单文件、单章节强行迁移。
+
+首批表：
+
+- `settings`：系统设置，例如监听地址、缓存目录、缓存上限、阅读偏好。
+- `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode`。
+- `scan_sessions`：扫描批次，保存开始时间、结束时间、root、统计结果、错误摘要。
+- `comics`：漫画业务实体，保存展示标题、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
+- `local_files`：本地文件实体，保存 root、路径、类型、size、mtime、可选 hash、是否主文件、缺失状态。
+- `chapters`：章节实体，保存 comic 归属、可选标题、排序值、来源 local_file。
+- `pages`：页面实体，保存 chapter 归属、页码、page source、宽高、读取状态。
+- `tags`：canonical 标签，保存 namespace、name、中文翻译、别名信息。
+- `comic_tags`：comic 与 tag 关系。
+- `chapter_tags`：预留章节标签关系，MVP 可以不开放 UI。
+- `reading_progress`：阅读进度，保存 comic、chapter、page、百分比、更新时间。
+- `comic_sources`：来源站元数据，保存站点、来源 ID、URL、原始标题、封面 URL。
+- `comic_resources`：可下载资源，保存资源类型、脱敏展示字段、完整资源链接密文或受控字段。
+- `download_tasks`：下载任务，第四阶段启用。
+- `media_assets`：生成的封面和缩略图记录，保存用途类型、尺寸、key、路径、lastAccess、过期时间。
+- `cache_entries`：压缩包文件列表、最近访问页面等缓存记录。
+- `operation_logs`：危险操作日志，记录软删除、路径修复、合并章节、切换主文件。
+
+关键关系：
+
+```text
+manga_root 1 ── * local_file
+comic      1 ── * local_file
+comic      1 ── * chapter
+chapter    1 ── * page
+comic      * ── * tag
+chapter    * ── * tag   (reserved)
+comic      1 ── * comic_source
+comic      1 ── * comic_resource
+comic      1 ── * reading_progress
+```
+
+数据安全要求：
+
+- `page` 对外只暴露 `pageId`，不得暴露可拼接读取的真实路径。
+- `comic_resource` 可以保存完整资源链接，但日志和常规 UI 必须脱敏。
+- `operation_logs` 不记录完整 magnet。
+- manga root 必须是绝对路径，且不得默默自动创建父目录。
+
+## 6. 模块交互示例
+
+### 6.1 本地扫描
 
 ```text
 Admin 点击扫描
@@ -319,7 +582,7 @@ Tags: attach basic tags if present
 Admin 展示扫描结果
 ```
 
-### 5.2 插件导入 metadata
+### 6.2 插件导入 metadata
 
 ```text
 Extension 采集页面
@@ -337,7 +600,7 @@ Metadata Ingest: create comic_source and comic_resource
 返回导入结果和可下载资源状态
 ```
 
-### 5.3 下载
+### 6.3 下载
 
 ```text
 用户选择资源下载
@@ -355,7 +618,7 @@ Library: scan finalized file
 Reader 可以读取页面
 ```
 
-## 6. 第一阶段 MVP
+## 7. 第一阶段 MVP
 
 第一阶段目标：
 
@@ -367,16 +630,27 @@ Reader 可以读取页面
 
 - Next.js 本地自托管 web app
 - SQLite + Drizzle
-- manga root 绝对路径设置
+- 一个或多个 manga root 绝对路径设置
 - 普通目录 / zip / cbz 扫描
+- 手动扫描和 scan_session 结果记录
 - 漫画列表
 - 漫画详情
 - 垂直阅读器
 - 阅读进度保存
+- 方向键、空格、Home、End 基础快捷键
+- 桌面缩略图侧边栏和移动端手动打开
+- 压缩包文件列表缓存和按需页面抽取
+- reader 缩略图懒生成、占位、缓存命中秒显、后台队列补图
+- 缓存目录、缓存大小上限、过期时间、LRU 清理
 - 基础标签存储和展示
 - 基础搜索和筛选
 - 后台文件维护
 - 缺失文件检测和路径修复提示
+- 软删除 / 隐藏记录
+- 手动 SQLite 备份导出
+- 危险操作简单日志
+- 后台首页展示扫描状态、缺失文件、疑似重复、最近危险操作、存储和缓存状态
+- 设置页包含 manga root、监听地址、缓存目录、缓存上限、备份导出、主题和阅读偏好
 
 第一阶段不做：
 
@@ -387,16 +661,21 @@ Reader 可以读取页面
 - 云端目录扫描
 - 下载任务中心
 - 收藏分类连续阅读队列
+- 文件监听
+- 物理删除文件
+- 多用户系统
+- 启动时自动扫描
+- 列表页批量插件采集
 - rar / cbr / 7z / pdf
 
-## 7. 第二阶段
+## 8. 第二阶段
 
 数据库和后台维护完善：
 
 - 编辑 display_title
 - 保留 file_title 不变
 - 编辑 original_title / metadata_query_title
-- 编辑作者
+- 编辑 `artist:*`、`group:*` 等作者相关标签
 - 编辑标签
 - 标签翻译表
 - 手动上传封面
@@ -405,7 +684,7 @@ Reader 可以读取页面
 - 重复候选处理
 - 软删除和恢复
 
-## 8. 第三阶段
+## 9. 第三阶段
 
 浏览器插件和 Metadata Ingest：
 
@@ -416,8 +695,10 @@ Reader 可以读取页面
 - 提交本地服务
 - 与已有本地漫画匹配
 - 重复导入策略
+- 第一版插件只提交详情页，不做列表页批量采集
+- 允许只提交 metadata，不提交可下载资源
 
-## 9. 第四阶段
+## 10. 第四阶段
 
 Downloads 和 OpenList provider：
 
@@ -430,7 +711,7 @@ Downloads 和 OpenList provider：
 - 下载完成后扫描入库
 - provider 边界预留 aria2 / builtin HTTP
 
-## 10. 第五阶段
+## 11. 第五阶段
 
 阅读体验增强：
 
@@ -441,7 +722,7 @@ Downloads 和 OpenList provider：
 - 跨章节 / 跨漫画分隔条
 - 继续阅读当前队列
 
-## 11. 安全边界
+## 12. 安全边界
 
 - 不提交真实 token、cookie、OpenList 凭据、磁链、私有来源 URL。
 - mock 数据必须使用 mock 路径和 mock 元数据。
@@ -451,7 +732,7 @@ Downloads 和 OpenList provider：
 - 插件写接口至少需要本地 token。
 - MVP 不做完整登录系统。
 
-## 12. 当前原型状态
+## 13. 当前原型状态
 
 `apps/prototype` 用于验证关键交互：
 

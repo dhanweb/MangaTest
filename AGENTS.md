@@ -13,6 +13,7 @@
 - `packages/shared` is for cross-app types, API contracts, tag helpers, and small pure utilities.
 - `packages/ui` is for shared UI components after designs stabilize.
 - `packages/mock-data` is for mock data used by prototypes.
+- `scripts` is for development, maintenance, and one-off local tasks.
 - `docs/plan.md` documents the modular architecture and phase plan.
 
 ## Architecture Rules
@@ -37,6 +38,7 @@ route / page / component
 
 - `library` owns local manga catalog behavior: scanning configured roots, creating comics/chapters/pages, listing, detail data, and local display status.
 - `local-files` owns filesystem facts: paths, missing files, file changes, cover generation, path repair, and physical file safety.
+- `media-assets` owns generated image assets: covers, list thumbnails, reader page thumbnails, cache invalidation, and regeneration.
 - `tags` owns canonical tags, translations, aliases, and tag display text.
 - `reader` owns page data, page image access, reading progress, and vertical reader behavior.
 - `metadata-ingest` owns browser-plugin submissions and source metadata normalization.
@@ -44,7 +46,37 @@ route / page / component
 - OpenList, builtin HTTP download, and aria2 are provider adapters inside `downloads`.
 - `admin` is a management UI and orchestration layer; it should not own core business rules.
 - `search` can start as simple database queries and later become its own module.
+- `collections` is reserved for favorites, reading queues, category reading, and auto-next flows after MVP.
 - `apps/extension` is an independent app and communicates with `apps/web` only through HTTP APIs.
+
+## Product Decisions
+
+- MVP supports multiple configured manga roots, but only implements the default scan mode where each child directory or archive is treated as a comic.
+- A comic may have multiple `local_file` records; reader uses the primary local file unless the user changes it in admin.
+- Merging one comic into another as a chapter must be reversible and must not move physical files.
+- Authors are tags, such as `artist:*` and `group:*`; do not introduce a separate author table unless the plan changes.
+- Public site pages show only local readable comics by default. Missing, hidden, remote-only, and unreadable records belong in admin views.
+- User-edited display titles and tags must not be overwritten by later metadata imports.
+- Reader progress is tracked by `comic + chapter + page`, with a comic-level last-read snapshot.
+- Route/page image APIs must read by `pageId`; do not accept arbitrary filesystem paths from the client.
+- Zip/cbz files are not fully extracted by default. Cache file lists first, then extract requested images on demand.
+- Reader thumbnails are generated lazily around the current page and visible window. Use fixed-size placeholders, cache hits should appear immediately, misses should enqueue background generation.
+- Thumbnail cache keys must include image path or sha, requested size, and usage type.
+- Generated-image and archive caches track `lastAccess` and are cleaned by both size limit and expiration time.
+- Background generation must use a queue to avoid unbounded concurrency while scrolling.
+
+## Directory Rules
+
+- Prefer `apps/web/src/app/(site)` for public manga website routes.
+- Prefer `apps/web/src/app/admin` for admin routes.
+- Prefer `apps/web/src/app/api` for Route Handlers that call module services.
+- Do not create a top-level `comic` module unless the plan is changed; `comic` is the central entity and `library` owns the local catalog behavior.
+- Do not name the browser-plugin ingestion module `import`; use `metadata-ingest` to avoid confusion with local file scanning.
+- Do not create a top-level `openlist` module; keep OpenList under `modules/downloads/providers/openlist`.
+- Use `modules/media-assets` instead of a narrow `thumbnail` module when generated images include both covers and reader thumbnails.
+- `workers` may host long-running task entrypoints, but business rules still belong in module services.
+- Do not introduce `prisma/`; the planned ORM is Drizzle.
+- Do not assume real manga files live under project `storage/manga`; the manga root is configured as an absolute path.
 
 ## Current Phase
 
@@ -52,6 +84,7 @@ route / page / component
 - Next real implementation target is `apps/web` MVP.
 - MVP starts with local library: manga root settings, directory/zip/cbz scanning, comic list, detail page, reader, reading progress, basic tags, search, and file maintenance.
 - Do not implement browser extension, OpenList, 115, aria2, magnet download, or cloud scanning during MVP phase unless the user explicitly changes the plan.
+- Do not implement file watching, physical file deletion, multi-user accounts, startup auto-scan, or plugin list-page batch collection during MVP.
 
 ## Tech Decisions
 
@@ -60,6 +93,7 @@ route / page / component
 - Chrome extension targets Manifest V3 first.
 - MVP supports local directories, `.zip`, and `.cbz` only.
 - Manga root is configured as an absolute path.
+- The default listen host is `127.0.0.1`; if non-localhost listening is enabled later, write APIs require a token.
 
 ## Prototype Rules
 
