@@ -1,4 +1,9 @@
 import { DEFAULT_SCAN_MODE } from "@/modules/core/config";
+import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
+
+import { MangaRootForm } from "./manga-root-form";
+
+export const dynamic = "force-dynamic";
 
 const rules = [
   "必须使用绝对路径",
@@ -8,48 +13,21 @@ const rules = [
   "启动时不自动扫描，由后台手动触发",
 ];
 
-export default function AdminPathsPage() {
+export default async function AdminPathsPage() {
+  const mangaRoots = await createMangaRootRepository().list();
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 px-6 py-8">
       <header className="grid gap-2 border-b border-border pb-5">
         <p className="text-sm font-bold text-primary">Manga Roots</p>
         <h1 className="text-2xl font-black">漫画根目录</h1>
         <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-          真实保存和扫描动作会在下一步接入 SQLite repository 和 scan session service。这里先落定路径规则和管理入口。
+          漫画根目录会保存到本地 SQLite。下一步会在这里接入 scan session 和手动扫描按钮。
         </p>
       </header>
 
       <section className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        <form className="grid gap-4 rounded-lg border border-border bg-card p-5 shadow-sm">
-          <div className="grid gap-2">
-            <label className="text-sm font-black" htmlFor="manga-root-path">
-              绝对路径
-            </label>
-            <input
-              className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              id="manga-root-path"
-              name="absolutePath"
-              placeholder="D:\\manga"
-              type="text"
-            />
-            <p className="text-xs leading-5 text-muted-foreground">暂未提交到数据库。下一步会接 Server Action 和 repository。</p>
-          </div>
-          <div className="grid gap-2">
-            <label className="text-sm font-black" htmlFor="manga-root-name">
-              显示名称
-            </label>
-            <input
-              className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              id="manga-root-name"
-              name="displayName"
-              placeholder="本地漫画库"
-              type="text"
-            />
-          </div>
-          <button className="min-h-10 rounded-md bg-primary px-4 text-sm font-black text-primary-foreground hover:bg-[var(--pink-strong)]" type="button">
-            保存根目录
-          </button>
-        </form>
+        <MangaRootForm />
 
         <aside className="grid gap-3 rounded-lg border border-border bg-card p-5 shadow-sm">
           <div>
@@ -64,6 +42,32 @@ export default function AdminPathsPage() {
             ))}
           </ul>
         </aside>
+      </section>
+
+      <section className="grid gap-3">
+        <div>
+          <h2 className="font-black">已配置根目录</h2>
+          <p className="text-sm text-muted-foreground">前台只展示本地可读漫画。缺失、隐藏、remote-only 记录会留在后台。</p>
+        </div>
+        {mangaRoots.length ? (
+          <div className="grid gap-3">
+            {mangaRoots.map((root) => (
+              <article key={root.id} className="grid gap-2 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-[1fr_auto] md:items-center">
+                <div className="grid gap-1">
+                  <h3 className="font-black">{root.displayName || root.absolutePath}</h3>
+                  <p className="break-all text-sm text-muted-foreground">{root.absolutePath}</p>
+                </div>
+                <span className="rounded-md bg-secondary px-3 py-2 text-sm font-bold text-primary">
+                  {root.isEnabled ? "启用" : "停用"}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border bg-card p-6 text-sm font-bold text-muted-foreground">
+            还没有配置 manga root。先添加一个绝对路径，再开始手动扫描。
+          </div>
+        )}
       </section>
     </main>
   );
