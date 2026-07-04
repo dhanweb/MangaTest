@@ -1,13 +1,14 @@
 "use client";
 
 import { Box } from "@mantine/core";
-import { Folder, Library, Settings, Tag, Wrench } from "lucide-react";
+import { Folder, Gauge, Library, Settings, Tag, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { SiteHeader } from "@/components/site-header";
 
 const navItems = [
+  { href: "/admin", icon: Gauge, label: "后台首页", exact: true },
   { href: "/admin/paths", icon: Folder, label: "漫画路径" },
   { href: "/admin/comics", icon: Library, label: "漫画管理" },
   { href: "/admin/files", icon: Wrench, label: "文件维护" },
@@ -37,7 +38,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           aria-label="后台导航"
         >
           {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
+            const isActive = item.exact ? pathname === item.href : pathname.startsWith(item.href);
             return (
               <Box
                 key={item.href}

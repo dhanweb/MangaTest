@@ -1,10 +1,11 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { and, eq, lt, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import sharp from "sharp";
 
+import { cleanupApplicationCache } from "@/modules/core/cache";
 import { defaultRuntimeSettings } from "@/modules/core/settings";
 import { bootstrapDatabase, chapters, localFiles, mediaAssets, pages, getDb } from "@/modules/core/db";
 import { readReaderPageImage } from "@/modules/reader/page-images";
@@ -143,41 +144,9 @@ export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise
       })
       .run();
 
-    void cleanupMediaAssetCache().catch(() => undefined);
+    void cleanupApplicationCache().catch(() => undefined);
     return { data, contentType: "image/webp", cacheStatus: "generated" };
   });
-}
-
-export async function cleanupMediaAssetCache() {
-  bootstrapDatabase();
-
-  const db = getDb();
-  const now = new Date().toISOString();
-  const expiredRows = db.select().from(mediaAssets).where(and(lt(mediaAssets.expiresAt, now))).all();
-
-  for (const row of expiredRows) {
-    await rm(/*turbopackIgnore: true*/ row.filePath, { force: true }).catch(() => undefined);
-    db.delete(mediaAssets).where(eq(mediaAssets.id, row.id)).run();
-  }
-
-  const totalRow = db.select({ total: sql<number>`coalesce(sum(${mediaAssets.sizeBytes}), 0)` }).from(mediaAssets).get();
-  let totalBytes = Number(totalRow?.total ?? 0);
-  const maxBytes = defaultRuntimeSettings.cacheSizeMb * 1024 * 1024;
-
-  if (totalBytes <= maxBytes) {
-    return;
-  }
-
-  const oldestRows = db.select().from(mediaAssets).orderBy(mediaAssets.lastAccessAt).all();
-  for (const row of oldestRows) {
-    if (totalBytes <= maxBytes) {
-      break;
-    }
-
-    totalBytes -= row.sizeBytes ?? 0;
-    await rm(/*turbopackIgnore: true*/ row.filePath, { force: true }).catch(() => undefined);
-    db.delete(mediaAssets).where(eq(mediaAssets.id, row.id)).run();
-  }
 }
 
 function enqueueThumbnailGeneration<T>(task: () => Promise<T>) {

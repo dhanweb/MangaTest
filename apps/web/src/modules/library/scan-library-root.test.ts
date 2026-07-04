@@ -91,6 +91,23 @@ describe("scanMangaRoot", () => {
     expect(cachedThumbnail?.cacheStatus).toBe("hit");
     expect(countRows(sqlite, "media_assets")).toBe(1);
 
+    const { cleanupApplicationCache, getCacheSummary } = await import("../core/cache");
+    const cacheSummary = await getCacheSummary();
+
+    expect(cacheSummary.mediaAssetCount).toBe(1);
+    expect(cacheSummary.archiveFileListCount).toBe(1);
+    expect(cacheSummary.totalSizeBytes).toBeGreaterThan(0);
+
+    sqlite
+      .prepare(
+        "insert into cache_entries (id, kind, cache_key, metadata_json, size_bytes, last_access_at, expires_at) values (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(randomUUID(), "archive_file_list", "expired:test", '{"pages":[]}', 12, "2000-01-01T00:00:00.000Z", "2000-01-01T00:00:00.000Z");
+
+    const cleanupResult = await cleanupApplicationCache();
+    expect(cleanupResult.removedCount).toBeGreaterThanOrEqual(1);
+    expect(countRows(sqlite, "cache_entries", "cache_key = 'expired:test'")).toBe(0);
+
     const { saveReadingProgress } = await import("../reader/reading-progress");
     const savedDirectoryProgress = await saveReadingProgress({
       pageId: directoryPage.id,
