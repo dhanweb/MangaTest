@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import yauzl from "yauzl";
 
 import { bootstrapDatabase, cacheEntries, getDb } from "@/modules/core/db";
-import { defaultRuntimeSettings } from "@/modules/core/settings";
+import { getRuntimeSettings } from "@/modules/core/settings";
 
 import type { LocalFileKind } from ".";
 
@@ -191,6 +191,7 @@ async function getCachedArchivePages(absolutePath: string, stat: { size: number;
 
   const pages = await enumerateArchivePages(absolutePath);
   const metadataJson = JSON.stringify({ pages });
+  const runtimeSettings = await getRuntimeSettings();
 
   db.insert(cacheEntries)
     .values({
@@ -200,7 +201,7 @@ async function getCachedArchivePages(absolutePath: string, stat: { size: number;
       metadataJson,
       sizeBytes: Buffer.byteLength(metadataJson),
       lastAccessAt: now,
-      expiresAt: addDays(now, defaultRuntimeSettings.readerThumbnailTtlDays),
+      expiresAt: addDays(now, runtimeSettings.readerThumbnailTtlDays),
       updatedAt: now,
     })
     .onConflictDoUpdate({
@@ -209,7 +210,7 @@ async function getCachedArchivePages(absolutePath: string, stat: { size: number;
         metadataJson,
         sizeBytes: Buffer.byteLength(metadataJson),
         lastAccessAt: now,
-        expiresAt: addDays(now, defaultRuntimeSettings.readerThumbnailTtlDays),
+        expiresAt: addDays(now, runtimeSettings.readerThumbnailTtlDays),
         updatedAt: now,
       },
     })

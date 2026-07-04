@@ -2,10 +2,11 @@
 
 import { Box, Group, Stack, Text } from "@mantine/core";
 import { Settings } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
-import { defaultRuntimeSettings } from "@/modules/core/settings";
+import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
+import type { RuntimeSettings } from "@/modules/core/settings/types";
 
 type SettingsTab = (typeof TABS)[number];
 
@@ -13,6 +14,45 @@ const TABS = ["常规设置", "阅读设置", "扫描设置", "安全设置"] as
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
+  const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedMessage, setSavedMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    fetch("/api/settings")
+      .then((response) => response.json())
+      .then((payload: { settings?: RuntimeSettings }) => {
+        if (isMounted && payload.settings) {
+          setRuntimeSettings(payload.settings);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function saveSettings() {
+    setIsSaving(true);
+    setSavedMessage("");
+
+    const response = await fetch("/api/settings", {
+      method: "PATCH",
+      body: JSON.stringify(runtimeSettings),
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = (await response.json()) as { settings?: RuntimeSettings };
+
+    if (payload.settings) {
+      setRuntimeSettings(payload.settings);
+      setSavedMessage("设置已保存");
+    }
+
+    setIsSaving(false);
+  }
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
@@ -59,8 +99,18 @@ export default function SettingsPage() {
       </Box>
 
       <Box>
-        {activeTab === "常规设置" && <GeneralSettings />}
-        {activeTab === "阅读设置" && <ReaderSettings />}
+        {activeTab === "常规设置" && (
+          <GeneralSettings
+            isSaving={isSaving}
+            onSave={saveSettings}
+            onSettingsChange={setRuntimeSettings}
+            savedMessage={savedMessage}
+            settings={runtimeSettings}
+          />
+        )}
+        {activeTab === "阅读设置" && (
+          <ReaderSettings isSaving={isSaving} onSave={saveSettings} onSettingsChange={setRuntimeSettings} settings={runtimeSettings} />
+        )}
         {activeTab === "扫描设置" && <ScanSettings />}
         {activeTab === "安全设置" && <SecuritySettings />}
       </Box>
@@ -109,7 +159,19 @@ function SettingsRow({ label, note, children }: { label: string; note?: string; 
   );
 }
 
-function GeneralSettings() {
+function GeneralSettings({
+  isSaving,
+  onSave,
+  onSettingsChange,
+  savedMessage,
+  settings,
+}: {
+  isSaving: boolean;
+  onSave: () => void;
+  onSettingsChange: (settings: RuntimeSettings) => void;
+  savedMessage: string;
+  settings: RuntimeSettings;
+}) {
   return (
     <>
       <SettingsGroup title="路径配置">
@@ -117,13 +179,29 @@ function GeneralSettings() {
           <AppInput value="见漫画路径页" readOnly style={{ width: 280 }} />
         </SettingsRow>
         <SettingsRow label="数据目录" note="系统元数据、封面缓存、缩略图存放位置。">
-          <AppInput value={defaultRuntimeSettings.cacheDirectory} readOnly style={{ width: 280 }} />
+          <AppInput
+            value={settings.cacheDirectory}
+            onChange={(event) => onSettingsChange({ ...settings, cacheDirectory: event.currentTarget.value })}
+            style={{ width: 280 }}
+          />
+        </SettingsRow>
+        <SettingsRow label="缓存大小上限" note="单位 MB，缓存清理会按大小上限和过期时间双策略执行。">
+          <AppInput
+            type="number"
+            value={String(settings.cacheSizeMb)}
+            onChange={(event) => onSettingsChange({ ...settings, cacheSizeMb: Number(event.currentTarget.value) })}
+            style={{ width: 140 }}
+          />
         </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="服务配置">
         <SettingsRow label="监听地址" note="本地服务绑定的 IP 地址。">
-          <AppInput value={defaultRuntimeSettings.listenHost} readOnly style={{ width: 280 }} />
+          <AppInput
+            value={settings.listenHost}
+            onChange={(event) => onSettingsChange({ ...settings, listenHost: event.currentTarget.value })}
+            style={{ width: 280 }}
+          />
         </SettingsRow>
         <SettingsRow label="端口号" note="HTTP 服务端口，修改后需重启。">
           <AppInput value="4317" readOnly style={{ width: 120 }} />
@@ -140,13 +218,30 @@ function GeneralSettings() {
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
-        <AppButton disabled>保存常规设置</AppButton>
+        {savedMessage && (
+          <Text size="sm" c="green.7">
+            {savedMessage}
+          </Text>
+        )}
+        <AppButton loading={isSaving} onClick={onSave}>
+          保存常规设置
+        </AppButton>
       </Group>
     </>
   );
 }
 
-function ReaderSettings() {
+function ReaderSettings({
+  isSaving,
+  onSave,
+  onSettingsChange,
+  settings,
+}: {
+  isSaving: boolean;
+  onSave: () => void;
+  onSettingsChange: (settings: RuntimeSettings) => void;
+  settings: RuntimeSettings;
+}) {
   return (
     <>
       <SettingsGroup title="阅读行为">
@@ -161,6 +256,14 @@ function ReaderSettings() {
         </SettingsRow>
         <SettingsRow label="预加载距离" note="距离底部多少像素时开始预加载下一章节。">
           <AppInput value="3000" readOnly style={{ width: 120 }} />
+        </SettingsRow>
+        <SettingsRow label="Reader 缩略图过期天数" note="超过该天数未访问的 reader 缩略图可被清理。">
+          <AppInput
+            type="number"
+            value={String(settings.readerThumbnailTtlDays)}
+            onChange={(event) => onSettingsChange({ ...settings, readerThumbnailTtlDays: Number(event.currentTarget.value) })}
+            style={{ width: 120 }}
+          />
         </SettingsRow>
       </SettingsGroup>
 
@@ -196,7 +299,9 @@ function ReaderSettings() {
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
-        <AppButton disabled>保存阅读设置</AppButton>
+        <AppButton loading={isSaving} onClick={onSave}>
+          保存阅读设置
+        </AppButton>
       </Group>
     </>
   );

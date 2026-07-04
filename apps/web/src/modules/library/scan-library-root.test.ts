@@ -82,6 +82,18 @@ describe("scanMangaRoot", () => {
     expect(archiveImage?.contentType).toBe("image/jpeg");
     expect(archiveImage?.data.length).toBeGreaterThan(0);
 
+    const { getRuntimeSettings, saveRuntimeSettings } = await import("../core/settings");
+    const savedSettings = await saveRuntimeSettings({
+      cacheDirectory: path.join(workspace, "cache"),
+      cacheSizeMb: 1,
+      readerThumbnailTtlDays: 7,
+    });
+    const runtimeSettings = await getRuntimeSettings();
+
+    expect(savedSettings.cacheDirectory).toBe(path.join(workspace, "cache"));
+    expect(runtimeSettings.cacheSizeMb).toBe(1);
+    expect(runtimeSettings.readerThumbnailTtlDays).toBe(7);
+
     const { getReaderThumbnail } = await import("../media-assets");
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
     const cachedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
@@ -96,6 +108,7 @@ describe("scanMangaRoot", () => {
 
     expect(cacheSummary.mediaAssetCount).toBe(1);
     expect(cacheSummary.archiveFileListCount).toBe(1);
+    expect(cacheSummary.maxSizeBytes).toBe(1024 * 1024);
     expect(cacheSummary.totalSizeBytes).toBeGreaterThan(0);
 
     sqlite

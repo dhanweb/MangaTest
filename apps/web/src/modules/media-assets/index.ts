@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import sharp from "sharp";
 
 import { cleanupApplicationCache } from "@/modules/core/cache";
-import { defaultRuntimeSettings } from "@/modules/core/settings";
+import { getRuntimeSettings } from "@/modules/core/settings";
 import { bootstrapDatabase, chapters, localFiles, mediaAssets, pages, getDb } from "@/modules/core/db";
 import { readReaderPageImage } from "@/modules/reader/page-images";
 
@@ -113,8 +113,9 @@ export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise
       .resize({ width, height, fit: "inside", withoutEnlargement: true })
       .webp({ quality: 72 })
       .toBuffer();
-    const cachePath = await writeThumbnailCacheFile(cacheKey, data);
-    const expiresAt = addDays(now, defaultRuntimeSettings.readerThumbnailTtlDays);
+    const runtimeSettings = await getRuntimeSettings();
+    const cachePath = await writeThumbnailCacheFile(cacheKey, data, runtimeSettings.cacheDirectory);
+    const expiresAt = addDays(now, runtimeSettings.readerThumbnailTtlDays);
 
     db.insert(mediaAssets)
       .values({
@@ -170,9 +171,9 @@ function enqueueThumbnailGeneration<T>(task: () => Promise<T>) {
   });
 }
 
-async function writeThumbnailCacheFile(cacheKey: string, data: Buffer) {
+async function writeThumbnailCacheFile(cacheKey: string, data: Buffer, cacheDirectorySetting: string) {
   const safeFileName = `${createHash("sha256").update(cacheKey).digest("hex")}.webp`;
-  const cacheDirectory = path.resolve(process.cwd(), defaultRuntimeSettings.cacheDirectory, "reader-thumbnails");
+  const cacheDirectory = path.resolve(process.cwd(), cacheDirectorySetting, "reader-thumbnails");
   const cachePath = path.join(cacheDirectory, safeFileName);
   await mkdir(cacheDirectory, { recursive: true });
   await writeFile(/*turbopackIgnore: true*/ cachePath, data);
