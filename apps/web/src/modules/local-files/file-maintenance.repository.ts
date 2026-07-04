@@ -1,6 +1,11 @@
+import { randomUUID } from "node:crypto";
+import fs from "node:fs/promises";
+import path from "node:path";
+
 import { eq } from "drizzle-orm";
 
-import { bootstrapDatabase, comics, getDb, localFiles } from "@/modules/core/db";
+import { bootstrapDatabase, comics, getDb, localFiles, mangaRoots, operationLogs } from "@/modules/core/db";
+import { validateAbsolutePath } from "@/modules/local-files/path-safety";
 
 export interface FileMaintenanceIssueRecord {
   id: string;
@@ -15,6 +20,7 @@ export interface FileMaintenanceIssueRecord {
 
 export interface FileMaintenanceRepository {
   listIssues(): Promise<FileMaintenanceIssueRecord[]>;
+  repairMissingPath(localFileId: string, nextAbsolutePath: string): Promise<{ localFileId: string; absolutePath: string }>;
 }
 
 export function createFileMaintenanceRepository(): FileMaintenanceRepository {
@@ -47,6 +53,103 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         detail: "文件路径不存在，可能是磁盘已断开连接或文件被移动。",
         detectedAt: row.missingSince ?? row.updatedAt,
       }));
+    },
+
+    async repairMissingPath(localFileId, nextAbsolutePath) {
+      bootstrapDatabase();
+      const validation = validateAbsolutePath(nextAbsolutePath);
+      if (!validation.isValid || !validation.normalizedPath) {
+        throw new Error(validation.reason ?? "路径无效。");
+      }
+      const normalizedPath = validation.normalizedPath;
+
+      const db = getDb();
+      const row = db
+        .select({
+          id: localFiles.id,
+          comicId: localFiles.comicId,
+          kind: localFiles.kind,
+          oldAbsolutePath: localFiles.absolutePath,
+          mangaRootId: localFiles.mangaRootId,
+          rootPath: mangaRoots.absolutePath,
+        })
+        .from(localFiles)
+        .leftJoin(mangaRoots, eq(mangaRoots.id, localFiles.mangaRootId))
+        .where(eq(localFiles.id, localFileId))
+        .get();
+
+      if (!row) {
+        throw new Error("找不到要修复的本地文件记录。");
+      }
+
+      if (!row.rootPath) {
+        throw new Error("这个文件记录没有关联 manga root，暂时不能自动修复。");
+      }
+
+      const stat = await fs.stat(normalizedPath).catch(() => null);
+      if (!stat) {
+        throw new Error("新路径不存在。");
+      }
+
+      if (row.kind === "directory" && !stat.isDirectory()) {
+        throw new Error("这个记录是目录漫画，新路径也必须是目录。");
+      }
+
+      if ((row.kind === "zip" || row.kind === "cbz") && !stat.isFile()) {
+        throw new Error("这个记录是压缩包漫画，新路径也必须是文件。");
+      }
+
+      const relativePath = path.relative(row.rootPath, normalizedPath);
+      if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+        throw new Error("新路径必须位于原 manga root 下。");
+      }
+
+      const now = new Date().toISOString();
+      db.transaction((tx) => {
+        const localFileUpdate = {
+          absolutePath: normalizedPath,
+          relativePath,
+          mtimeMs: Math.trunc(stat.mtimeMs),
+          isMissing: false,
+          missingSince: null,
+          updatedAt: now,
+          ...(stat.isFile() ? { sizeBytes: stat.size } : {}),
+        };
+
+        tx.update(localFiles)
+          .set(localFileUpdate)
+          .where(eq(localFiles.id, localFileId))
+          .run();
+
+        if (row.comicId) {
+          tx.update(comics)
+            .set({
+              status: "readable",
+              updatedAt: now,
+            })
+            .where(eq(comics.id, row.comicId))
+            .run();
+        }
+
+        tx.insert(operationLogs)
+          .values({
+            id: randomUUID(),
+            operation: "path_repair",
+            targetType: "local_file",
+            targetId: localFileId,
+            summary: "修复缺失文件路径",
+            detailJson: JSON.stringify({
+              from: row.oldAbsolutePath,
+              to: normalizedPath,
+            }),
+          })
+          .run();
+      });
+
+      return {
+        localFileId,
+        absolutePath: normalizedPath,
+      };
     },
   };
 }

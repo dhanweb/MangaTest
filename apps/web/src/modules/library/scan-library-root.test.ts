@@ -174,6 +174,18 @@ describe("scanMangaRoot", () => {
     expect(thirdScan.missingCount).toBe(1);
     expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(1);
 
+    const repairedComicPath = path.join(rootPath, "Comic A repaired");
+    await mkdir(repairedComicPath, { recursive: true });
+    await writeFile(path.join(repairedComicPath, "001.jpg"), jpegFixture);
+
+    const { createFileMaintenanceRepository } = await import("../local-files/file-maintenance.repository");
+    const missingLocalFileId = selectMissingLocalFileId(sqlite);
+    const repairResult = await createFileMaintenanceRepository().repairMissingPath(missingLocalFileId, repairedComicPath);
+
+    expect(repairResult.absolutePath).toBe(repairedComicPath);
+    expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(0);
+    expect(countRows(sqlite, "operation_logs", "operation = 'path_repair'")).toBe(1);
+
     sqlite.close();
   });
 });
@@ -206,4 +218,9 @@ function selectLastReadPageId(sqlite: Database.Database, comicId: string) {
     | undefined;
 
   return row?.pageId ?? null;
+}
+
+function selectMissingLocalFileId(sqlite: Database.Database) {
+  const row = sqlite.prepare("select id from local_files where is_missing = 1 limit 1").get() as { id: string };
+  return row.id;
 }

@@ -1,10 +1,10 @@
 "use client";
 
-import { ActionIcon, Box, Group, Table, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Box, Group, Modal, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { FileWarning, FolderSync, RefreshCcw, Search, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { AppButton } from "@/components/ui/app-components";
+import { AppButton, AppInput } from "@/components/ui/app-components";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
 const ISSUE_CONFIG: Record<FileMaintenanceIssueRecord["issueType"], { label: string; bg: string; color: string }> = {
@@ -12,23 +12,60 @@ const ISSUE_CONFIG: Record<FileMaintenanceIssueRecord["issueType"], { label: str
 };
 
 export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] }) {
+  const [items, setItems] = useState(issues);
   const [search, setSearch] = useState("");
+  const [repairTarget, setRepairTarget] = useState<FileMaintenanceIssueRecord | null>(null);
+  const [repairPath, setRepairPath] = useState("");
+  const [repairError, setRepairError] = useState("");
+  const [isRepairing, setIsRepairing] = useState(false);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {
-      return issues;
+      return items;
     }
 
-    return issues.filter(
+    return items.filter(
       (issue) =>
         issue.comicTitle.toLowerCase().includes(query) ||
         issue.filePath.toLowerCase().includes(query) ||
         ISSUE_CONFIG[issue.issueType].label.includes(query),
     );
-  }, [issues, search]);
+  }, [items, search]);
 
-  const missing = issues.filter((issue) => issue.issueType === "missing").length;
+  const missing = items.filter((issue) => issue.issueType === "missing").length;
+
+  function openRepair(issue: FileMaintenanceIssueRecord) {
+    setRepairTarget(issue);
+    setRepairPath(issue.filePath);
+    setRepairError("");
+  }
+
+  async function repairPathForTarget() {
+    if (!repairTarget) {
+      return;
+    }
+
+    setIsRepairing(true);
+    setRepairError("");
+
+    const response = await fetch(`/api/local-files/${encodeURIComponent(repairTarget.id)}/repair`, {
+      method: "POST",
+      body: JSON.stringify({ absolutePath: repairPath }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      setRepairError(payload.error ?? "修复路径失败。");
+      setIsRepairing(false);
+      return;
+    }
+
+    setItems((current) => current.filter((item) => item.id !== repairTarget.id));
+    setIsRepairing(false);
+    setRepairTarget(null);
+  }
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
@@ -156,8 +193,8 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
-                    <Tooltip label="修复路径后续实现" withArrow>
-                      <ActionIcon variant="subtle" color="pink" size="md" disabled aria-label="修复路径">
+                    <Tooltip label="修复路径" withArrow>
+                      <ActionIcon variant="subtle" color="pink" size="md" onClick={() => openRepair(issue)} aria-label="修复路径">
                         <Wrench size={15} />
                       </ActionIcon>
                     </Tooltip>
@@ -182,6 +219,37 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
           </Table.Tbody>
         </Table>
       </Box>
+
+      <Modal
+        opened={repairTarget !== null}
+        onClose={() => setRepairTarget(null)}
+        title="修复缺失文件路径"
+        size="lg"
+        styles={{
+          title: { fontWeight: 700, fontSize: "18px" },
+          header: { borderBottom: "1px solid var(--mantine-color-pink-1)" },
+        }}
+      >
+        <Stack gap="md" py="sm">
+          <Text size="sm" c="ink.5">
+            只更新数据库记录，不移动、不复制、不删除真实文件。新路径必须位于原 manga root 下。
+          </Text>
+          <AppInput label="新绝对路径" value={repairPath} onChange={(event) => setRepairPath(event.currentTarget.value)} />
+          {repairError && (
+            <Text size="sm" c="red.7">
+              {repairError}
+            </Text>
+          )}
+          <Group justify="flex-end">
+            <AppButton variant="outline" onClick={() => setRepairTarget(null)}>
+              取消
+            </AppButton>
+            <AppButton loading={isRepairing} onClick={repairPathForTarget}>
+              保存修复
+            </AppButton>
+          </Group>
+        </Stack>
+      </Modal>
     </Box>
   );
 }
