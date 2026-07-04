@@ -10,6 +10,14 @@ export function bootstrapDatabase() {
   const sqlite = getSqlite();
 
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL,
+      value_type TEXT NOT NULL DEFAULT 'string',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
     CREATE TABLE IF NOT EXISTS manga_roots (
       id TEXT PRIMARY KEY NOT NULL,
       absolute_path TEXT NOT NULL,
@@ -175,6 +183,145 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS chapter_tags_tag_idx
       ON chapter_tags (tag_id);
+
+    CREATE TABLE IF NOT EXISTS reading_progress (
+      id TEXT PRIMARY KEY NOT NULL,
+      comic_id TEXT NOT NULL REFERENCES comics(id),
+      chapter_id TEXT NOT NULL REFERENCES chapters(id),
+      page_id TEXT NOT NULL REFERENCES pages(id),
+      page_number INTEGER NOT NULL,
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS reading_progress_comic_idx
+      ON reading_progress (comic_id);
+
+    CREATE INDEX IF NOT EXISTS reading_progress_chapter_idx
+      ON reading_progress (chapter_id);
+
+    CREATE TABLE IF NOT EXISTS comic_sources (
+      id TEXT PRIMARY KEY NOT NULL,
+      comic_id TEXT NOT NULL REFERENCES comics(id),
+      site TEXT NOT NULL,
+      source_id TEXT,
+      source_url TEXT NOT NULL,
+      original_title TEXT,
+      cover_url TEXT,
+      raw_metadata_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS comic_sources_comic_idx
+      ON comic_sources (comic_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS comic_sources_site_source_idx
+      ON comic_sources (site, source_id);
+
+    CREATE TABLE IF NOT EXISTS comic_resources (
+      id TEXT PRIMARY KEY NOT NULL,
+      comic_id TEXT NOT NULL REFERENCES comics(id),
+      comic_source_id TEXT REFERENCES comic_sources(id),
+      resource_type TEXT NOT NULL,
+      display_label TEXT,
+      resource_url TEXT,
+      redacted_resource TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS comic_resources_comic_idx
+      ON comic_resources (comic_id);
+
+    CREATE INDEX IF NOT EXISTS comic_resources_source_idx
+      ON comic_resources (comic_source_id);
+
+    CREATE TABLE IF NOT EXISTS download_tasks (
+      id TEXT PRIMARY KEY NOT NULL,
+      comic_resource_id TEXT REFERENCES comic_resources(id),
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      target_directory TEXT,
+      error_message TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS download_tasks_status_idx
+      ON download_tasks (status);
+
+    CREATE INDEX IF NOT EXISTS download_tasks_resource_idx
+      ON download_tasks (comic_resource_id);
+
+    CREATE TABLE IF NOT EXISTS media_assets (
+      id TEXT PRIMARY KEY NOT NULL,
+      comic_id TEXT REFERENCES comics(id),
+      chapter_id TEXT REFERENCES chapters(id),
+      page_id TEXT REFERENCES pages(id),
+      use TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      width INTEGER NOT NULL,
+      height INTEGER NOT NULL,
+      file_path TEXT NOT NULL,
+      size_bytes INTEGER,
+      last_access_at TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS media_assets_cache_key_idx
+      ON media_assets (cache_key);
+
+    CREATE INDEX IF NOT EXISTS media_assets_comic_idx
+      ON media_assets (comic_id);
+
+    CREATE INDEX IF NOT EXISTS media_assets_page_idx
+      ON media_assets (page_id);
+
+    CREATE INDEX IF NOT EXISTS media_assets_last_access_idx
+      ON media_assets (last_access_at);
+
+    CREATE TABLE IF NOT EXISTS cache_entries (
+      id TEXT PRIMARY KEY NOT NULL,
+      kind TEXT NOT NULL,
+      cache_key TEXT NOT NULL,
+      local_file_id TEXT REFERENCES local_files(id),
+      file_path TEXT,
+      metadata_json TEXT,
+      size_bytes INTEGER,
+      last_access_at TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS cache_entries_cache_key_idx
+      ON cache_entries (cache_key);
+
+    CREATE INDEX IF NOT EXISTS cache_entries_local_file_idx
+      ON cache_entries (local_file_id);
+
+    CREATE INDEX IF NOT EXISTS cache_entries_last_access_idx
+      ON cache_entries (last_access_at);
+
+    CREATE TABLE IF NOT EXISTS operation_logs (
+      id TEXT PRIMARY KEY NOT NULL,
+      operation TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      detail_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS operation_logs_target_idx
+      ON operation_logs (target_type, target_id);
+
+    CREATE INDEX IF NOT EXISTS operation_logs_operation_idx
+      ON operation_logs (operation);
   `);
 
   bootstrapped = true;

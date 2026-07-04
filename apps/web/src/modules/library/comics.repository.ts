@@ -50,7 +50,6 @@ export interface ReaderPageRecord {
   chapterId: string;
   chapterTitle: string | null;
   pageNumber: number;
-  internalPath: string;
 }
 
 export interface ReaderComicRecord {
@@ -228,7 +227,6 @@ export function createComicRepository(): ComicRepository {
           chapterId: pages.chapterId,
           chapterTitle: chapters.title,
           pageNumber: pages.pageNumber,
-          internalPath: pages.internalPath,
         })
         .from(pages)
         .innerJoin(chapters, eq(chapters.id, pages.chapterId))

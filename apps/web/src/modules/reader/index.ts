@@ -5,3 +5,5 @@ export interface ReadingPosition {
   pageNumber: number;
   progressPercent: number;
 }
+
+export * from "./page-images";

@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Reader pages are local files served by pageId and keep native lazy loading. */
+
 import { Box } from "@mantine/core";
 import { ArrowLeft, Eye, Settings } from "lucide-react";
 import Link from "next/link";
@@ -8,16 +10,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, 
 import { AppButton } from "@/components/ui/app-components";
 import type { ReaderComicRecord } from "@/modules/library";
 
-const MAX_PAGES = 150;
+const THUMB_ROW_HEIGHT = 140;
+const THUMB_OVERSCAN = 8;
 
 export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const [activePage, setActivePage] = useState(1);
+  const [thumbVisibleRange, setThumbVisibleRange] = useState({ start: 0, end: 24 });
 
-  const pages = useMemo(
-    () => comic.pages.slice(0, MAX_PAGES).map((page, index) => ({ ...page, displayNumber: index + 1 })),
-    [comic.pages],
-  );
+  const pages = useMemo(() => comic.pages.map((page, index) => ({ ...page, displayNumber: index + 1 })), [comic.pages]);
 
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pagesContainerRef = useRef<HTMLDivElement>(null);
@@ -100,6 +101,27 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
     [animateScrollTop],
   );
 
+  const updateThumbVisibleRange = useCallback(() => {
+    const rail = thumbRailRef.current;
+    if (!rail) {
+      return;
+    }
+
+    const start = Math.max(0, Math.floor(rail.scrollTop / THUMB_ROW_HEIGHT) - THUMB_OVERSCAN);
+    const end = Math.min(
+      Math.max(pages.length - 1, 0),
+      Math.ceil((rail.scrollTop + rail.clientHeight) / THUMB_ROW_HEIGHT) + THUMB_OVERSCAN,
+    );
+
+    setThumbVisibleRange((current) => {
+      if (current.start === start && current.end === end) {
+        return current;
+      }
+
+      return { start, end };
+    });
+  }, [pages.length]);
+
   const setCurrentPage = useCallback(
     (pageNum: number) => {
       if (activePageRef.current === pageNum) {
@@ -119,7 +141,7 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
       return activePageRef.current;
     }
 
-    const pageElements = container.querySelectorAll<HTMLElement>(".mock-page");
+    const pageElements = container.querySelectorAll<HTMLElement>(".reader-page");
     const availableScroll = Math.max(0, container.scrollHeight - container.clientHeight);
     const centerOffset = Math.min(availableScroll, container.clientHeight) / 2;
     const scrollTop = container.scrollTop;
@@ -222,6 +244,20 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
     };
   }, [cancelScrollFrame, findCurrentPage, setCurrentPage]);
 
+  useEffect(() => {
+    const rail = thumbRailRef.current;
+    if (!rail) {
+      return;
+    }
+
+    rail.addEventListener("scroll", updateThumbVisibleRange, { passive: true });
+    updateThumbVisibleRange();
+
+    return () => {
+      rail.removeEventListener("scroll", updateThumbVisibleRange);
+    };
+  }, [updateThumbVisibleRange]);
+
   return (
     <Box component="main" className="reader-shell">
       <Box component="header" className={`reader-toolbar${toolbarVisible ? "" : " is-hidden"}`}>
@@ -298,25 +334,41 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
           className={`reader-thumb-rail${toolbarVisible ? "" : " is-hidden"}`}
           aria-label="页面缩略图"
         >
-          {pages.map((page) => (
-            <Box
-              component="div"
-              key={page.id}
-              role="button"
-              tabIndex={0}
-              data-page={page.displayNumber}
-              className={`reader-thumb-btn${page.displayNumber === activePage ? " is-active" : ""}`}
-              aria-current={page.displayNumber === activePage ? "page" : undefined}
-              aria-label={`跳转到第 ${page.displayNumber} 页`}
-              onClick={() => scrollToPage(page.displayNumber)}
-              onKeyDown={(event) => handleThumbKeyDown(event, page.displayNumber)}
-            >
-              <div className="reader-thumb-index">{page.displayNumber}</div>
-              <div className="reader-thumb-sheet" aria-hidden="true">
-                <div className="reader-thumb-sheet-label">PAGE {String(page.displayNumber).padStart(2, "0")}</div>
-              </div>
-            </Box>
-          ))}
+          {pages.map((page, index) => {
+            const shouldLoadThumb =
+              (index >= thumbVisibleRange.start && index <= thumbVisibleRange.end) ||
+              Math.abs(page.displayNumber - activePage) <= THUMB_OVERSCAN;
+
+            return (
+              <Box
+                component="div"
+                key={page.id}
+                role="button"
+                tabIndex={0}
+                data-page={page.displayNumber}
+                className={`reader-thumb-btn${page.displayNumber === activePage ? " is-active" : ""}`}
+                aria-current={page.displayNumber === activePage ? "page" : undefined}
+                aria-label={`跳转到第 ${page.displayNumber} 页`}
+                onClick={() => scrollToPage(page.displayNumber)}
+                onKeyDown={(event) => handleThumbKeyDown(event, page.displayNumber)}
+              >
+                <div className="reader-thumb-index">{page.displayNumber}</div>
+                <div className="reader-thumb-sheet" aria-hidden="true">
+                  {shouldLoadThumb ? (
+                    <img
+                      alt=""
+                      className="reader-thumb-image"
+                      decoding="async"
+                      loading="lazy"
+                      src={getPageImageUrl(page.id)}
+                    />
+                  ) : (
+                    <div className="reader-thumb-placeholder">PAGE {String(page.displayNumber).padStart(2, "0")}</div>
+                  )}
+                </div>
+              </Box>
+            );
+          })}
         </Box>
 
         <Box component="section" ref={pagesContainerRef} className="reader-pages" aria-label="漫画页面">
@@ -328,7 +380,7 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
             pages.map((page) => (
               <Box
                 component="article"
-                className="mock-page"
+                className="reader-page"
                 key={page.id}
                 data-page={page.displayNumber}
                 ref={(node) => {
@@ -340,11 +392,17 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
                 }}
               >
                 <span>PAGE {String(page.displayNumber).padStart(2, "0")}</span>
-                <p>{page.internalPath}</p>
+                <img
+                  alt={`${comic.displayTitle} 第 ${page.displayNumber} 页`}
+                  className="reader-page-image"
+                  decoding="async"
+                  loading={page.displayNumber <= 2 ? "eager" : "lazy"}
+                  src={getPageImageUrl(page.id)}
+                />
               </Box>
             ))
           ) : (
-            <Box className="mock-page">
+            <Box className="reader-page">
               <span>暂无页面</span>
               <p>{comic.displayTitle}</p>
             </Box>
@@ -357,4 +415,8 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
       </Box>
     </Box>
   );
+}
+
+function getPageImageUrl(pageId: string) {
+  return `/api/pages/${encodeURIComponent(pageId)}`;
 }

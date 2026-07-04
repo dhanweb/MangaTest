@@ -42,6 +42,22 @@ describe("scanMangaRoot", () => {
     expect(countRows(sqlite, "local_files")).toBe(2);
     expect(countRows(sqlite, "chapters")).toBe(2);
     expect(countRows(sqlite, "pages")).toBe(4);
+    expect(tableExists(sqlite, "settings")).toBe(true);
+    expect(tableExists(sqlite, "reading_progress")).toBe(true);
+    expect(tableExists(sqlite, "media_assets")).toBe(true);
+    expect(tableExists(sqlite, "cache_entries")).toBe(true);
+    expect(tableExists(sqlite, "operation_logs")).toBe(true);
+
+    const { readReaderPageImage } = await import("../reader/page-images");
+    const directoryPage = selectPageBySourceKind(sqlite, "filesystem");
+    const archivePage = selectPageBySourceKind(sqlite, "archive");
+    const directoryImage = await readReaderPageImage(directoryPage.id);
+    const archiveImage = await readReaderPageImage(archivePage.id);
+
+    expect(directoryImage?.contentType).toBe("image/jpeg");
+    expect(directoryImage?.data.toString()).toBe("fake image 1");
+    expect(archiveImage?.contentType).toBe("image/jpeg");
+    expect(archiveImage?.data.length).toBeGreaterThan(0);
 
     const secondScan = await scanMangaRoot(root.id);
 
@@ -66,4 +82,18 @@ function countRows(sqlite: Database.Database, tableName: string, whereClause = "
   };
 
   return row.count;
+}
+
+function tableExists(sqlite: Database.Database, tableName: string) {
+  const row = sqlite
+    .prepare("select name from sqlite_master where type = 'table' and name = ?")
+    .get(tableName) as { name: string } | undefined;
+
+  return row?.name === tableName;
+}
+
+function selectPageBySourceKind(sqlite: Database.Database, sourceKind: "filesystem" | "archive") {
+  return sqlite
+    .prepare("select id from pages where source_kind = ? order by page_number limit 1")
+    .get(sourceKind) as { id: string };
 }
