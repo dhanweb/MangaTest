@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, chapters, comics, getDb, localFiles, pages } from "@/modules/core/db";
 
@@ -12,6 +12,22 @@ export interface LibraryComicCardRecord {
   pageCount: number;
   chapterCount: number;
   addedAt: string;
+}
+
+export type LibraryComicSortMode = "recent" | "title" | "pages";
+
+export interface LibraryComicSearchInput {
+  query?: string;
+  sort?: LibraryComicSortMode;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface LibraryComicSearchResult {
+  items: LibraryComicCardRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
 }
 
 export interface LibraryComicAdminRowRecord extends LibraryComicCardRecord {
@@ -62,6 +78,7 @@ export interface ReaderComicRecord {
 
 export interface ComicRepository {
   listReadableCards(limit?: number): Promise<LibraryComicCardRecord[]>;
+  searchReadableCards(input?: LibraryComicSearchInput): Promise<LibraryComicSearchResult>;
   listAdminRows(limit?: number): Promise<LibraryComicAdminRowRecord[]>;
   getDetail(id: string): Promise<LibraryComicDetailRecord | null>;
   getReaderData(id: string): Promise<ReaderComicRecord | null>;
@@ -70,8 +87,30 @@ export interface ComicRepository {
 export function createComicRepository(): ComicRepository {
   return {
     async listReadableCards(limit = 48) {
+      const result = await this.searchReadableCards({ pageSize: limit });
+      return result.items;
+    },
+
+    async searchReadableCards(input = {}) {
       bootstrapDatabase();
       const db = getDb();
+      const page = Math.max(1, Math.trunc(input.page ?? 1));
+      const pageSize = Math.max(12, Math.min(96, Math.trunc(input.pageSize ?? 48)));
+      const query = input.query?.trim();
+      const whereClause = query
+        ? and(
+            eq(comics.status, "readable"),
+            or(like(comics.displayTitle, `%${query}%`), like(comics.fileTitle, `%${query}%`), like(comics.originalTitle, `%${query}%`)),
+          )
+        : eq(comics.status, "readable");
+      const pageCountSql = sql<number>`count(distinct ${pages.id})`;
+      const sort = input.sort ?? "recent";
+      const orderBy =
+        sort === "title"
+          ? [asc(comics.sortTitle), desc(comics.createdAt)]
+          : sort === "pages"
+            ? [desc(pageCountSql), desc(comics.createdAt)]
+            : [desc(comics.createdAt)];
 
       const rows = db
         .select({
@@ -81,7 +120,7 @@ export function createComicRepository(): ComicRepository {
           status: comics.status,
           primaryLocalFileId: comics.primaryLocalFileId,
           localFileKind: localFiles.kind,
-          pageCount: sql<number>`count(distinct ${pages.id})`,
+          pageCount: pageCountSql,
           chapterCount: sql<number>`count(distinct ${chapters.id})`,
           addedAt: comics.createdAt,
         })
@@ -89,17 +128,29 @@ export function createComicRepository(): ComicRepository {
         .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
         .leftJoin(chapters, eq(chapters.comicId, comics.id))
         .leftJoin(pages, eq(pages.chapterId, chapters.id))
-        .where(eq(comics.status, "readable"))
+        .where(whereClause)
         .groupBy(comics.id)
-        .orderBy(desc(comics.createdAt))
-        .limit(limit)
+        .orderBy(...orderBy)
+        .limit(pageSize)
+        .offset((page - 1) * pageSize)
         .all();
+      const totalRow = db
+        .select({ count: sql<number>`count(distinct ${comics.id})` })
+        .from(comics)
+        .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+        .where(whereClause)
+        .get();
 
-      return rows.map((row) => ({
-        ...row,
-        pageCount: Number(row.pageCount),
-        chapterCount: Number(row.chapterCount),
-      }));
+      return {
+        items: rows.map((row) => ({
+          ...row,
+          pageCount: Number(row.pageCount),
+          chapterCount: Number(row.chapterCount),
+        })),
+        page,
+        pageSize,
+        total: Number(totalRow?.count ?? 0),
+      };
     },
 
     async listAdminRows(limit = 200) {

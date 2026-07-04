@@ -7,11 +7,10 @@ import { useMemo, useState } from "react";
 import { ComicCard } from "@/components/comic-card";
 import { SiteHeader } from "@/components/site-header";
 import { AppButton, AppLink, AppSelect } from "@/components/ui/app-components";
-import type { LibraryComicCardRecord } from "@/modules/library";
+import type { LibraryComicCardRecord, LibraryComicSearchResult, LibraryComicSortMode } from "@/modules/library";
+import { useRouter } from "next/navigation";
 
-type SortMode = "recent" | "title" | "pages";
-
-const sortOptions: Array<{ label: string; value: SortMode }> = [
+const sortOptions: Array<{ label: string; value: LibraryComicSortMode }> = [
   { label: "最近添加", value: "recent" },
   { label: "标题", value: "title" },
   { label: "页数", value: "pages" },
@@ -32,10 +31,21 @@ const fallbackFilterGroups = [
   },
 ];
 
-export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
-  const [query, setQuery] = useState("");
-  const [sortMode, setSortMode] = useState<SortMode>("recent");
+export function LibraryHome({
+  initialQuery,
+  initialSort,
+  result,
+}: {
+  initialQuery: string;
+  initialSort: LibraryComicSortMode;
+  result: LibraryComicSearchResult;
+}) {
+  const router = useRouter();
+  const [query, setQuery] = useState(initialQuery);
+  const [sortMode, setSortMode] = useState<LibraryComicSortMode>(initialSort);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const comics = result.items;
+  const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
 
   const filterGroups = useMemo(() => {
     const availableFormats = Array.from(
@@ -59,24 +69,33 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
   }, [comics]);
 
   const filteredComics = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
     const next = comics.filter((comic) => {
-      const searchable = [comic.displayTitle, comic.fileTitle, comic.localFileKind ?? "", comic.status].join(" ").toLowerCase();
-      return (!normalizedQuery || searchable.includes(normalizedQuery)) && selectedTags.every((tag) => matchesFilterTag(comic, tag));
+      return selectedTags.every((tag) => matchesFilterTag(comic, tag));
     });
 
-    return [...next].sort((a, b) => {
-      if (sortMode === "title") {
-        return a.displayTitle.localeCompare(b.displayTitle, "zh-Hans-CN");
-      }
+    return next;
+  }, [comics, selectedTags]);
 
-      if (sortMode === "pages") {
-        return b.pageCount - a.pageCount;
-      }
+  function applySearch(next: { page?: number; query?: string; sort?: LibraryComicSortMode }) {
+    const params = new URLSearchParams();
+    const nextQuery = next.query ?? query;
+    const nextSort = next.sort ?? sortMode;
+    const nextPage = next.page ?? result.page;
 
-      return new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime();
-    });
-  }, [comics, query, selectedTags, sortMode]);
+    if (nextQuery.trim()) {
+      params.set("q", nextQuery.trim());
+    }
+
+    if (nextSort !== "recent") {
+      params.set("sort", nextSort);
+    }
+
+    if (nextPage > 1) {
+      params.set("page", String(nextPage));
+    }
+
+    router.push(params.size ? `/?${params.toString()}` : "/");
+  }
 
   return (
     <>
@@ -91,7 +110,16 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
           </Text>
         </Box>
 
-        <Box mb={24} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 12 }} className="search-row">
+        <Box
+          component="form"
+          mb={24}
+          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 12 }}
+          className="search-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            applySearch({ page: 1, query });
+          }}
+        >
           <Box
             component="label"
             style={{
@@ -127,7 +155,11 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
 
           <AppSelect
             value={sortMode}
-            onChange={(value) => setSortMode((value ?? "recent") as SortMode)}
+            onChange={(value) => {
+              const nextSort = (value ?? "recent") as LibraryComicSortMode;
+              setSortMode(nextSort);
+              applySearch({ page: 1, sort: nextSort });
+            }}
             data={sortOptions}
             aria-label="排序方式"
           />
@@ -179,7 +211,8 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
 
         <Flex justify="space-between" mb={24} className="result-summary">
           <Text size="sm" c="ink.5">
-            共 {filteredComics.length} 本
+            共 {result.total} 本
+            {filteredComics.length !== comics.length ? `，当前页筛选后 ${filteredComics.length} 本` : ""}
           </Text>
           {selectedTags.length > 0 && (
             <AppButton variant="transparent" size="xs" onClick={() => setSelectedTags([])} leftSection={<X size={14} />}>
@@ -189,11 +222,15 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
         </Flex>
 
         {filteredComics.length > 0 ? (
-          <Box component="section" aria-label="漫画列表" className="comic-grid">
-            {filteredComics.map((comic, index) => (
-              <ComicCard comic={comic} index={index} key={comic.id} />
-            ))}
-          </Box>
+          <>
+            <PaginationBar currentPage={result.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
+            <Box component="section" aria-label="漫画列表" className="comic-grid">
+              {filteredComics.map((comic, index) => (
+                <ComicCard comic={comic} index={index} key={comic.id} />
+              ))}
+            </Box>
+            <PaginationBar currentPage={result.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
+          </>
         ) : (
           <Box
             component="section"
@@ -214,6 +251,34 @@ export function LibraryHome({ comics }: { comics: LibraryComicCardRecord[] }) {
         )}
       </Container>
     </>
+  );
+}
+
+function PaginationBar({
+  currentPage,
+  onPageChange,
+  totalPages,
+}: {
+  currentPage: number;
+  onPageChange: (page: number) => void;
+  totalPages: number;
+}) {
+  if (totalPages <= 1) {
+    return null;
+  }
+
+  return (
+    <Group justify="center" my={20}>
+      <AppButton variant="outline" disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>
+        上一页
+      </AppButton>
+      <Text size="sm" c="ink.5">
+        {currentPage} / {totalPages}
+      </Text>
+      <AppButton variant="outline" disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>
+        下一页
+      </AppButton>
+    </Group>
   );
 }
 
