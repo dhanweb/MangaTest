@@ -1,6 +1,10 @@
 "use client";
 
+import { Group, Stack, Text } from "@mantine/core";
+import { Plus } from "lucide-react";
 import { useActionState } from "react";
+
+import { AppButton, AppInput } from "@/components/ui/app-components";
 
 import { saveMangaRootAction, type SaveMangaRootState } from "./actions";
 
@@ -13,44 +17,26 @@ export function MangaRootForm() {
   const [state, formAction, isPending] = useActionState(saveMangaRootAction, initialState);
 
   return (
-    <form action={formAction} className="grid gap-4 rounded-lg border border-border bg-card p-5 shadow-sm">
-      <div className="grid gap-2">
-        <label className="text-sm font-black" htmlFor="manga-root-path">
-          绝对路径
-        </label>
-        <input
-          className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          id="manga-root-path"
+    <form action={formAction}>
+      <Stack gap="md" py="sm">
+        <AppInput
+          label="文件夹路径"
           name="absolutePath"
-          placeholder="D:\\manga"
-          type="text"
+          placeholder="D:\\Comics\\Manga 或 \\\\NAS\\shared\\comics"
+          description="必须使用绝对路径。系统不会自动创建父目录。"
         />
-        <p className="text-xs leading-5 text-muted-foreground">必须使用绝对路径。系统不会自动创建父目录。</p>
-      </div>
-      <div className="grid gap-2">
-        <label className="text-sm font-black" htmlFor="manga-root-name">
-          显示名称
-        </label>
-        <input
-          className="min-h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          id="manga-root-name"
-          name="displayName"
-          placeholder="本地漫画库"
-          type="text"
-        />
-      </div>
-      <button
-        className="min-h-10 rounded-md bg-primary px-4 text-sm font-black text-primary-foreground hover:bg-[var(--pink-strong)] disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isPending}
-        type="submit"
-      >
-        {isPending ? "保存中..." : "保存根目录"}
-      </button>
-      {state.message ? (
-        <p className={state.status === "error" ? "text-sm font-bold text-destructive" : "text-sm font-bold text-primary"}>
-          {state.message}
-        </p>
-      ) : null}
+        <AppInput label="描述（可选）" name="displayName" placeholder="例如：主漫画库、下载待整理" />
+        <Group justify="flex-end" mt="sm">
+          <AppButton type="submit" disabled={isPending} leftSection={<Plus size={16} />}>
+            {isPending ? "保存中..." : "添加"}
+          </AppButton>
+        </Group>
+        {state.message ? (
+          <Text size="sm" fw={700} c={state.status === "error" ? "red" : "pink.5"}>
+            {state.message}
+          </Text>
+        ) : null}
+      </Stack>
     </form>
   );
 }

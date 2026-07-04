@@ -88,7 +88,9 @@ route / page / component
 
 ## Tech Decisions
 
-- The interactive prototype and final web app use Next.js App Router, TypeScript, Tailwind CSS, shadcn/ui, and lucide-react for UI work.
+- The interactive prototype and final web app use Next.js App Router, TypeScript, Tailwind CSS, Mantine, shadcn/ui, and lucide-react for UI work.
+- `apps/prototype` is the dependency reference for prototype-validated UI patterns. When `apps/web` implements a matching page or workflow, install and use the same prototype UI dependencies when practical; current prototype UI dependencies include `@mantine/core` and `@mantine/hooks`.
+- Mantine is the primary component library for pages and workflows that are copied from or visually matched to `apps/prototype`. shadcn/ui may remain for existing components or low-level primitives, but it must not be used to approximate a prototype page when the prototype already uses Mantine for that control or workflow.
 - The final web app also uses SQLite, Drizzle ORM, Vitest, Playwright, Sharp, and a zip/cbz reader such as `yauzl` or `unzipper`.
 - The final app is local self-hosted software, not a serverless/Vercel-first deployment.
 - Chrome extension targets Manifest V3 first.
@@ -102,6 +104,8 @@ route / page / component
 - `apps/prototype` may use mock data and fake state.
 - Keep prototype-only fake data out of `apps/web`.
 - Prototype pages should validate layout, density, navigation shape, reader feel, admin workflow, and responsive behavior.
+- When implementing matching pages and workflows in `apps/web`, use `apps/prototype` as the primary reference for visual density, navigation structure, page layout, and interaction feel.
+- When a prototype page uses Mantine wrappers such as `AppButton`, `AppInput`, `AppSelect`, `AppSwitch`, `AppModal`, or `AppTabs`, the matching `apps/web` page should use the same Mantine-based component approach unless there is a documented reason not to.
 - Do not build real database, file scanning, OpenList, aria2, or browser extension logic in prototype code.
 
 ## Design Rules
@@ -115,8 +119,9 @@ route / page / component
 - Use realistic mock data in prototypes so layout pressure is visible early.
 - Use icons for compact actions where appropriate; avoid emoji as UI icons.
 - Keep card radius modest and avoid nested cards.
-- Use shadcn/ui components first for reusable or stateful UI such as dialogs, alert dialogs, sheets, dropdown menus, select menus, tabs, popovers, tooltips, switches, inputs, tables, badges, and cards.
-- Avoid over-wrapping shadcn components. Prefer direct composition and thin domain components only when they remove repeated manga-specific structure.
+- Use Mantine first for reusable or stateful UI that already exists in the prototype, including buttons, inputs, selects, switches, modals, tabs, tables, and admin controls.
+- Use shadcn/ui components only when they are already in place, when the prototype has no Mantine equivalent, or when a low-level primitive is a better fit. Do not let shadcn styling drift away from a Mantine-based prototype page.
+- Avoid over-wrapping component libraries. Prefer the shared prototype-style `App*` wrappers only when they preserve visual parity or remove repeated manga-specific structure.
 - Use Tailwind semantic tokens and CSS variables for colors and surfaces instead of page-local hardcoded color values.
 
 ## Product Boundaries

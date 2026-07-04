@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
-import { createScanSessionRepository } from "@/modules/library/scan-sessions.repository";
+import { scanMangaRoot } from "@/modules/library/scan-library-root";
 
 export interface SaveMangaRootState {
   status: "idle" | "success" | "error";
@@ -33,13 +33,18 @@ export async function saveMangaRootAction(_state: SaveMangaRootState, formData: 
   }
 }
 
-export async function createScanSessionAction(formData: FormData) {
+export async function scanMangaRootAction(formData: FormData) {
   const mangaRootId = String(formData.get("mangaRootId") ?? "");
 
   if (!mangaRootId) {
     return;
   }
 
-  await createScanSessionRepository().createQueued(mangaRootId);
+  try {
+    await scanMangaRoot(mangaRootId);
+  } catch {
+    // The scan service records failed sessions for the admin page to show.
+  }
+
   revalidatePath("/admin/paths");
 }

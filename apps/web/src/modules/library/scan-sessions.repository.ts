@@ -21,10 +21,13 @@ export function createScanSessionRepository(): ScanSessionRepository {
         id: row.id,
         mangaRootId: row.mangaRootId ?? "",
         status: row.status,
+        startedAt: row.startedAt,
+        finishedAt: row.finishedAt,
         addedCount: row.addedCount,
         missingCount: row.missingCount,
         duplicateCandidateCount: row.duplicateCandidateCount,
         recoverableCount: row.recoverableCount,
+        errorSummary: row.errorSummary,
       }));
     },
 

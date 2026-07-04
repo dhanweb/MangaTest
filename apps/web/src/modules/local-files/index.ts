@@ -7,4 +7,6 @@ export interface PageSource {
   archiveIndex: number | null;
 }
 
+export * from "./file-enumerator";
+export * from "./file-maintenance.repository";
 export * from "./path-safety";

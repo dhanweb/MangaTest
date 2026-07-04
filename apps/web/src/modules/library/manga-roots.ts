@@ -16,6 +16,11 @@ export interface MangaRootRecord {
   isEnabled: boolean;
 }
 
+export interface MangaRootWithStats extends MangaRootRecord {
+  comicCount: number;
+  lastScanSessionId: string | null;
+}
+
 export function createMangaRootRecord(input: MangaRootDraft): MangaRootRecord {
   const validation = validateAbsolutePath(input.absolutePath);
 

@@ -9,7 +9,9 @@ export interface LibraryComicSummary {
   lastReadPageId: string | null;
 }
 
+export * from "./comics.repository";
 export * from "./manga-roots";
 export * from "./manga-roots.repository";
+export * from "./scan-library-root";
 export * from "./scan-sessions";
 export * from "./scan-sessions.repository";

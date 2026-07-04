@@ -741,4 +741,10 @@ Downloads 和 OpenList provider：
 - reader 垂直阅读、缩略图导航、图钉返回顶部
 - admin 文件维护、漫画管理、标签管理、设置
 
+从现在开始，`apps/web` 实现对应页面和工作流时，必须优先参照 `apps/prototype` 已验证的视觉密度、导航结构、页面布局和交互手感。
+
+`apps/prototype` 同时是已验证 UI 依赖栈的参考。当前原型使用 Next.js App Router、TypeScript、Tailwind CSS、Mantine、shadcn/ui 和 lucide-react；其中 Mantine (`@mantine/core`, `@mantine/hooks`) 是原型页面中按钮、输入、选择器、开关、弹窗、tabs 等控件的主要实现来源。
+
+`apps/web` 实现与原型对应的页面或工作流时，应安装并使用这些原型 UI 依赖，优先复用 Mantine 和原型中的 `AppButton`、`AppInput`、`AppSelect`、`AppSwitch`、`AppModal`、`AppTabs` 等组件方式。shadcn/ui 可以保留为已有组件或低层 primitives，但不能在已有 Mantine 原型的页面上用另一套视觉系统近似替代，除非计划先记录原因。
+
 原型只保留 mock 数据和 mock 状态，不得迁移到 `apps/web` 作为真实业务实现。

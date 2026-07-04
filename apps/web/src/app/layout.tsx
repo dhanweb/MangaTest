@@ -1,21 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 
+import "@mantine/core/styles.css";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+import { PinnedActions } from "@/components/pinned-actions";
+import { Providers } from "@/lib/theme";
 
 export const metadata: Metadata = {
   title: "MangaTest",
   description: "Local self-hosted manga library",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -25,8 +20,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
-        {children}
+      <body>
+        <Providers>
+          {children}
+          <PinnedActions />
+        </Providers>
       </body>
     </html>
   );
