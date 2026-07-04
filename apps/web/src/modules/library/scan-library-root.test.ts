@@ -50,6 +50,7 @@ describe("scanMangaRoot", () => {
 
     const { readReaderPageImage } = await import("../reader/page-images");
     const directoryPage = selectPageBySourceKind(sqlite, "filesystem");
+    const secondDirectoryPage = selectPageBySourceKind(sqlite, "filesystem", 1);
     const archivePage = selectPageBySourceKind(sqlite, "archive");
     const directoryImage = await readReaderPageImage(directoryPage.id);
     const archiveImage = await readReaderPageImage(archivePage.id);
@@ -58,6 +59,27 @@ describe("scanMangaRoot", () => {
     expect(directoryImage?.data.toString()).toBe("fake image 1");
     expect(archiveImage?.contentType).toBe("image/jpeg");
     expect(archiveImage?.data.length).toBeGreaterThan(0);
+
+    const { saveReadingProgress } = await import("../reader/reading-progress");
+    const savedDirectoryProgress = await saveReadingProgress({
+      pageId: directoryPage.id,
+      progressPercent: 25,
+    });
+    const updatedDirectoryProgress = await saveReadingProgress({
+      pageId: secondDirectoryPage.id,
+      progressPercent: 50,
+    });
+    const savedArchiveProgress = await saveReadingProgress({
+      pageId: archivePage.id,
+      progressPercent: 150,
+    });
+
+    expect(savedDirectoryProgress?.progressPercent).toBe(25);
+    expect(updatedDirectoryProgress?.progressPercent).toBe(50);
+    expect(savedArchiveProgress?.progressPercent).toBe(100);
+    expect(countRows(sqlite, "reading_progress")).toBe(2);
+    expect(selectLastReadPageId(sqlite, updatedDirectoryProgress?.comicId ?? "")).toBe(secondDirectoryPage.id);
+    expect(selectLastReadPageId(sqlite, savedArchiveProgress?.comicId ?? "")).toBe(archivePage.id);
 
     const secondScan = await scanMangaRoot(root.id);
 
@@ -92,8 +114,16 @@ function tableExists(sqlite: Database.Database, tableName: string) {
   return row?.name === tableName;
 }
 
-function selectPageBySourceKind(sqlite: Database.Database, sourceKind: "filesystem" | "archive") {
+function selectPageBySourceKind(sqlite: Database.Database, sourceKind: "filesystem" | "archive", offset = 0) {
   return sqlite
-    .prepare("select id from pages where source_kind = ? order by page_number limit 1")
-    .get(sourceKind) as { id: string };
+    .prepare("select id from pages where source_kind = ? order by page_number limit 1 offset ?")
+    .get(sourceKind, offset) as { id: string };
+}
+
+function selectLastReadPageId(sqlite: Database.Database, comicId: string) {
+  const row = sqlite.prepare("select last_read_page_id as pageId from comics where id = ?").get(comicId) as
+    | { pageId: string | null }
+    | undefined;
+
+  return row?.pageId ?? null;
 }

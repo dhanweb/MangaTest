@@ -7,3 +7,4 @@ export interface ReadingPosition {
 }
 
 export * from "./page-images";
+export * from "./reading-progress";

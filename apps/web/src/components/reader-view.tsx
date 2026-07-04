@@ -14,11 +14,15 @@ const THUMB_ROW_HEIGHT = 140;
 const THUMB_OVERSCAN = 8;
 
 export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
-  const [toolbarVisible, setToolbarVisible] = useState(true);
-  const [activePage, setActivePage] = useState(1);
-  const [thumbVisibleRange, setThumbVisibleRange] = useState({ start: 0, end: 24 });
-
   const pages = useMemo(() => comic.pages.map((page, index) => ({ ...page, displayNumber: index + 1 })), [comic.pages]);
+  const initialActivePage = useMemo(() => {
+    const lastReadIndex = pages.findIndex((page) => page.id === comic.lastReadPageId);
+    return lastReadIndex >= 0 ? lastReadIndex + 1 : 1;
+  }, [comic.lastReadPageId, pages]);
+
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const [activePage, setActivePage] = useState(initialActivePage);
+  const [thumbVisibleRange, setThumbVisibleRange] = useState({ start: 0, end: 24 });
 
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pagesContainerRef = useRef<HTMLDivElement>(null);
@@ -28,6 +32,7 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
   const releaseProgrammaticScrollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentAnimationRef = useRef<number | null>(null);
   const thumbAnimationRef = useRef<number | null>(null);
+  const restoredInitialPageRef = useRef(false);
 
   useEffect(() => {
     activePageRef.current = activePage;
@@ -217,6 +222,33 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
     [scrollToPage],
   );
 
+  const saveProgress = useCallback(
+    (pageNum: number, transport: "fetch" | "beacon" = "fetch") => {
+      const page = pages[pageNum - 1];
+      if (!page) {
+        return;
+      }
+
+      const payload = JSON.stringify({
+        pageId: page.id,
+        progressPercent: Math.round((pageNum / Math.max(pages.length, 1)) * 100),
+      });
+
+      if (transport === "beacon" && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/reader/progress", new Blob([payload], { type: "application/json" }));
+        return;
+      }
+
+      void fetch("/api/reader/progress", {
+        method: "POST",
+        body: payload,
+        headers: { "Content-Type": "application/json" },
+        keepalive: transport === "beacon",
+      });
+    },
+    [pages],
+  );
+
   useEffect(() => {
     const container = pagesContainerRef.current;
     if (!container) {
@@ -245,6 +277,22 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
   }, [cancelScrollFrame, findCurrentPage, setCurrentPage]);
 
   useEffect(() => {
+    if (restoredInitialPageRef.current || initialActivePage <= 1) {
+      restoredInitialPageRef.current = true;
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      restoredInitialPageRef.current = true;
+      scrollToPage(initialActivePage);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [initialActivePage, scrollToPage]);
+
+  useEffect(() => {
     const rail = thumbRailRef.current;
     if (!rail) {
       return;
@@ -257,6 +305,24 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
       rail.removeEventListener("scroll", updateThumbVisibleRange);
     };
   }, [updateThumbVisibleRange]);
+
+  useEffect(() => {
+    const timeoutId = setTimeout(() => saveProgress(activePage), 900);
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [activePage, saveProgress]);
+
+  useEffect(() => {
+    function onPageHide() {
+      saveProgress(activePageRef.current, "beacon");
+    }
+
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [saveProgress]);
 
   return (
     <Box component="main" className="reader-shell">
