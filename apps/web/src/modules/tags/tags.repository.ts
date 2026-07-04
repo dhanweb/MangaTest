@@ -1,11 +1,21 @@
-import { asc, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+import { asc, eq, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, comicTags, getDb, tags } from "@/modules/core/db";
 
-import type { CanonicalTag } from ".";
+import { createCanonicalTag, type CanonicalTag } from ".";
+
+export interface SaveTagInput {
+  namespace: string;
+  name: string;
+  displayNameZh?: string | null;
+}
 
 export interface TagRepository {
   listWithCounts(): Promise<Array<CanonicalTag & { comicCount: number }>>;
+  create(input: SaveTagInput): Promise<CanonicalTag>;
+  update(id: string, input: SaveTagInput): Promise<CanonicalTag | null>;
 }
 
 export function createTagRepository(): TagRepository {
@@ -34,5 +44,66 @@ export function createTagRepository(): TagRepository {
         comicCount: Number(row.comicCount),
       }));
     },
+
+    async create(input) {
+      bootstrapDatabase();
+      const db = getDb();
+      const tag = normalizeTagInput(input);
+      const id = randomUUID();
+
+      db.insert(tags)
+        .values({
+          id,
+          ...tag,
+        })
+        .run();
+
+      return { id, ...tag };
+    },
+
+    async update(id, input) {
+      bootstrapDatabase();
+      const db = getDb();
+      const tag = normalizeTagInput(input);
+      const now = new Date().toISOString();
+
+      db.update(tags)
+        .set({
+          ...tag,
+          updatedAt: now,
+        })
+        .where(eq(tags.id, id))
+        .run();
+
+      const row = db
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          name: tags.name,
+          canonical: tags.canonical,
+          displayNameZh: tags.displayNameZh,
+        })
+        .from(tags)
+        .where(eq(tags.id, id))
+        .get();
+
+      return row ?? null;
+    },
+  };
+}
+
+function normalizeTagInput(input: SaveTagInput) {
+  const namespace = input.namespace.trim().toLowerCase();
+  const name = input.name.trim().toLowerCase();
+
+  if (!namespace || !name) {
+    throw new Error("标签分类和名称不能为空。");
+  }
+
+  return {
+    namespace,
+    name,
+    canonical: createCanonicalTag(namespace, name),
+    displayNameZh: input.displayNameZh?.trim() || null,
   };
 }

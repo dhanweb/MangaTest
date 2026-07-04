@@ -7,23 +7,43 @@ import { useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import type { CanonicalTag } from "@/modules/tags";
-import { namespaceLabel, namespaceOptionLabel, tagDisplayLabel } from "@/modules/tags";
+import { NAMESPACE_LABELS, namespaceLabel, namespaceOptionLabel, tagDisplayLabel } from "@/modules/tags";
 
-export function TagsPanel({ tags }: { tags: Array<CanonicalTag & { comicCount: number }> }) {
+type TagRow = CanonicalTag & { comicCount: number };
+
+interface TagFormState {
+  id: string | null;
+  namespace: string;
+  name: string;
+  displayNameZh: string;
+}
+
+const DEFAULT_TAG_FORM: TagFormState = {
+  id: null,
+  namespace: "other",
+  name: "",
+  displayNameZh: "",
+};
+
+export function TagsPanel({ tags }: { tags: TagRow[] }) {
+  const [items, setItems] = useState(tags);
   const [search, setSearch] = useState("");
   const [namespaceFilter, setNamespaceFilter] = useState<string | null>(null);
   const [opened, { open, close }] = useDisclosure(false);
-  const [editTarget, setEditTarget] = useState<(CanonicalTag & { comicCount: number }) | null>(null);
+  const [editTarget, setEditTarget] = useState<TagRow | null>(null);
+  const [form, setForm] = useState<TagFormState>(DEFAULT_TAG_FORM);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const namespaceOptions = useMemo(() => {
-    const seen = new Set(tags.map((tag) => tag.namespace));
+    const seen = new Set([...Object.keys(NAMESPACE_LABELS), ...items.map((tag) => tag.namespace)]);
     return Array.from(seen)
       .sort((a, b) => namespaceLabel(a).localeCompare(namespaceLabel(b), "zh-Hans-CN"))
       .map((namespace) => ({ value: namespace, label: namespaceOptionLabel(namespace) }));
-  }, [tags]);
+  }, [items]);
 
   const filtered = useMemo(() => {
-    let list = tags;
+    let list = items;
     if (namespaceFilter) {
       list = list.filter((tag) => tag.namespace === namespaceFilter);
     }
@@ -40,17 +60,59 @@ export function TagsPanel({ tags }: { tags: Array<CanonicalTag & { comicCount: n
     }
 
     return list;
-  }, [namespaceFilter, search, tags]);
+  }, [namespaceFilter, search, items]);
 
   const openAdd = () => {
     setEditTarget(null);
+    setForm(DEFAULT_TAG_FORM);
+    setError("");
     open();
   };
 
-  const openEdit = (item: CanonicalTag & { comicCount: number }) => {
+  const openEdit = (item: TagRow) => {
     setEditTarget(item);
+    setForm({
+      id: item.id,
+      namespace: item.namespace,
+      name: item.name,
+      displayNameZh: item.displayNameZh ?? "",
+    });
+    setError("");
     open();
   };
+
+  async function saveTag() {
+    setIsSaving(true);
+    setError("");
+
+    const response = await fetch("/api/tags", {
+      method: editTarget ? "PATCH" : "POST",
+      body: JSON.stringify(form),
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = (await response.json()) as { tag?: CanonicalTag; error?: string };
+
+    if (!response.ok || !payload.tag) {
+      setError(payload.error ?? "保存标签失败。");
+      setIsSaving(false);
+      return;
+    }
+
+    const saved: TagRow = {
+      ...payload.tag,
+      comicCount: editTarget?.comicCount ?? 0,
+    };
+
+    setItems((current) => {
+      if (editTarget) {
+        return current.map((item) => (item.id === saved.id ? saved : item));
+      }
+
+      return [...current, saved].sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name));
+    });
+    setIsSaving(false);
+    close();
+  }
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
@@ -199,20 +261,35 @@ export function TagsPanel({ tags }: { tags: Array<CanonicalTag & { comicCount: n
             label="分类"
             placeholder="选择分类"
             data={namespaceOptions}
-            value={editTarget?.namespace ?? null}
+            value={form.namespace}
+            onChange={(value) => setForm((current) => ({ ...current, namespace: value ?? "other" }))}
             searchable
             clearable={false}
             nothingFoundMessage="无匹配分类"
             comboboxProps={{ withinPortal: false }}
-            disabled
           />
-          <AppInput label="英文标签名" placeholder="例如: sole female" value={editTarget?.name ?? ""} readOnly />
-          <AppInput label="中文翻译" placeholder="例如: 单女主" value={editTarget?.displayNameZh ?? ""} readOnly />
+          <AppInput
+            label="英文标签名"
+            placeholder="例如: sole female"
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.currentTarget.value }))}
+          />
+          <AppInput
+            label="中文翻译"
+            placeholder="例如: 单女主"
+            value={form.displayNameZh}
+            onChange={(event) => setForm((current) => ({ ...current, displayNameZh: event.currentTarget.value }))}
+          />
+          {error && (
+            <Text size="sm" c="red.7">
+              {error}
+            </Text>
+          )}
           <Group justify="flex-end" mt="sm">
             <AppButton variant="outline" onClick={close}>
               取消
             </AppButton>
-            <AppButton leftSection={<Plus size={16} />} disabled>
+            <AppButton leftSection={<Plus size={16} />} loading={isSaving} onClick={saveTag}>
               {editTarget ? "保存" : "添加"}
             </AppButton>
           </Group>

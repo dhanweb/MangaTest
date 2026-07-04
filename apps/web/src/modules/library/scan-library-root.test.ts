@@ -121,6 +121,24 @@ describe("scanMangaRoot", () => {
     expect(cleanupResult.removedCount).toBeGreaterThanOrEqual(1);
     expect(countRows(sqlite, "cache_entries", "cache_key = 'expired:test'")).toBe(0);
 
+    const { createTagRepository } = await import("../tags/tags.repository");
+    const tagRepository = createTagRepository();
+    const createdTag = await tagRepository.create({
+      namespace: "artist",
+      name: "Sample Artist",
+      displayNameZh: "示例作者",
+    });
+    const updatedTag = await tagRepository.update(createdTag.id, {
+      namespace: "artist",
+      name: "Sample Artist",
+      displayNameZh: "示例作者改",
+    });
+    const tagRows = await tagRepository.listWithCounts();
+
+    expect(createdTag.canonical).toBe("artist:sample artist");
+    expect(updatedTag?.displayNameZh).toBe("示例作者改");
+    expect(tagRows.some((tag) => tag.id === createdTag.id && tag.comicCount === 0)).toBe(true);
+
     const { saveReadingProgress } = await import("../reader/reading-progress");
     const savedDirectoryProgress = await saveReadingProgress({
       pageId: directoryPage.id,
