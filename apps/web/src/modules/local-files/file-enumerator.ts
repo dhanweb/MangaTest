@@ -1,7 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
+import { eq } from "drizzle-orm";
 import yauzl from "yauzl";
+
+import { bootstrapDatabase, cacheEntries, getDb } from "@/modules/core/db";
+import { defaultRuntimeSettings } from "@/modules/core/settings";
 
 import type { LocalFileKind } from ".";
 
@@ -85,7 +90,7 @@ async function createArchiveComicEntry(rootPath: string, absolutePath: string): 
     fileTitle: path.basename(absolutePath, ext),
     sizeBytes: stat.size,
     mtimeMs: Math.trunc(stat.mtimeMs),
-    pages: await enumerateArchivePages(absolutePath),
+    pages: await getCachedArchivePages(absolutePath, stat),
   };
 }
 
@@ -161,10 +166,93 @@ function enumerateArchivePages(absolutePath: string): Promise<LocalComicPage[]> 
   });
 }
 
+async function getCachedArchivePages(absolutePath: string, stat: { size: number; mtimeMs: number }) {
+  bootstrapDatabase();
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const cacheKey = createArchiveFileListCacheKey(absolutePath, stat);
+  const cached = db.select().from(cacheEntries).where(eq(cacheEntries.cacheKey, cacheKey)).get();
+
+  if (cached?.metadataJson) {
+    const pages = parseCachedArchivePages(cached.metadataJson);
+    if (pages) {
+      db.update(cacheEntries)
+        .set({
+          lastAccessAt: now,
+          updatedAt: now,
+        })
+        .where(eq(cacheEntries.id, cached.id))
+        .run();
+
+      return pages;
+    }
+  }
+
+  const pages = await enumerateArchivePages(absolutePath);
+  const metadataJson = JSON.stringify({ pages });
+
+  db.insert(cacheEntries)
+    .values({
+      id: cached?.id ?? randomUUID(),
+      kind: "archive_file_list",
+      cacheKey,
+      metadataJson,
+      sizeBytes: Buffer.byteLength(metadataJson),
+      lastAccessAt: now,
+      expiresAt: addDays(now, defaultRuntimeSettings.readerThumbnailTtlDays),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: cacheEntries.cacheKey,
+      set: {
+        metadataJson,
+        sizeBytes: Buffer.byteLength(metadataJson),
+        lastAccessAt: now,
+        expiresAt: addDays(now, defaultRuntimeSettings.readerThumbnailTtlDays),
+        updatedAt: now,
+      },
+    })
+    .run();
+
+  return pages;
+}
+
+function createArchiveFileListCacheKey(absolutePath: string, stat: { size: number; mtimeMs: number }) {
+  return `archive_file_list:${path.resolve(absolutePath)}:${Math.trunc(stat.mtimeMs)}:${stat.size}`;
+}
+
+function parseCachedArchivePages(metadataJson: string) {
+  try {
+    const parsed = JSON.parse(metadataJson) as { pages?: LocalComicPage[] };
+    if (!Array.isArray(parsed.pages)) {
+      return null;
+    }
+
+    return parsed.pages.filter(isCachedArchivePage);
+  } catch {
+    return null;
+  }
+}
+
+function isCachedArchivePage(page: LocalComicPage): page is LocalComicPage {
+  return (
+    page?.sourceKind === "archive" &&
+    typeof page.internalPath === "string" &&
+    (typeof page.archiveIndex === "number" || page.archiveIndex === null)
+  );
+}
+
 function compareDirentsByName(a: { name: string }, b: { name: string }) {
   return pathCollator.compare(a.name, b.name);
 }
 
 function toPortablePath(input: string) {
   return input.split(path.sep).join("/");
+}
+
+function addDays(isoDate: string, days: number) {
+  const date = new Date(isoDate);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
 }

@@ -63,6 +63,7 @@ describe("scanMangaRoot", () => {
     expect(countRows(sqlite, "local_files")).toBe(2);
     expect(countRows(sqlite, "chapters")).toBe(2);
     expect(countRows(sqlite, "pages")).toBe(4);
+    expect(countRows(sqlite, "cache_entries", "kind = 'archive_file_list'")).toBe(1);
     expect(tableExists(sqlite, "settings")).toBe(true);
     expect(tableExists(sqlite, "reading_progress")).toBe(true);
     expect(tableExists(sqlite, "media_assets")).toBe(true);
@@ -115,6 +116,7 @@ describe("scanMangaRoot", () => {
 
     expect(secondScan.addedCount).toBe(0);
     expect(secondScan.missingCount).toBe(0);
+    expect(countRows(sqlite, "cache_entries", "kind = 'archive_file_list'")).toBe(1);
 
     await rm(directoryComicPath, { recursive: true, force: true });
 
