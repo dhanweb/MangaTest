@@ -12,21 +12,46 @@ export interface AdminHealthSummary {
   readableComics: number;
   localFiles: number;
   recentDangerousOperations: number;
+  recentOperations: AdminOperationLogRecord[];
   latestScanFinishedAt: string | null;
   latestScanError: string | null;
+}
+
+export interface AdminOperationLogRecord {
+  id: string;
+  operation: string;
+  targetType: string;
+  targetId: string;
+  summary: string;
+  createdAt: string;
 }
 
 export async function getAdminHealthSummary(): Promise<AdminHealthSummary> {
   bootstrapDatabase();
 
   const db = getDb();
-  const [cache, latestScan, missingRow, readableRow, localFileRow, operationRow] = await Promise.all([
+  const [cache, latestScan, missingRow, readableRow, localFileRow, operationRow, recentOperations] = await Promise.all([
     getCacheSummary(),
     Promise.resolve(db.select().from(scanSessions).orderBy(desc(scanSessions.createdAt)).limit(1).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(localFiles).where(eq(localFiles.isMissing, true)).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(comics).where(eq(comics.status, "readable")).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(localFiles).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(operationLogs).get()),
+    Promise.resolve(
+      db
+        .select({
+          id: operationLogs.id,
+          operation: operationLogs.operation,
+          targetType: operationLogs.targetType,
+          targetId: operationLogs.targetId,
+          summary: operationLogs.summary,
+          createdAt: operationLogs.createdAt,
+        })
+        .from(operationLogs)
+        .orderBy(desc(operationLogs.createdAt))
+        .limit(5)
+        .all(),
+    ),
   ]);
 
   return {
@@ -38,6 +63,7 @@ export async function getAdminHealthSummary(): Promise<AdminHealthSummary> {
     readableComics: Number(readableRow?.count ?? 0),
     localFiles: Number(localFileRow?.count ?? 0),
     recentDangerousOperations: Number(operationRow?.count ?? 0),
+    recentOperations,
     latestScanFinishedAt: latestScan?.finishedAt ?? null,
     latestScanError: latestScan?.errorSummary ?? null,
   };

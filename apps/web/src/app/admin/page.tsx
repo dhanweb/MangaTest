@@ -47,6 +47,30 @@ export default async function AdminPage() {
           <InfoRow label="最早访问" value={summary.cache.oldestLastAccessAt ? formatDate(summary.cache.oldestLastAccessAt) : "暂无"} />
         </StatusPanel>
       </SimpleGrid>
+
+      <Box mt="md">
+        <StatusPanel title="最近操作" actionHref="/admin/files" actionLabel="文件维护">
+          {summary.recentOperations.length > 0 ? (
+            summary.recentOperations.map((operation) => (
+              <Group key={operation.id} justify="space-between" gap={16} wrap="nowrap">
+                <Box style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={700} c="ink.8">
+                    {formatOperation(operation.operation)} · {operation.summary}
+                  </Text>
+                  <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                    {operation.targetType}:{operation.targetId}
+                  </Text>
+                </Box>
+                <AppBadge>{formatDate(operation.createdAt)}</AppBadge>
+              </Group>
+            ))
+          ) : (
+            <Text size="sm" c="ink.5">
+              暂无操作日志。
+            </Text>
+          )}
+        </StatusPanel>
+      </Box>
     </Box>
   );
 }
@@ -139,6 +163,19 @@ function formatScanStatus(status: string) {
   };
 
   return labels[status] ?? status;
+}
+
+function formatOperation(operation: string) {
+  const labels: Record<string, string> = {
+    cache_cleanup: "缓存清理",
+    merge_chapter: "合并章节",
+    path_repair: "路径修复",
+    restore: "恢复",
+    soft_delete: "软删除",
+    switch_primary_file: "切换主文件",
+  };
+
+  return labels[operation] ?? operation;
 }
 
 function formatBytes(value: number) {
