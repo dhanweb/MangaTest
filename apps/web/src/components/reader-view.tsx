@@ -423,10 +423,10 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
                   {shouldLoadThumb ? (
                     <img
                       alt=""
-                      className="reader-thumb-image"
-                      decoding="async"
-                      loading="lazy"
-                      src={getPageImageUrl(page.id)}
+                    className="reader-thumb-image"
+                    decoding="async"
+                    loading="lazy"
+                    src={getPageThumbnailUrl(page.id)}
                     />
                   ) : (
                     <div className="reader-thumb-placeholder">PAGE {String(page.displayNumber).padStart(2, "0")}</div>
@@ -485,4 +485,8 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
 
 function getPageImageUrl(pageId: string) {
   return `/api/pages/${encodeURIComponent(pageId)}`;
+}
+
+function getPageThumbnailUrl(pageId: string) {
+  return `/api/pages/${encodeURIComponent(pageId)}/thumbnail?w=176&h=264`;
 }

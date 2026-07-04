@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import Database from "better-sqlite3";
+import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
 const ARCHIVE_FIXTURE_BASE64 =
@@ -15,11 +16,31 @@ describe("scanMangaRoot", () => {
     const rootPath = path.join(workspace, "Root");
     const directoryComicPath = path.join(rootPath, "Comic A");
     const dbPath = path.join(workspace, "test.sqlite");
+    const jpegFixture = await sharp({
+      create: {
+        width: 16,
+        height: 24,
+        channels: 3,
+        background: "#ef3b91",
+      },
+    })
+      .jpeg()
+      .toBuffer();
+    const pngFixture = await sharp({
+      create: {
+        width: 12,
+        height: 18,
+        channels: 3,
+        background: "#ffffff",
+      },
+    })
+      .png()
+      .toBuffer();
 
     await mkdir(workspace, { recursive: true });
     await mkdir(directoryComicPath, { recursive: true });
-    await writeFile(path.join(directoryComicPath, "001.jpg"), "fake image 1");
-    await writeFile(path.join(directoryComicPath, "002.png"), "fake image 2");
+    await writeFile(path.join(directoryComicPath, "001.jpg"), jpegFixture);
+    await writeFile(path.join(directoryComicPath, "002.png"), pngFixture);
     await writeFile(path.join(rootPath, "Archive Comic.cbz"), Buffer.from(ARCHIVE_FIXTURE_BASE64, "base64"));
 
     process.env.MANGATEST_DB_PATH = dbPath;
@@ -56,9 +77,18 @@ describe("scanMangaRoot", () => {
     const archiveImage = await readReaderPageImage(archivePage.id);
 
     expect(directoryImage?.contentType).toBe("image/jpeg");
-    expect(directoryImage?.data.toString()).toBe("fake image 1");
+    expect(directoryImage?.data.length).toBe(jpegFixture.length);
     expect(archiveImage?.contentType).toBe("image/jpeg");
     expect(archiveImage?.data.length).toBeGreaterThan(0);
+
+    const { getReaderThumbnail } = await import("../media-assets");
+    const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
+    const cachedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
+
+    expect(generatedThumbnail?.contentType).toBe("image/webp");
+    expect(generatedThumbnail?.cacheStatus).toBe("generated");
+    expect(cachedThumbnail?.cacheStatus).toBe("hit");
+    expect(countRows(sqlite, "media_assets")).toBe(1);
 
     const { saveReadingProgress } = await import("../reader/reading-progress");
     const savedDirectoryProgress = await saveReadingProgress({
