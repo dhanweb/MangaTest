@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
+import { createAndScanMangaRoot } from "@/modules/library/create-and-scan-manga-root";
 import { scanMangaRoot } from "@/modules/library/scan-library-root";
 
 export interface SaveMangaRootState {
@@ -15,15 +15,18 @@ export async function saveMangaRootAction(_state: SaveMangaRootState, formData: 
   const displayName = String(formData.get("displayName") ?? "");
 
   try {
-    await createMangaRootRepository().create({
+    const result = await createAndScanMangaRoot({
       absolutePath,
       displayName,
     });
     revalidatePath("/admin/paths");
+    revalidatePath("/");
 
     return {
-      status: "success",
-      message: "漫画根目录已保存。",
+      status: result.scanError ? "error" : "success",
+      message: result.scanError
+        ? `漫画根目录已保存，但自动扫描失败：${result.scanError}`
+        : `漫画根目录已保存，并已自动扫描新增 ${result.scanResult?.addedCount ?? 0} 本。`,
     };
   } catch (error) {
     return {

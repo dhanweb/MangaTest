@@ -4,8 +4,7 @@ import { Box, Card, Group, Text } from "@mantine/core";
 import { Play } from "lucide-react";
 import Link from "next/link";
 
-import { getCoverColor } from "@/components/comic-cover";
-import { CoverBlock } from "@/components/site-header";
+import { ComicCover } from "@/components/comic-cover";
 import type { LibraryComicCardRecord } from "@/modules/library";
 
 export function ComicCard({ comic, index }: { comic: LibraryComicCardRecord; index: number }) {
@@ -26,7 +25,7 @@ export function ComicCard({ comic, index }: { comic: LibraryComicCardRecord; ind
         <span className="sr-only">{comic.displayTitle}</span>
       </Link>
 
-      <CoverBlock title={`${comic.chapterCount || 1}话`} color={getCoverColor(index)} compact />
+      <ComicCover comicId={comic.id} title={`${comic.chapterCount || 1}话`} index={index} compact />
 
       <Box p="sm" pb="md">
         <Text fw={700} size="sm" lineClamp={1} mb={2} style={{ color: "var(--mantine-color-ink-7)" }}>

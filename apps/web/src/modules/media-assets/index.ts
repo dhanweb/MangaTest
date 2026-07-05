@@ -2,12 +2,12 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import sharp from "sharp";
 
 import { cleanupApplicationCache } from "@/modules/core/cache";
 import { getRuntimeSettings } from "@/modules/core/settings";
-import { bootstrapDatabase, chapters, localFiles, mediaAssets, pages, getDb } from "@/modules/core/db";
+import { bootstrapDatabase, chapters, comics, localFiles, mediaAssets, pages, getDb } from "@/modules/core/db";
 import { readReaderPageImage } from "@/modules/reader/page-images";
 
 export type MediaAssetUse = "cover" | "list_thumbnail" | "reader_thumbnail";
@@ -29,18 +29,127 @@ export interface ReaderThumbnailRequest {
   height?: number;
 }
 
+export interface ComicCoverRequest {
+  comicId: string;
+  height?: number;
+  use?: "cover" | "list_thumbnail";
+  width?: number;
+}
+
 export interface CachedMediaAsset {
   data: Buffer;
   contentType: string;
   cacheStatus: "hit" | "generated";
 }
 
+const DEFAULT_COVER_WIDTH = 520;
+const DEFAULT_COVER_HEIGHT = 780;
+const DEFAULT_LIST_COVER_WIDTH = 240;
+const DEFAULT_LIST_COVER_HEIGHT = 360;
 const DEFAULT_READER_THUMBNAIL_WIDTH = 176;
 const DEFAULT_READER_THUMBNAIL_HEIGHT = 264;
 const GENERATION_CONCURRENCY = 2;
 
 let activeGenerationCount = 0;
 const generationQueue: Array<() => void> = [];
+
+export async function getComicCover(input: ComicCoverRequest): Promise<CachedMediaAsset | null> {
+  bootstrapDatabase();
+
+  const db = getDb();
+  const use = input.use ?? "cover";
+  const width = normalizeDimension(input.width, use === "list_thumbnail" ? DEFAULT_LIST_COVER_WIDTH : DEFAULT_COVER_WIDTH, 1200);
+  const height = normalizeDimension(input.height, use === "list_thumbnail" ? DEFAULT_LIST_COVER_HEIGHT : DEFAULT_COVER_HEIGHT, 1200);
+  const coverPage = findComicCoverPage(input.comicId);
+
+  if (!coverPage) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const sourceVersion = coverPage.localFileContentHash ?? `${coverPage.localFileMtimeMs ?? "unknown-mtime"}:${coverPage.localFileSizeBytes ?? "unknown-size"}`;
+  const sourceIdentity = `${coverPage.localFileId}:${coverPage.internalPath}:${sourceVersion}`;
+  const cacheKey = createThumbnailCacheKey({
+    sourceIdentity,
+    width,
+    height,
+    use,
+  });
+
+  const cached = db.select().from(mediaAssets).where(eq(mediaAssets.cacheKey, cacheKey)).get();
+  if (cached) {
+    const data = await readFile(/*turbopackIgnore: true*/ cached.filePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") {
+        return null;
+      }
+
+      throw error;
+    });
+
+    if (data) {
+      db.update(mediaAssets)
+        .set({
+          lastAccessAt: now,
+          updatedAt: now,
+        })
+        .where(eq(mediaAssets.id, cached.id))
+        .run();
+
+      return { data, contentType: "image/webp", cacheStatus: "hit" };
+    }
+  }
+
+  return enqueueThumbnailGeneration(async () => {
+    const sourceImage = await readReaderPageImage(coverPage.pageId);
+    if (!sourceImage) {
+      return null;
+    }
+
+    const data = await sharp(sourceImage.data)
+      .resize({ width, height, fit: "cover", withoutEnlargement: true })
+      .webp({ quality: use === "list_thumbnail" ? 74 : 80 })
+      .toBuffer();
+    const runtimeSettings = await getRuntimeSettings();
+    const cachePath = await writeMediaCacheFile(
+      cacheKey,
+      data,
+      runtimeSettings.cacheDirectory,
+      use === "list_thumbnail" ? "list-covers" : "covers",
+    );
+    const expiresAt = addDays(now, runtimeSettings.readerThumbnailTtlDays);
+
+    db.insert(mediaAssets)
+      .values({
+        id: cached?.id ?? randomUUID(),
+        comicId: coverPage.comicId,
+        chapterId: coverPage.chapterId,
+        pageId: coverPage.pageId,
+        use,
+        cacheKey,
+        width,
+        height,
+        filePath: cachePath,
+        sizeBytes: data.byteLength,
+        lastAccessAt: now,
+        expiresAt,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: mediaAssets.cacheKey,
+        set: {
+          filePath: cachePath,
+          sizeBytes: data.byteLength,
+          lastAccessAt: now,
+          expiresAt,
+          updatedAt: now,
+        },
+      })
+      .run();
+
+    void cleanupApplicationCache().catch(() => undefined);
+    return { data, contentType: "image/webp", cacheStatus: "generated" };
+  });
+}
 
 export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise<CachedMediaAsset | null> {
   bootstrapDatabase();
@@ -114,7 +223,7 @@ export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise
       .webp({ quality: 72 })
       .toBuffer();
     const runtimeSettings = await getRuntimeSettings();
-    const cachePath = await writeThumbnailCacheFile(cacheKey, data, runtimeSettings.cacheDirectory);
+    const cachePath = await writeMediaCacheFile(cacheKey, data, runtimeSettings.cacheDirectory, "reader-thumbnails");
     const expiresAt = addDays(now, runtimeSettings.readerThumbnailTtlDays);
 
     db.insert(mediaAssets)
@@ -150,6 +259,35 @@ export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise
   });
 }
 
+function findComicCoverPage(comicId: string) {
+  const db = getDb();
+  const rows = db
+    .select({
+      pageId: pages.id,
+      chapterId: pages.chapterId,
+      comicId: chapters.comicId,
+      internalPath: pages.internalPath,
+      localFileId: pages.localFileId,
+      localFileMtimeMs: localFiles.mtimeMs,
+      localFileSizeBytes: localFiles.sizeBytes,
+      localFileContentHash: localFiles.contentHash,
+    })
+    .from(comics)
+    .innerJoin(chapters, eq(chapters.comicId, comics.id))
+    .innerJoin(pages, eq(pages.chapterId, chapters.id))
+    .innerJoin(localFiles, eq(localFiles.id, pages.localFileId))
+    .where(and(eq(comics.id, comicId), eq(comics.status, "readable"), eq(localFiles.isMissing, false)))
+    .orderBy(asc(chapters.sortOrder), asc(pages.pageNumber))
+    .all();
+
+  return rows.find((row) => isCoverLikePath(row.internalPath)) ?? rows[0] ?? null;
+}
+
+function isCoverLikePath(internalPath: string) {
+  const name = path.basename(internalPath, path.extname(internalPath)).toLocaleLowerCase();
+  return name === "cover" || name.startsWith("cover.") || name.startsWith("cover-") || name.startsWith("cover_");
+}
+
 function enqueueThumbnailGeneration<T>(task: () => Promise<T>) {
   return new Promise<T>((resolve, reject) => {
     const run = () => {
@@ -171,21 +309,21 @@ function enqueueThumbnailGeneration<T>(task: () => Promise<T>) {
   });
 }
 
-async function writeThumbnailCacheFile(cacheKey: string, data: Buffer, cacheDirectorySetting: string) {
+async function writeMediaCacheFile(cacheKey: string, data: Buffer, cacheDirectorySetting: string, mediaDirectoryName: string) {
   const safeFileName = `${createHash("sha256").update(cacheKey).digest("hex")}.webp`;
-  const cacheDirectory = path.resolve(process.cwd(), cacheDirectorySetting, "reader-thumbnails");
+  const cacheDirectory = path.resolve(/*turbopackIgnore: true*/ process.cwd(), cacheDirectorySetting, mediaDirectoryName);
   const cachePath = path.join(cacheDirectory, safeFileName);
   await mkdir(cacheDirectory, { recursive: true });
   await writeFile(/*turbopackIgnore: true*/ cachePath, data);
   return cachePath;
 }
 
-function normalizeDimension(value: number | undefined, fallback: number) {
+function normalizeDimension(value: number | undefined, fallback: number, max = 512) {
   if (!value || !Number.isFinite(value)) {
     return fallback;
   }
 
-  return Math.max(48, Math.min(512, Math.round(value)));
+  return Math.max(48, Math.min(max, Math.round(value)));
 }
 
 function addDays(isoDate: string, days: number) {

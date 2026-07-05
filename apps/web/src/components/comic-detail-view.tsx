@@ -5,8 +5,7 @@ import { ChevronRight, Edit3, Heart, Play } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
-import { getCoverColor } from "@/components/comic-cover";
-import { CoverBlock } from "@/components/site-header";
+import { ComicCover } from "@/components/comic-cover";
 import { AppBadge, AppButton, AppLink } from "@/components/ui/app-components";
 import type { LibraryComicDetailRecord } from "@/modules/library";
 
@@ -26,7 +25,7 @@ export function ComicDetailView({ comic }: { comic: LibraryComicDetailRecord }) 
   return (
     <>
       <Flex direction={{ base: "column", sm: "row" }} gap={28} mb={42}>
-        <CoverBlock title={`第1页 / 共${comic.pageCount}页`} color={getCoverColor(hashIndex(comic.id))} />
+        <ComicCover comicId={comic.id} title={`第1页 / 共${comic.pageCount}页`} index={hashIndex(comic.id)} compact={false} use="cover" />
         <Box style={{ flex: 1 }}>
           <Text size="xs" fw={800} c="ink.5" mb={4}>
             Local Scan

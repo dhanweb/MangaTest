@@ -45,18 +45,21 @@ describe("scanMangaRoot", () => {
 
     process.env.MANGATEST_DB_PATH = dbPath;
 
-    const { createMangaRootRepository } = await import("./manga-roots.repository");
+    const { createAndScanMangaRoot } = await import("./create-and-scan-manga-root");
     const { scanMangaRoot } = await import("./scan-library-root");
 
-    const root = await createMangaRootRepository().create({
+    const autoScan = await createAndScanMangaRoot({
       absolutePath: rootPath,
       displayName: "Smoke root",
     });
 
-    const firstScan = await scanMangaRoot(root.id);
+    const root = autoScan.root;
+    const firstScan = autoScan.scanResult;
 
-    expect(firstScan.addedCount).toBe(2);
-    expect(firstScan.pageCount).toBe(4);
+    expect(autoScan.scanError).toBeNull();
+    expect(firstScan).not.toBeNull();
+    expect(firstScan?.addedCount).toBe(2);
+    expect(firstScan?.pageCount).toBe(4);
 
     const sqlite = new Database(dbPath);
     expect(countRows(sqlite, "comics")).toBe(2);
@@ -105,19 +108,25 @@ describe("scanMangaRoot", () => {
     expect(savedSettings.themeMode).toBe("light");
     expect(runtimeSettings.themeMode).toBe("light");
 
-    const { getReaderThumbnail } = await import("../media-assets");
+    const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
+    const { getComicCover, getReaderThumbnail } = await import("../media-assets");
+    const generatedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
+    const cachedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
     const cachedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
 
+    expect(generatedCover?.contentType).toBe("image/webp");
+    expect(generatedCover?.cacheStatus).toBe("generated");
+    expect(cachedCover?.cacheStatus).toBe("hit");
     expect(generatedThumbnail?.contentType).toBe("image/webp");
     expect(generatedThumbnail?.cacheStatus).toBe("generated");
     expect(cachedThumbnail?.cacheStatus).toBe("hit");
-    expect(countRows(sqlite, "media_assets")).toBe(1);
+    expect(countRows(sqlite, "media_assets")).toBe(2);
 
     const { cleanupApplicationCache, getCacheSummary } = await import("../core/cache");
     const cacheSummary = await getCacheSummary();
 
-    expect(cacheSummary.mediaAssetCount).toBe(1);
+    expect(cacheSummary.mediaAssetCount).toBe(2);
     expect(cacheSummary.archiveFileListCount).toBe(1);
     expect(cacheSummary.maxSizeBytes).toBe(1024 * 1024);
     expect(cacheSummary.totalSizeBytes).toBeGreaterThan(0);
@@ -150,7 +159,6 @@ describe("scanMangaRoot", () => {
     expect(updatedTag?.displayNameZh).toBe("示例作者改");
     expect(tagRows.some((tag) => tag.id === createdTag.id && tag.comicCount === 0)).toBe(true);
 
-    const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
     const { createComicTagAssignmentRepository } = await import("../tags/comic-tags.repository");
     const comicTagRepository = createComicTagAssignmentRepository();
     const assignedTags = await comicTagRepository.addToComic(comicAId, createdTag.id);
