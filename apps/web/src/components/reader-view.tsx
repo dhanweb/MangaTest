@@ -5,10 +5,12 @@
 import { Box } from "@mantine/core";
 import { ArrowLeft, Eye, Settings } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
 
 import { AppButton } from "@/components/ui/app-components";
 import type { ReaderComicRecord } from "@/modules/library";
+import { getReaderKeyboardCommand } from "@/modules/reader/keyboard-shortcuts";
 
 const THUMB_ROW_HEIGHT = 140;
 const THUMB_OVERSCAN = 8;
@@ -21,6 +23,7 @@ export interface ReaderPreferences {
 }
 
 export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; preferences: ReaderPreferences }) {
+  const router = useRouter();
   const pages = useMemo(() => comic.pages.map((page, index) => ({ ...page, displayNumber: index + 1 })), [comic.pages]);
   const initialActivePage = useMemo(() => {
     const lastReadIndex = pages.findIndex((page) => page.id === comic.lastReadPageId);
@@ -218,8 +221,83 @@ export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; p
     [animateScrollTop, centerThumbnail, setCurrentPage],
   );
 
+  const scrollContentTo = useCallback(
+    (targetTop: number) => {
+      const container = pagesContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      programmaticScrollRef.current = true;
+      if (releaseProgrammaticScrollRef.current) {
+        clearTimeout(releaseProgrammaticScrollRef.current);
+      }
+
+      animateScrollTop(container, targetTop, 240, contentAnimationRef, () => {
+        setCurrentPage(findCurrentPage());
+        releaseProgrammaticScrollRef.current = setTimeout(() => {
+          programmaticScrollRef.current = false;
+        }, 80);
+      });
+    },
+    [animateScrollTop, findCurrentPage, setCurrentPage],
+  );
+
+  const scrollContentBy = useCallback(
+    (direction: -1 | 1) => {
+      const container = pagesContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const distance = Math.max(240, container.clientHeight * 0.82);
+      scrollContentTo(container.scrollTop + distance * direction);
+    },
+    [scrollContentTo],
+  );
+
+  const executeKeyboardCommand = useCallback(
+    (command: ReturnType<typeof getReaderKeyboardCommand>) => {
+      if (!command) {
+        return;
+      }
+
+      const container = pagesContainerRef.current;
+
+      if (command === "scroll_up") {
+        scrollContentBy(-1);
+        return;
+      }
+
+      if (command === "scroll_down") {
+        scrollContentBy(1);
+        return;
+      }
+
+      if (command === "go_to_start") {
+        scrollContentTo(0);
+        return;
+      }
+
+      if (command === "go_to_end") {
+        scrollContentTo(container?.scrollHeight ?? 0);
+        return;
+      }
+
+      if (command === "toggle_toolbar") {
+        setToolbarVisible((value) => !value);
+        return;
+      }
+
+      if (command === "back_to_detail") {
+        router.push(`/comics/${comic.id}`);
+      }
+    },
+    [comic.id, router, scrollContentBy, scrollContentTo],
+  );
+
   const handleThumbKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLDivElement>, pageNum: number) => {
+    (event: ReactKeyboardEvent<HTMLDivElement>, pageNum: number) => {
       if (event.key !== "Enter" && event.key !== " ") {
         return;
       }
@@ -229,6 +307,23 @@ export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; p
     },
     [scrollToPage],
   );
+
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      const command = getReaderKeyboardCommand(event);
+      if (!command) {
+        return;
+      }
+
+      event.preventDefault();
+      executeKeyboardCommand(command);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [executeKeyboardCommand]);
 
   const saveProgress = useCallback(
     (pageNum: number, transport: "fetch" | "beacon" = "fetch") => {
