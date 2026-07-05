@@ -1,11 +1,11 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { Library, Search } from "lucide-react";
+import { EyeOff, Library, RotateCcw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput } from "@/components/ui/app-components";
-import type { LibraryComicAdminRowRecord } from "@/modules/library";
+import type { ComicMaintenanceAction, LibraryComicAdminRowRecord } from "@/modules/library";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "10 条/页" },
@@ -14,27 +14,61 @@ const PAGE_SIZE_OPTIONS = [
 ];
 
 export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }) {
+  const [rows, setRows] = useState(() => comics);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {
-      return comics;
+      return rows;
     }
 
-    return comics.filter((comic) => {
+    return rows.filter((comic) => {
       const text = [comic.displayTitle, comic.fileTitle, comic.status, comic.localFileKind ?? ""].join(" ").toLowerCase();
       return text.includes(query);
     });
-  }, [comics, search]);
+  }, [rows, search]);
 
   const limit = Number(pageSize);
   const total = filtered.length;
   const totalPages = Math.ceil(total / limit);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
+
+  async function changeComicStatus(comic: LibraryComicAdminRowRecord, action: ComicMaintenanceAction) {
+    const actionKey = `${comic.id}:${action}`;
+    setPendingAction(actionKey);
+    setActionError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as {
+        comic?: { id: string; status: LibraryComicAdminRowRecord["status"] };
+        error?: string;
+      };
+
+      const updatedComic = payload.comic;
+
+      if (!response.ok || !updatedComic) {
+        throw new Error(payload.error ?? "漫画状态更新失败。");
+      }
+
+      setRows((current) => current.map((row) => (row.id === updatedComic.id ? { ...row, status: updatedComic.status } : row)));
+      setEditTarget((current) => (current?.id === updatedComic.id ? { ...current, status: updatedComic.status } : current));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "漫画状态更新失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
@@ -181,11 +215,62 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
 
             <AppInput label="本地路径" value={editTarget.primaryLocalPath ?? "未关联主文件"} readOnly />
 
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
+                background: "var(--mantine-color-pink-0)",
+              }}
+            >
+              <Text size="sm" fw={700} c="ink.8">
+                记录维护不会移动或删除真实文件
+              </Text>
+              <Text size="xs" c="ink.5" mt={2}>
+                隐藏会从前台列表移除；软删除只是标记数据库记录，后续可从后台恢复。
+              </Text>
+            </Box>
+
+            {actionError && (
+              <Text size="sm" c="red.7">
+                {actionError}
+              </Text>
+            )}
+
             <Group justify="flex-end" mt="sm">
               <AppButton variant="outline" onClick={() => setEditTarget(null)}>
                 关闭
               </AppButton>
-              <AppButton disabled>保存更改</AppButton>
+              {editTarget.status === "hidden" || editTarget.status === "deleted" ? (
+                <AppButton
+                  variant="outline"
+                  leftSection={<RotateCcw size={15} />}
+                  loading={pendingAction === `${editTarget.id}:restore`}
+                  onClick={() => changeComicStatus(editTarget, "restore")}
+                >
+                  恢复记录
+                </AppButton>
+              ) : (
+                <AppButton
+                  variant="outline"
+                  leftSection={<EyeOff size={15} />}
+                  loading={pendingAction === `${editTarget.id}:hide`}
+                  onClick={() => changeComicStatus(editTarget, "hide")}
+                >
+                  隐藏
+                </AppButton>
+              )}
+              {editTarget.status !== "deleted" && (
+                <AppButton
+                  color="red"
+                  variant="outline"
+                  leftSection={<Trash2 size={15} />}
+                  loading={pendingAction === `${editTarget.id}:soft_delete`}
+                  onClick={() => changeComicStatus(editTarget, "soft_delete")}
+                >
+                  软删除
+                </AppButton>
+              )}
             </Group>
           </Stack>
         )}

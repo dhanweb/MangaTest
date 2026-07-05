@@ -356,7 +356,7 @@ export const operationLogs = sqliteTable(
   {
     id: text("id").primaryKey(),
     operation: text("operation", {
-      enum: ["soft_delete", "restore", "path_repair", "merge_chapter", "switch_primary_file", "cache_cleanup"],
+      enum: ["hide", "soft_delete", "restore", "path_repair", "merge_chapter", "switch_primary_file", "cache_cleanup"],
     }).notNull(),
     targetType: text("target_type").notNull(),
     targetId: text("target_id").notNull(),

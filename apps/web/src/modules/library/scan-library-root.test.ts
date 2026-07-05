@@ -174,6 +174,12 @@ describe("scanMangaRoot", () => {
     expect(thirdScan.missingCount).toBe(1);
     expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(1);
 
+    const { createComicRepository } = await import("./comics.repository");
+    const comicRepository = createComicRepository();
+    const publicRowsAfterMissing = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(publicRowsAfterMissing.items.some((comic) => comic.fileTitle === "Comic A")).toBe(false);
+
     const repairedComicPath = path.join(rootPath, "Comic A repaired");
     await mkdir(repairedComicPath, { recursive: true });
     await writeFile(path.join(repairedComicPath, "001.jpg"), jpegFixture);
@@ -185,6 +191,41 @@ describe("scanMangaRoot", () => {
     expect(repairResult.absolutePath).toBe(repairedComicPath);
     expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(0);
     expect(countRows(sqlite, "operation_logs", "operation = 'path_repair'")).toBe(1);
+
+    const { createComicMaintenanceRepository } = await import("./comic-maintenance.repository");
+    const maintenanceRepository = createComicMaintenanceRepository();
+    const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
+    const publicRowsAfterRepair = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(publicRowsAfterRepair.items.some((comic) => comic.id === comicAId)).toBe(true);
+
+    const hiddenComic = await maintenanceRepository.changeStatus(comicAId, "hide");
+    const publicRowsAfterHide = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(hiddenComic.previousStatus).toBe("readable");
+    expect(hiddenComic.status).toBe("hidden");
+    expect(selectComicStatus(sqlite, comicAId).status).toBe("hidden");
+    expect(publicRowsAfterHide.items.some((comic) => comic.id === comicAId)).toBe(false);
+    expect(countRows(sqlite, "operation_logs", "operation = 'hide'")).toBe(1);
+
+    const deletedComic = await maintenanceRepository.changeStatus(comicAId, "soft_delete");
+
+    expect(deletedComic.previousStatus).toBe("hidden");
+    expect(deletedComic.status).toBe("deleted");
+    expect(selectComicStatus(sqlite, comicAId).status).toBe("deleted");
+    expect(countRows(sqlite, "operation_logs", "operation = 'soft_delete'")).toBe(1);
+
+    const restoredComic = await maintenanceRepository.changeStatus(comicAId, "restore");
+    const restoredStatus = selectComicStatus(sqlite, comicAId);
+    const publicRowsAfterRestore = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(restoredComic.previousStatus).toBe("deleted");
+    expect(restoredComic.status).toBe("readable");
+    expect(restoredStatus.status).toBe("readable");
+    expect(restoredStatus.hiddenAt).toBeNull();
+    expect(restoredStatus.deletedAt).toBeNull();
+    expect(publicRowsAfterRestore.items.some((comic) => comic.id === comicAId)).toBe(true);
+    expect(countRows(sqlite, "operation_logs", "operation = 'restore'")).toBe(1);
 
     sqlite.close();
   });
@@ -223,4 +264,19 @@ function selectLastReadPageId(sqlite: Database.Database, comicId: string) {
 function selectMissingLocalFileId(sqlite: Database.Database) {
   const row = sqlite.prepare("select id from local_files where is_missing = 1 limit 1").get() as { id: string };
   return row.id;
+}
+
+function selectComicIdByFileTitle(sqlite: Database.Database, fileTitle: string) {
+  const row = sqlite.prepare("select id from comics where file_title = ?").get(fileTitle) as { id: string };
+  return row.id;
+}
+
+function selectComicStatus(sqlite: Database.Database, comicId: string) {
+  return sqlite
+    .prepare("select status, hidden_at as hiddenAt, deleted_at as deletedAt from comics where id = ?")
+    .get(comicId) as {
+    status: string;
+    hiddenAt: string | null;
+    deletedAt: string | null;
+  };
 }

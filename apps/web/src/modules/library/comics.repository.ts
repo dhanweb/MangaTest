@@ -100,9 +100,10 @@ export function createComicRepository(): ComicRepository {
       const whereClause = query
         ? and(
             eq(comics.status, "readable"),
+            eq(localFiles.isMissing, false),
             or(like(comics.displayTitle, `%${query}%`), like(comics.fileTitle, `%${query}%`), like(comics.originalTitle, `%${query}%`)),
           )
-        : eq(comics.status, "readable");
+        : and(eq(comics.status, "readable"), eq(localFiles.isMissing, false));
       const pageCountSql = sql<number>`count(distinct ${pages.id})`;
       const sort = input.sort ?? "recent";
       const orderBy =

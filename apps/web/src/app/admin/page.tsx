@@ -168,6 +168,7 @@ function formatScanStatus(status: string) {
 function formatOperation(operation: string) {
   const labels: Record<string, string> = {
     cache_cleanup: "缓存清理",
+    hide: "隐藏",
     merge_chapter: "合并章节",
     path_repair: "路径修复",
     restore: "恢复",
