@@ -18,4 +18,5 @@ export interface RuntimeSettings {
   readerThumbnailSidebarDefault: boolean;
   readerImmersiveDefault: boolean;
   themeMode: "system" | "light" | "dark";
+  metadataImportToken: string;
 }

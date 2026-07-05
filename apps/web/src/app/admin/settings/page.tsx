@@ -153,7 +153,16 @@ export default function SettingsPage() {
         )}
         {activeTab === "扫描设置" && <ScanSettings />}
         {activeTab === "安全设置" && (
-          <SecuritySettings backupMessage={backupMessage} isExportingBackup={isExportingBackup} onExportBackup={exportSqliteBackup} />
+          <SecuritySettings
+            backupMessage={backupMessage}
+            isExportingBackup={isExportingBackup}
+            isSaving={isSaving}
+            onExportBackup={exportSqliteBackup}
+            onSave={saveSettings}
+            onSettingsChange={setRuntimeSettings}
+            savedMessage={savedMessage}
+            settings={runtimeSettings}
+          />
         )}
       </Box>
     </Box>
@@ -453,11 +462,21 @@ function ScanSettings() {
 function SecuritySettings({
   backupMessage,
   isExportingBackup,
+  isSaving,
   onExportBackup,
+  onSave,
+  onSettingsChange,
+  savedMessage,
+  settings,
 }: {
   backupMessage: string;
   isExportingBackup: boolean;
+  isSaving: boolean;
   onExportBackup: () => void;
+  onSave: () => void;
+  onSettingsChange: (settings: RuntimeSettings) => void;
+  savedMessage: string;
+  settings: RuntimeSettings;
 }) {
   return (
     <>
@@ -474,7 +493,13 @@ function SecuritySettings({
 
       <SettingsGroup title="接口保护">
         <SettingsRow label="导入令牌" note="浏览器插件调用写接口时需携带此令牌。">
-          <AppInput value="MVP 未启用" readOnly style={{ width: 260 }} />
+          <AppInput
+            type="password"
+            value={settings.metadataImportToken}
+            onChange={(event) => onSettingsChange({ ...settings, metadataImportToken: event.currentTarget.value })}
+            placeholder="未配置"
+            style={{ width: 260 }}
+          />
         </SettingsRow>
         <SettingsRow label="写接口保护" note="启用后非本机 IP 的写操作需令牌验证。">
           <AppSwitch defaultChecked disabled aria-label="写接口保护" />
@@ -505,7 +530,14 @@ function SecuritySettings({
             {backupMessage}
           </Text>
         )}
-        <AppButton disabled>保存安全设置</AppButton>
+        {savedMessage && (
+          <Text size="sm" c="green.7">
+            {savedMessage}
+          </Text>
+        )}
+        <AppButton loading={isSaving} onClick={onSave}>
+          保存安全设置
+        </AppButton>
       </Group>
     </>
   );

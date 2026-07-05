@@ -13,6 +13,7 @@ export interface AssignedComicTag extends CanonicalTag {
 export interface ComicTagAssignmentRepository {
   listForComic(comicId: string): Promise<AssignedComicTag[]>;
   addToComic(comicId: string, tagId: string): Promise<AssignedComicTag[]>;
+  addMetadataToComic(comicId: string, tagId: string): Promise<AssignedComicTag[]>;
   removeFromComic(comicId: string, tagId: string): Promise<AssignedComicTag[]>;
 }
 
@@ -46,6 +47,29 @@ export function createComicTagAssignmentRepository(): ComicTagAssignmentReposito
           })
           .run();
       }
+
+      return listComicTags(comicId);
+    },
+
+    async addMetadataToComic(comicId, tagId) {
+      bootstrapDatabase();
+      const db = getDb();
+      const now = new Date().toISOString();
+
+      ensureComicExists(comicId);
+      ensureTagExists(tagId);
+
+      db.insert(comicTags)
+        .values({
+          comicId,
+          tagId,
+          source: "metadata",
+          isUserEdited: false,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflictDoNothing()
+        .run();
 
       return listComicTags(comicId);
     },

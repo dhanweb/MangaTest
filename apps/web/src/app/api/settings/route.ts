@@ -53,6 +53,10 @@ export async function PATCH(request: Request) {
     input.themeMode = "light";
   }
 
+  if (typeof payload.metadataImportToken === "string") {
+    input.metadataImportToken = payload.metadataImportToken.trim();
+  }
+
   return Response.json({ settings: await saveRuntimeSettings(input) });
 }
 

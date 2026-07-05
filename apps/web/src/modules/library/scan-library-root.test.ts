@@ -95,6 +95,7 @@ describe("scanMangaRoot", () => {
       readerThumbnailSidebarDefault: false,
       readerThumbnailTtlDays: 7,
       themeMode: "dark",
+      metadataImportToken: "test-import-token",
     });
     const runtimeSettings = await getRuntimeSettings();
 
@@ -107,6 +108,7 @@ describe("scanMangaRoot", () => {
     expect(runtimeSettings.readerThumbnailTtlDays).toBe(7);
     expect(savedSettings.themeMode).toBe("light");
     expect(runtimeSettings.themeMode).toBe("light");
+    expect(runtimeSettings.metadataImportToken).toBe("test-import-token");
 
     const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
     const { getComicCover, getReaderThumbnail, regenerateComicCover, uploadComicCover } = await import("../media-assets");
@@ -208,6 +210,80 @@ describe("scanMangaRoot", () => {
     expect(updatedMetadata.metadataQueryTitle).toBe("Comic A Search Alias");
     expect(storedMetadata.sortTitle).toBe("comic a edited");
     expect(metadataSearchResult.items.map((comic) => comic.id)).toContain(comicAId);
+
+    const { importMetadataPayload, validateMetadataImportToken } = await import("../metadata-ingest");
+
+    await expect(validateMetadataImportToken("wrong-token")).rejects.toThrow("导入令牌无效");
+    await expect(validateMetadataImportToken("test-import-token")).resolves.toBeUndefined();
+
+    const metadataImport = await importMetadataPayload({
+      comicId: comicAId,
+      site: "ExampleSite",
+      sourceId: "gallery-123",
+      sourceUrl: "https://example.test/g/gallery-123",
+      title: "Remote Metadata Title",
+      originalTitle: "Remote Original Title",
+      coverUrl: "https://example.test/g/gallery-123/cover.jpg",
+      tags: [
+        { namespace: "artist", name: "Sample Artist" },
+        { namespace: "group", name: "Metadata Group", displayNameZh: "元数据社团" },
+      ],
+      resources: [
+        {
+          type: "magnet",
+          url: "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=PrivateName",
+          label: "磁链",
+        },
+      ],
+    });
+    const metadataAfterImport = selectComicMetadata(sqlite, comicAId);
+    const metadataResource = selectComicResource(sqlite, comicAId);
+
+    expect(metadataImport.createdComic).toBe(false);
+    expect(metadataImport.matchedBy).toBe("comic_id");
+    expect(metadataImport.localReadable).toBe(true);
+    expect(metadataAfterImport.displayTitle).toBe("Comic A Edited");
+    expect(metadataAfterImport.originalTitle).toBe("Comic A Original");
+    expect(metadataAfterImport.metadataQueryTitle).toBe("Comic A Search Alias");
+    expect(countRows(sqlite, "comic_sources", "site = 'examplesite'")).toBe(1);
+    expect(metadataResource.resourceUrl).toContain("PrivateName");
+    expect(metadataResource.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
+    expect(metadataResource.redactedResource).not.toContain("PrivateName");
+    expect(selectComicTagSource(sqlite, comicAId, "artist:sample artist").source).toBe("manual");
+    expect(selectComicTagSource(sqlite, comicAId, "group:metadata group").source).toBe("metadata");
+
+    const repeatedMetadataImport = await importMetadataPayload({
+      site: "examplesite",
+      sourceId: "gallery-123",
+      sourceUrl: "https://example.test/g/gallery-123?updated=1",
+      title: "Remote Metadata Title Updated",
+      resources: [
+        {
+          type: "magnet",
+          url: "magnet:?xt=urn:btih:ABCDEF1234567890ABCDEF1234567890ABCDEF12&dn=PrivateName",
+          label: "更新磁链",
+        },
+      ],
+    });
+
+    expect(repeatedMetadataImport.comicId).toBe(comicAId);
+    expect(repeatedMetadataImport.matchedBy).toBe("source");
+    expect(countRows(sqlite, "comic_sources", "site = 'examplesite'")).toBe(1);
+    expect(countRows(sqlite, "comic_resources", `comic_id = '${comicAId}'`)).toBe(1);
+    expect(selectComicResource(sqlite, comicAId).displayLabel).toBe("更新磁链");
+
+    const remoteOnlyImport = await importMetadataPayload({
+      site: "ExampleSite",
+      sourceUrl: "https://example.test/g/remote-only",
+      title: "Remote Only Comic",
+      tags: [{ namespace: "artist", name: "Remote Artist" }],
+    });
+    const remoteOnlyPublicRows = await comicRepository.searchReadableCards({ query: "Remote Only", pageSize: 12 });
+
+    expect(remoteOnlyImport.createdComic).toBe(true);
+    expect(remoteOnlyImport.comicStatus).toBe("remote_only");
+    expect(remoteOnlyImport.localReadable).toBe(false);
+    expect(remoteOnlyPublicRows.total).toBe(0);
 
     const duplicateComicId = randomUUID();
     sqlite
@@ -399,7 +475,7 @@ describe("scanMangaRoot", () => {
 
     expect(backup.filename).toMatch(/^mangatest-.+\.sqlite$/);
     expect(backup.sizeBytes).toBeGreaterThan(0);
-    expect(countRows(backupSqlite, "comics")).toBe(2);
+    expect(countRows(backupSqlite, "comics")).toBe(3);
     expect(countRows(backupSqlite, "reading_progress")).toBe(2);
     expect(countRows(backupSqlite, "operation_logs")).toBeGreaterThanOrEqual(4);
 
@@ -478,5 +554,33 @@ function selectComicMetadata(sqlite: Database.Database, comicId: string) {
     originalTitle: string | null;
     metadataQueryTitle: string | null;
     sortTitle: string;
+  };
+}
+
+function selectComicResource(sqlite: Database.Database, comicId: string) {
+  return sqlite
+    .prepare(
+      "select display_label as displayLabel, resource_url as resourceUrl, redacted_resource as redactedResource from comic_resources where comic_id = ? limit 1",
+    )
+    .get(comicId) as {
+    displayLabel: string | null;
+    resourceUrl: string | null;
+    redactedResource: string | null;
+  };
+}
+
+function selectComicTagSource(sqlite: Database.Database, comicId: string, canonical: string) {
+  return sqlite
+    .prepare(
+      `
+      select comic_tags.source as source, comic_tags.is_user_edited as isUserEdited
+      from comic_tags
+      inner join tags on tags.id = comic_tags.tag_id
+      where comic_tags.comic_id = ? and tags.canonical = ?
+      `,
+    )
+    .get(comicId, canonical) as {
+    source: string;
+    isUserEdited: number;
   };
 }

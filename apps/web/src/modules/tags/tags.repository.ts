@@ -15,6 +15,7 @@ export interface SaveTagInput {
 export interface TagRepository {
   listWithCounts(): Promise<Array<CanonicalTag & { comicCount: number }>>;
   create(input: SaveTagInput): Promise<CanonicalTag>;
+  upsert(input: SaveTagInput): Promise<CanonicalTag>;
   update(id: string, input: SaveTagInput): Promise<CanonicalTag | null>;
 }
 
@@ -59,6 +60,48 @@ export function createTagRepository(): TagRepository {
         .run();
 
       return { id, ...tag };
+    },
+
+    async upsert(input) {
+      bootstrapDatabase();
+      const db = getDb();
+      const tag = normalizeTagInput(input);
+      const now = new Date().toISOString();
+
+      db.insert(tags)
+        .values({
+          id: randomUUID(),
+          ...tag,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: tags.canonical,
+          set: {
+            namespace: tag.namespace,
+            name: tag.name,
+            displayNameZh: tag.displayNameZh ? tag.displayNameZh : sql`coalesce(${tags.displayNameZh}, excluded.display_name_zh)`,
+            updatedAt: now,
+          },
+        })
+        .run();
+
+      const row = db
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          name: tags.name,
+          canonical: tags.canonical,
+          displayNameZh: tags.displayNameZh,
+        })
+        .from(tags)
+        .where(eq(tags.canonical, tag.canonical))
+        .get();
+
+      if (!row) {
+        throw new Error("保存标签失败。");
+      }
+
+      return row;
     },
 
     async update(id, input) {

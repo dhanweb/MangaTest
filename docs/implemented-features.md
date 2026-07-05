@@ -62,6 +62,12 @@ This document records features that are already implemented in `apps/web`.
 - Comic tags can be assigned and removed in admin comic management.
 - Tags store namespace, name, canonical text, optional Chinese display name, aliases JSON, and comic counts.
 
+### Metadata Ingest
+
+- `/api/metadata/import` accepts token-protected metadata submissions for future browser extension detail-page imports.
+- Metadata imports can enrich an explicit existing comic or create a remote-only comic when no local comic is matched.
+- Metadata imports save source records, redacted resource display fields, canonical tags, and comic tag bindings without overwriting user-edited display titles or manual tag bindings.
+
 ### Admin And Maintenance
 
 - Admin home shows scan status, missing file count, duplicate candidate count, storage/cache summary, and recent operation logs.
@@ -80,11 +86,12 @@ This document records features that are already implemented in `apps/web`.
 ### Settings
 
 - Runtime settings persist cache directory, cache size, reader thumbnail TTL, reader preload behavior, reader sidebar default, immersive reader default, listen host, and theme mode.
+- Runtime settings persist the browser metadata import token used by `/api/metadata/import`.
 - MVP theme mode is fixed to light to avoid unadapted dark-mode contrast regressions.
 
 ## Not Implemented Yet
 
-- Browser extension and metadata ingest.
+- Browser extension UI and site adapters.
 - OpenList, 115, aria2, magnet, torrent, and cloud download workflows.
 - File watching and startup auto-scan.
 - Physical file deletion.

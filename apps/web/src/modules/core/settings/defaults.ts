@@ -12,6 +12,7 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   readerThumbnailSidebarDefault: true,
   readerImmersiveDefault: false,
   themeMode: "light",
+  metadataImportToken: "",
 };
 
 export const settingDefinitions = [
@@ -77,5 +78,12 @@ export const settingDefinitions = [
     description: "MVP 固定浅色主题；深色主题需要完整 token 和对比度适配后再启用。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.themeMode,
+  },
+  {
+    key: "metadataImportToken",
+    label: "Metadata 导入令牌",
+    description: "浏览器插件提交详情页 metadata 时必须携带的本地写入令牌。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.metadataImportToken,
   },
 ] satisfies Array<SettingDefinition<RuntimeSettings[keyof RuntimeSettings]>>;
