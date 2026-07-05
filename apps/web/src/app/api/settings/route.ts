@@ -33,6 +33,22 @@ export async function PATCH(request: Request) {
     input.readerThumbnailTtlDays = clampNumber(payload.readerThumbnailTtlDays, 1, 3650);
   }
 
+  if (typeof payload.readerPreloadEnabled === "boolean") {
+    input.readerPreloadEnabled = payload.readerPreloadEnabled;
+  }
+
+  if (typeof payload.readerPreloadAheadPages === "number") {
+    input.readerPreloadAheadPages = clampNumber(payload.readerPreloadAheadPages, 0, 12);
+  }
+
+  if (typeof payload.readerThumbnailSidebarDefault === "boolean") {
+    input.readerThumbnailSidebarDefault = payload.readerThumbnailSidebarDefault;
+  }
+
+  if (typeof payload.readerImmersiveDefault === "boolean") {
+    input.readerImmersiveDefault = payload.readerImmersiveDefault;
+  }
+
   if (payload.themeMode === "system" || payload.themeMode === "light" || payload.themeMode === "dark") {
     input.themeMode = payload.themeMode;
   }

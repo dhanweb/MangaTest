@@ -13,14 +13,22 @@ import type { ReaderComicRecord } from "@/modules/library";
 const THUMB_ROW_HEIGHT = 140;
 const THUMB_OVERSCAN = 8;
 
-export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
+export interface ReaderPreferences {
+  readerImmersiveDefault: boolean;
+  readerPreloadAheadPages: number;
+  readerPreloadEnabled: boolean;
+  readerThumbnailSidebarDefault: boolean;
+}
+
+export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; preferences: ReaderPreferences }) {
   const pages = useMemo(() => comic.pages.map((page, index) => ({ ...page, displayNumber: index + 1 })), [comic.pages]);
   const initialActivePage = useMemo(() => {
     const lastReadIndex = pages.findIndex((page) => page.id === comic.lastReadPageId);
     return lastReadIndex >= 0 ? lastReadIndex + 1 : 1;
   }, [comic.lastReadPageId, pages]);
 
-  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const [toolbarVisible, setToolbarVisible] = useState(!preferences.readerImmersiveDefault);
+  const [thumbnailSidebarVisible, setThumbnailSidebarVisible] = useState(preferences.readerThumbnailSidebarDefault);
   const [activePage, setActivePage] = useState(initialActivePage);
   const [thumbVisibleRange, setThumbVisibleRange] = useState({ start: 0, end: 24 });
 
@@ -314,6 +322,24 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
   }, [activePage, saveProgress]);
 
   useEffect(() => {
+    if (!preferences.readerPreloadEnabled || preferences.readerPreloadAheadPages <= 0) {
+      return;
+    }
+
+    const preloadCount = Math.min(12, Math.max(0, preferences.readerPreloadAheadPages));
+    for (let index = 1; index <= preloadCount; index += 1) {
+      const page = pages[activePage - 1 + index];
+      if (!page) {
+        continue;
+      }
+
+      const image = new Image();
+      image.decoding = "async";
+      image.src = getPageImageUrl(page.id);
+    }
+  }, [activePage, pages, preferences.readerPreloadAheadPages, preferences.readerPreloadEnabled]);
+
+  useEffect(() => {
     function onPageHide() {
       saveProgress(activePageRef.current, "beacon");
     }
@@ -366,13 +392,13 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
             },
           }}
         >
-          隐藏
+          {toolbarVisible ? "隐藏" : "显示"}
         </AppButton>
         <AppButton
           variant="transparent"
           size="xs"
-          disabled
           leftSection={<Settings size={18} />}
+          onClick={() => setThumbnailSidebarVisible((value) => !value)}
           styles={{
             root: {
               color: "white",
@@ -381,7 +407,7 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
             },
           }}
         >
-          设置
+          缩略图
         </AppButton>
       </Box>
 
@@ -397,7 +423,7 @@ export function ReaderView({ comic }: { comic: ReaderComicRecord }) {
         <Box
           component="nav"
           ref={thumbRailRef}
-          className={`reader-thumb-rail${toolbarVisible ? "" : " is-hidden"}`}
+          className={`reader-thumb-rail${toolbarVisible && thumbnailSidebarVisible ? "" : " is-hidden"}`}
           aria-label="页面缩略图"
         >
           {pages.map((page, index) => {

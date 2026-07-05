@@ -86,9 +86,9 @@ const theme = createTheme({
 
 export { theme };
 
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({ children, themeMode }: { children: ReactNode; themeMode: "system" | "light" | "dark" }) {
   return (
-    <MantineProvider theme={theme} defaultColorScheme="light">
+    <MantineProvider theme={theme} defaultColorScheme={themeMode === "system" ? "auto" : themeMode}>
       {children}
     </MantineProvider>
   );

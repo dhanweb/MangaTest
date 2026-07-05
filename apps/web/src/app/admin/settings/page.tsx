@@ -143,7 +143,13 @@ export default function SettingsPage() {
           />
         )}
         {activeTab === "阅读设置" && (
-          <ReaderSettings isSaving={isSaving} onSave={saveSettings} onSettingsChange={setRuntimeSettings} settings={runtimeSettings} />
+          <ReaderSettings
+            isSaving={isSaving}
+            onSave={saveSettings}
+            onSettingsChange={setRuntimeSettings}
+            savedMessage={savedMessage}
+            settings={runtimeSettings}
+          />
         )}
         {activeTab === "扫描设置" && <ScanSettings />}
         {activeTab === "安全设置" && (
@@ -244,6 +250,26 @@ function GeneralSettings({
         </SettingsRow>
       </SettingsGroup>
 
+      <SettingsGroup title="外观">
+        <SettingsRow label="主题模式" note="系统模式会跟随浏览器或系统的深浅色偏好。">
+          <AppSelect
+            value={settings.themeMode}
+            onChange={(value) =>
+              onSettingsChange({
+                ...settings,
+                themeMode: value === "light" || value === "dark" || value === "system" ? value : "system",
+              })
+            }
+            data={[
+              { value: "system", label: "跟随系统" },
+              { value: "light", label: "浅色" },
+              { value: "dark", label: "深色" },
+            ]}
+            style={{ width: 180 }}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
       <SettingsGroup title="自动化">
         <SettingsRow label="启动时自动扫描" note="MVP 阶段保留设置入口，当前由后台手动触发扫描。">
           <AppSwitch disabled aria-label="自动扫描" />
@@ -271,11 +297,13 @@ function ReaderSettings({
   isSaving,
   onSave,
   onSettingsChange,
+  savedMessage,
   settings,
 }: {
   isSaving: boolean;
   onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
+  savedMessage: string;
   settings: RuntimeSettings;
 }) {
   return (
@@ -285,13 +313,36 @@ function ReaderSettings({
           <AppSelect value="滚动模式" data={["滚动模式", "分页模式"].map((value) => ({ value, label: value }))} disabled />
         </SettingsRow>
         <SettingsRow label="图片预加载" note="提前加载后续页面图片以减少等待。">
-          <AppSwitch defaultChecked disabled aria-label="图片预加载" />
+          <AppSwitch
+            checked={settings.readerPreloadEnabled}
+            onChange={(event) => onSettingsChange({ ...settings, readerPreloadEnabled: event.currentTarget.checked })}
+            aria-label="图片预加载"
+          />
         </SettingsRow>
         <SettingsRow label="阅读进度记录" note="自动记录每本漫画的阅读位置。">
           <AppSwitch defaultChecked disabled aria-label="阅读进度" />
         </SettingsRow>
-        <SettingsRow label="预加载距离" note="距离底部多少像素时开始预加载下一章节。">
-          <AppInput value="3000" readOnly style={{ width: 120 }} />
+        <SettingsRow label="默认显示缩略图侧栏" note="桌面端打开 reader 时默认显示页面缩略图侧栏。">
+          <AppSwitch
+            checked={settings.readerThumbnailSidebarDefault}
+            onChange={(event) => onSettingsChange({ ...settings, readerThumbnailSidebarDefault: event.currentTarget.checked })}
+            aria-label="默认显示缩略图侧栏"
+          />
+        </SettingsRow>
+        <SettingsRow label="默认沉浸阅读" note="打开 reader 时默认隐藏顶部工具栏。">
+          <AppSwitch
+            checked={settings.readerImmersiveDefault}
+            onChange={(event) => onSettingsChange({ ...settings, readerImmersiveDefault: event.currentTarget.checked })}
+            aria-label="默认沉浸阅读"
+          />
+        </SettingsRow>
+        <SettingsRow label="预加载页数" note="当前页之后提前预加载的图片页数。">
+          <AppInput
+            type="number"
+            value={String(settings.readerPreloadAheadPages)}
+            onChange={(event) => onSettingsChange({ ...settings, readerPreloadAheadPages: Number(event.currentTarget.value) })}
+            style={{ width: 120 }}
+          />
         </SettingsRow>
         <SettingsRow label="Reader 缩略图过期天数" note="超过该天数未访问的 reader 缩略图可被清理。">
           <AppInput
@@ -335,6 +386,11 @@ function ReaderSettings({
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
+        {savedMessage && (
+          <Text size="sm" c="green.7">
+            {savedMessage}
+          </Text>
+        )}
         <AppButton loading={isSaving} onClick={onSave}>
           保存阅读设置
         </AppButton>

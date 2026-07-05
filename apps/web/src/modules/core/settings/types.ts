@@ -13,5 +13,9 @@ export interface RuntimeSettings {
   cacheDirectory: string;
   cacheSizeMb: number;
   readerThumbnailTtlDays: number;
+  readerPreloadEnabled: boolean;
+  readerPreloadAheadPages: number;
+  readerThumbnailSidebarDefault: boolean;
+  readerImmersiveDefault: boolean;
   themeMode: "system" | "light" | "dark";
 }

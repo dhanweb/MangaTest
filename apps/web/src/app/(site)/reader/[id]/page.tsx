@@ -1,13 +1,14 @@
 import { Box } from "@mantine/core";
 
 import { ReaderView } from "@/components/reader-view";
+import { getRuntimeSettings } from "@/modules/core/settings";
 import { createComicRepository } from "@/modules/library/comics.repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReaderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const comic = await createComicRepository().getReaderData(id);
+  const [comic, settings] = await Promise.all([createComicRepository().getReaderData(id), getRuntimeSettings()]);
 
   if (!comic) {
     return (
@@ -19,5 +20,15 @@ export default async function ReaderPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  return <ReaderView comic={comic} />;
+  return (
+    <ReaderView
+      comic={comic}
+      preferences={{
+        readerImmersiveDefault: settings.readerImmersiveDefault,
+        readerPreloadAheadPages: settings.readerPreloadAheadPages,
+        readerPreloadEnabled: settings.readerPreloadEnabled,
+        readerThumbnailSidebarDefault: settings.readerThumbnailSidebarDefault,
+      }}
+    />
+  );
 }

@@ -86,13 +86,23 @@ describe("scanMangaRoot", () => {
     const savedSettings = await saveRuntimeSettings({
       cacheDirectory: path.join(workspace, "cache"),
       cacheSizeMb: 1,
+      readerImmersiveDefault: true,
+      readerPreloadAheadPages: 4,
+      readerPreloadEnabled: false,
+      readerThumbnailSidebarDefault: false,
       readerThumbnailTtlDays: 7,
+      themeMode: "dark",
     });
     const runtimeSettings = await getRuntimeSettings();
 
     expect(savedSettings.cacheDirectory).toBe(path.join(workspace, "cache"));
     expect(runtimeSettings.cacheSizeMb).toBe(1);
+    expect(runtimeSettings.readerImmersiveDefault).toBe(true);
+    expect(runtimeSettings.readerPreloadAheadPages).toBe(4);
+    expect(runtimeSettings.readerPreloadEnabled).toBe(false);
+    expect(runtimeSettings.readerThumbnailSidebarDefault).toBe(false);
     expect(runtimeSettings.readerThumbnailTtlDays).toBe(7);
+    expect(runtimeSettings.themeMode).toBe("dark");
 
     const { getReaderThumbnail } = await import("../media-assets");
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
