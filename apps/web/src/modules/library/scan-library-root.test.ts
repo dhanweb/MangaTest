@@ -102,7 +102,8 @@ describe("scanMangaRoot", () => {
     expect(runtimeSettings.readerPreloadEnabled).toBe(false);
     expect(runtimeSettings.readerThumbnailSidebarDefault).toBe(false);
     expect(runtimeSettings.readerThumbnailTtlDays).toBe(7);
-    expect(runtimeSettings.themeMode).toBe("dark");
+    expect(savedSettings.themeMode).toBe("light");
+    expect(runtimeSettings.themeMode).toBe("light");
 
     const { getReaderThumbnail } = await import("../media-assets");
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });

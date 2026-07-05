@@ -11,7 +11,7 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   readerPreloadAheadPages: 2,
   readerThumbnailSidebarDefault: true,
   readerImmersiveDefault: false,
-  themeMode: "system",
+  themeMode: "light",
 };
 
 export const settingDefinitions = [
@@ -74,7 +74,7 @@ export const settingDefinitions = [
   {
     key: "themeMode",
     label: "主题模式",
-    description: "控制 Mantine 的初始主题模式。",
+    description: "MVP 固定浅色主题；深色主题需要完整 token 和对比度适配后再启用。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.themeMode,
   },

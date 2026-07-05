@@ -251,22 +251,8 @@ function GeneralSettings({
       </SettingsGroup>
 
       <SettingsGroup title="外观">
-        <SettingsRow label="主题模式" note="系统模式会跟随浏览器或系统的深浅色偏好。">
-          <AppSelect
-            value={settings.themeMode}
-            onChange={(value) =>
-              onSettingsChange({
-                ...settings,
-                themeMode: value === "light" || value === "dark" || value === "system" ? value : "system",
-              })
-            }
-            data={[
-              { value: "system", label: "跟随系统" },
-              { value: "light", label: "浅色" },
-              { value: "dark", label: "深色" },
-            ]}
-            style={{ width: 180 }}
-          />
+        <SettingsRow label="主题模式" note="MVP 先固定浅色主题，避免未适配的暗色组件造成低对比度。">
+          <AppInput value="浅色" readOnly style={{ width: 180 }} />
         </SettingsRow>
       </SettingsGroup>
 

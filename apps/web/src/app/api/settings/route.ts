@@ -50,7 +50,7 @@ export async function PATCH(request: Request) {
   }
 
   if (payload.themeMode === "system" || payload.themeMode === "light" || payload.themeMode === "dark") {
-    input.themeMode = payload.themeMode;
+    input.themeMode = "light";
   }
 
   return Response.json({ settings: await saveRuntimeSettings(input) });

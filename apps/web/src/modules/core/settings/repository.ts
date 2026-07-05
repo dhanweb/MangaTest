@@ -23,6 +23,8 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
     runtimeSettings[key] = parseSettingValue(row.value, row.valueType) as never;
   }
 
+  runtimeSettings.themeMode = normalizeThemeMode();
+
   return runtimeSettings;
 }
 
@@ -87,4 +89,10 @@ function serializeSettingValue(value: RuntimeSettings[keyof RuntimeSettings]) {
   }
 
   return String(value);
+}
+
+function normalizeThemeMode(): RuntimeSettings["themeMode"] {
+  // The MVP visual system is light-only. Mantine's automatic dark scheme uses
+  // dark component surfaces that clash with the app's current light tokens.
+  return "light";
 }
