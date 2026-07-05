@@ -1,7 +1,7 @@
 "use client";
 
 import { Box, Group, Stack, Text } from "@mantine/core";
-import { Settings } from "lucide-react";
+import { Download, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
@@ -16,7 +16,9 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
   const [isSaving, setIsSaving] = useState(false);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
+  const [backupMessage, setBackupMessage] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -52,6 +54,38 @@ export default function SettingsPage() {
     }
 
     setIsSaving(false);
+  }
+
+  async function exportSqliteBackup() {
+    setIsExportingBackup(true);
+    setBackupMessage("");
+
+    try {
+      const response = await fetch("/api/settings/backup");
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "SQLite 备份导出失败。");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename = parseAttachmentFilename(disposition) ?? "mangatest-backup.sqlite";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setBackupMessage("备份已开始下载");
+    } catch (error) {
+      setBackupMessage(error instanceof Error ? error.message : "SQLite 备份导出失败。");
+    } finally {
+      setIsExportingBackup(false);
+    }
   }
 
   return (
@@ -112,7 +146,9 @@ export default function SettingsPage() {
           <ReaderSettings isSaving={isSaving} onSave={saveSettings} onSettingsChange={setRuntimeSettings} settings={runtimeSettings} />
         )}
         {activeTab === "扫描设置" && <ScanSettings />}
-        {activeTab === "安全设置" && <SecuritySettings />}
+        {activeTab === "安全设置" && (
+          <SecuritySettings backupMessage={backupMessage} isExportingBackup={isExportingBackup} onExportBackup={exportSqliteBackup} />
+        )}
       </Box>
     </Box>
   );
@@ -368,9 +404,28 @@ function ScanSettings() {
   );
 }
 
-function SecuritySettings() {
+function SecuritySettings({
+  backupMessage,
+  isExportingBackup,
+  onExportBackup,
+}: {
+  backupMessage: string;
+  isExportingBackup: boolean;
+  onExportBackup: () => void;
+}) {
   return (
     <>
+      <SettingsGroup title="备份与恢复">
+        <SettingsRow label="SQLite 备份导出" note="导出当前数据库快照，不包含漫画原始文件和缓存图片。">
+          <AppButton leftSection={<Download size={15} />} loading={isExportingBackup} onClick={onExportBackup}>
+            导出备份
+          </AppButton>
+        </SettingsRow>
+        <SettingsRow label="备份范围" note="包含漫画记录、阅读进度、标签、设置、扫描和操作日志。">
+          <AppInput value="mangatest.sqlite" readOnly style={{ width: 180 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
       <SettingsGroup title="接口保护">
         <SettingsRow label="导入令牌" note="浏览器插件调用写接口时需携带此令牌。">
           <AppInput value="MVP 未启用" readOnly style={{ width: 260 }} />
@@ -399,8 +454,18 @@ function SecuritySettings() {
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
+        {backupMessage && (
+          <Text size="sm" c={backupMessage.includes("失败") ? "red.7" : "green.7"}>
+            {backupMessage}
+          </Text>
+        )}
         <AppButton disabled>保存安全设置</AppButton>
       </Group>
     </>
   );
+}
+
+function parseAttachmentFilename(disposition: string) {
+  const match = /filename="([^"]+)"/.exec(disposition);
+  return match?.[1] ?? null;
 }

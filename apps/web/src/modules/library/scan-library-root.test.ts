@@ -227,6 +227,21 @@ describe("scanMangaRoot", () => {
     expect(publicRowsAfterRestore.items.some((comic) => comic.id === comicAId)).toBe(true);
     expect(countRows(sqlite, "operation_logs", "operation = 'restore'")).toBe(1);
 
+    const { createSqliteBackupDownload } = await import("../core/db/backup");
+    const backup = await createSqliteBackupDownload();
+    const backupPath = path.join(workspace, backup.filename);
+
+    await writeFile(backupPath, backup.data);
+
+    const backupSqlite = new Database(backupPath);
+
+    expect(backup.filename).toMatch(/^mangatest-.+\.sqlite$/);
+    expect(backup.sizeBytes).toBeGreaterThan(0);
+    expect(countRows(backupSqlite, "comics")).toBe(2);
+    expect(countRows(backupSqlite, "reading_progress")).toBe(2);
+    expect(countRows(backupSqlite, "operation_logs")).toBeGreaterThanOrEqual(4);
+
+    backupSqlite.close();
     sqlite.close();
   });
 });
