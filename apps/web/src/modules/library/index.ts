@@ -10,6 +10,7 @@ export interface LibraryComicSummary {
 }
 
 export * from "./comics.repository";
+export * from "./comic-chapter-order.repository";
 export * from "./comic-merge.repository";
 export * from "./comic-maintenance.repository";
 export * from "./manga-roots";

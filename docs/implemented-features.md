@@ -67,6 +67,7 @@ This document records features that are already implemented in `apps/web`.
 - Missing local file paths can be repaired by updating database paths only; the app does not move, copy, or delete physical files.
 - Comic records can be hidden, soft-deleted, and restored.
 - Admin comic management can merge a readable single-chapter comic into another readable comic as a chapter, then restore it as an independent comic without moving, copying, or deleting physical files.
+- Admin comic management can reorder chapters for an independent comic and persist the order through `sort_order`.
 - Dangerous maintenance actions write operation log entries.
 - SQLite backup can be exported from settings.
 - Cache summary and cleanup support media assets and archive file-list cache entries.

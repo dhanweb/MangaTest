@@ -1,11 +1,11 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { EyeOff, GitMerge, Library, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, EyeOff, GitMerge, GripVertical, Library, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
-import type { ComicMaintenanceAction, LibraryComicAdminRowRecord } from "@/modules/library";
+import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
 import { namespaceLabel, tagDisplayLabel } from "@/modules/tags";
 
@@ -23,6 +23,7 @@ type AssignedComicTag = CanonicalTag & {
 };
 
 const EMPTY_ASSIGNED_TAGS: AssignedComicTag[] = [];
+const EMPTY_CHAPTERS: LibraryChapterRecord[] = [];
 
 export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]; comics: LibraryComicAdminRowRecord[] }) {
   const [rows, setRows] = useState(() => comics);
@@ -33,10 +34,14 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
   const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
+  const [chaptersByComicId, setChaptersByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
+  const [chapterDraftsByComicId, setChapterDraftsByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [isLoadingTags, setIsLoadingTags] = useState(false);
+  const [isLoadingChapters, setIsLoadingChapters] = useState(false);
   const [actionError, setActionError] = useState("");
   const [mergeError, setMergeError] = useState("");
+  const [chapterError, setChapterError] = useState("");
   const [tagError, setTagError] = useState("");
 
   const editTargetId = editTarget?.id ?? null;
@@ -80,6 +85,49 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
     };
   }, [assignedTagsByComicId, editTargetId]);
 
+  useEffect(() => {
+    if (!editTargetId || editTarget?.parentComicId || editTarget?.mergedAsChapterId || chaptersByComicId[editTargetId]) {
+      return;
+    }
+
+    let isCanceled = false;
+
+    fetch(`/api/comics/${editTargetId}/chapters/order`)
+      .then((response) => response.json())
+      .then((payload: { chapters?: LibraryChapterRecord[]; error?: string }) => {
+        if (isCanceled) {
+          return;
+        }
+
+        if (!payload.chapters) {
+          throw new Error(payload.error ?? "读取章节顺序失败。");
+        }
+
+        setChaptersByComicId((current) => ({
+          ...current,
+          [editTargetId]: payload.chapters ?? [],
+        }));
+        setChapterDraftsByComicId((current) => ({
+          ...current,
+          [editTargetId]: payload.chapters ?? [],
+        }));
+      })
+      .catch((error) => {
+        if (!isCanceled) {
+          setChapterError(error instanceof Error ? error.message : "读取章节顺序失败。");
+        }
+      })
+      .finally(() => {
+        if (!isCanceled) {
+          setIsLoadingChapters(false);
+        }
+      });
+
+    return () => {
+      isCanceled = true;
+    };
+  }, [chaptersByComicId, editTarget?.mergedAsChapterId, editTarget?.parentComicId, editTargetId]);
+
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) {
@@ -97,8 +145,12 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const totalPages = Math.ceil(total / limit);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
   const currentTags = editTarget ? (assignedTagsByComicId[editTarget.id] ?? EMPTY_ASSIGNED_TAGS) : EMPTY_ASSIGNED_TAGS;
+  const savedChapters = editTarget ? (chaptersByComicId[editTarget.id] ?? EMPTY_CHAPTERS) : EMPTY_CHAPTERS;
+  const currentChapters = editTarget ? (chapterDraftsByComicId[editTarget.id] ?? savedChapters) : EMPTY_CHAPTERS;
+  const chapterOrderChanged = currentChapters.map((chapter) => chapter.id).join("|") !== savedChapters.map((chapter) => chapter.id).join("|");
   const editTargetIsMerged = Boolean(editTarget?.parentComicId || editTarget?.mergedAsChapterId);
   const parentComic = editTarget?.parentComicId ? rows.find((comic) => comic.id === editTarget.parentComicId) : null;
+  const canReorderChapters = Boolean(editTarget && !editTargetIsMerged && currentChapters.length > 1);
   const mergeTargetOptions = useMemo(() => {
     if (!editTarget) {
       return [];
@@ -123,13 +175,40 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   }, [availableTags, currentTags]);
 
   function openComic(comic: LibraryComicAdminRowRecord) {
+    const comicIsMerged = Boolean(comic.parentComicId || comic.mergedAsChapterId);
+
     setActionError("");
     setMergeError("");
+    setChapterError("");
     setTagError("");
     setSelectedTagId(null);
     setSelectedMergeTargetId(null);
     setIsLoadingTags(!assignedTagsByComicId[comic.id]);
+    setIsLoadingChapters(!comicIsMerged && !chaptersByComicId[comic.id]);
     setEditTarget(comic);
+  }
+
+  function clearChapterCache(...comicIds: Array<string | null | undefined>) {
+    const ids = comicIds.filter((id): id is string => Boolean(id));
+
+    if (ids.length === 0) {
+      return;
+    }
+
+    if (editTarget && ids.includes(editTarget.id)) {
+      setIsLoadingChapters(true);
+    }
+
+    setChaptersByComicId((current) => {
+      const next = { ...current };
+      ids.forEach((id) => delete next[id]);
+      return next;
+    });
+    setChapterDraftsByComicId((current) => {
+      const next = { ...current };
+      ids.forEach((id) => delete next[id]);
+      return next;
+    });
   }
 
   async function changeComicStatus(comic: LibraryComicAdminRowRecord, action: ComicMaintenanceAction) {
@@ -184,7 +263,9 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
       }
 
       setRows(payload.comics);
+      clearChapterCache(comic.id, selectedMergeTargetId);
       setEditTarget(payload.comics.find((row) => row.id === comic.id) ?? null);
+      setIsLoadingChapters(false);
       setSelectedMergeTargetId(null);
     } catch (error) {
       setMergeError(error instanceof Error ? error.message : "合并章节失败。");
@@ -194,6 +275,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   }
 
   async function restoreMergedComic(comic: LibraryComicAdminRowRecord) {
+    const parentComicId = comic.parentComicId;
+
     setPendingAction(`${comic.id}:merge:restore`);
     setMergeError("");
 
@@ -208,9 +291,65 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
       }
 
       setRows(payload.comics);
+      clearChapterCache(comic.id, parentComicId);
       setEditTarget(payload.comics.find((row) => row.id === comic.id) ?? null);
     } catch (error) {
       setMergeError(error instanceof Error ? error.message : "恢复合并漫画失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  function reorderChapterDraft(fromIndex: number, toIndex: number) {
+    if (!editTarget || fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || toIndex >= currentChapters.length) {
+      return;
+    }
+
+    const nextChapters = [...currentChapters];
+    const [movedChapter] = nextChapters.splice(fromIndex, 1);
+
+    if (!movedChapter) {
+      return;
+    }
+
+    nextChapters.splice(toIndex, 0, movedChapter);
+    setChapterDraftsByComicId((current) => ({ ...current, [editTarget.id]: nextChapters }));
+  }
+
+  function moveChapter(chapterId: string, direction: -1 | 1) {
+    const currentIndex = currentChapters.findIndex((chapter) => chapter.id === chapterId);
+    reorderChapterDraft(currentIndex, currentIndex + direction);
+  }
+
+  function dropChapter(event: DragEvent<HTMLDivElement>, targetChapterId: string) {
+    event.preventDefault();
+    const draggedChapterId = event.dataTransfer.getData("text/plain");
+    const fromIndex = currentChapters.findIndex((chapter) => chapter.id === draggedChapterId);
+    const toIndex = currentChapters.findIndex((chapter) => chapter.id === targetChapterId);
+
+    reorderChapterDraft(fromIndex, toIndex);
+  }
+
+  async function saveChapterOrder(comic: LibraryComicAdminRowRecord) {
+    setPendingAction(`${comic.id}:chapters:order`);
+    setChapterError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/chapters/order`, {
+        method: "PATCH",
+        body: JSON.stringify({ chapterIds: currentChapters.map((chapter) => chapter.id) }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { chapters?: LibraryChapterRecord[]; error?: string };
+
+      if (!response.ok || !payload.chapters) {
+        throw new Error(payload.error ?? "保存章节顺序失败。");
+      }
+
+      setChaptersByComicId((current) => ({ ...current, [comic.id]: payload.chapters ?? [] }));
+      setChapterDraftsByComicId((current) => ({ ...current, [comic.id]: payload.chapters ?? [] }));
+    } catch (error) {
+      setChapterError(error instanceof Error ? error.message : "保存章节顺序失败。");
     } finally {
       setPendingAction(null);
     }
@@ -484,6 +623,106 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
               {tagError && (
                 <Text size="sm" c="red.7" mt="xs">
                   {tagError}
+                </Text>
+              )}
+            </Box>
+
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
+                background: "white",
+              }}
+            >
+              <Group justify="space-between" align="center" mb="sm">
+                <Box>
+                  <Text size="sm" fw={700} c="ink.8">
+                    章节顺序
+                  </Text>
+                  {isLoadingChapters && (
+                    <Text size="xs" c="ink.5" mt={2}>
+                      读取中...
+                    </Text>
+                  )}
+                </Box>
+                <AppButton
+                  size="xs"
+                  leftSection={<Save size={14} />}
+                  disabled={!canReorderChapters || !chapterOrderChanged}
+                  loading={pendingAction === `${editTarget.id}:chapters:order`}
+                  onClick={() => saveChapterOrder(editTarget)}
+                >
+                  保存顺序
+                </AppButton>
+              </Group>
+
+              <Stack gap={6}>
+                {currentChapters.length > 0 ? (
+                  currentChapters.map((chapter, index) => (
+                    <Box
+                      key={chapter.id}
+                      draggable={canReorderChapters}
+                      onDragStart={(event) => event.dataTransfer.setData("text/plain", chapter.id)}
+                      onDragOver={(event) => {
+                        if (canReorderChapters) {
+                          event.preventDefault();
+                        }
+                      }}
+                      onDrop={(event) => dropChapter(event, chapter.id)}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "30px minmax(0, 1fr) auto",
+                        gap: 10,
+                        alignItems: "center",
+                        minHeight: 46,
+                        padding: "8px 10px",
+                        border: "1px solid var(--mantine-color-pink-1)",
+                        borderRadius: 8,
+                        background: chapterOrderChanged ? "var(--mantine-color-pink-0)" : "white",
+                      }}
+                    >
+                      <GripVertical size={16} style={{ color: "var(--mantine-color-ink-4)", cursor: canReorderChapters ? "grab" : "default" }} />
+                      <Box style={{ minWidth: 0 }}>
+                        <Text size="sm" fw={700} truncate>
+                          {chapter.title ?? (currentChapters.length === 1 ? "单章节" : `章节 ${index + 1}`)}
+                        </Text>
+                        <Text size="xs" c="ink.5">
+                          {chapter.pageCount} 页 · #{index + 1}
+                        </Text>
+                      </Box>
+                      <Group gap={4} wrap="nowrap">
+                        <AppButton
+                          aria-label="上移章节"
+                          variant="outline"
+                          size="xs"
+                          disabled={!canReorderChapters || index === 0}
+                          onClick={() => moveChapter(chapter.id, -1)}
+                        >
+                          <ArrowUp size={14} />
+                        </AppButton>
+                        <AppButton
+                          aria-label="下移章节"
+                          variant="outline"
+                          size="xs"
+                          disabled={!canReorderChapters || index === currentChapters.length - 1}
+                          onClick={() => moveChapter(chapter.id, 1)}
+                        >
+                          <ArrowDown size={14} />
+                        </AppButton>
+                      </Group>
+                    </Box>
+                  ))
+                ) : (
+                  <Text size="sm" c="ink.5">
+                    暂无章节。
+                  </Text>
+                )}
+              </Stack>
+
+              {chapterError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {chapterError}
                 </Text>
               )}
             </Box>

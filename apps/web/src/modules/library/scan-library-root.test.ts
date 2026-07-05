@@ -199,6 +199,20 @@ describe("scanMangaRoot", () => {
     expect(publicRowsAfterMerge.items.some((comic) => comic.id === archiveComicId)).toBe(false);
     expect(countRows(sqlite, "operation_logs", "operation = 'merge_chapter'")).toBe(1);
 
+    const targetChapters = mergedTargetDetail?.chapters ?? [];
+    const { createComicChapterOrderRepository } = await import("./comic-chapter-order.repository");
+    const chapterOrderRepository = createComicChapterOrderRepository();
+    const reorderedChapters = await chapterOrderRepository.updateOrder(
+      comicAId,
+      targetChapters.map((chapter) => chapter.id).reverse(),
+    );
+    const reorderedTargetDetail = await comicRepository.getDetail(comicAId);
+    const reorderedTargetReader = await comicRepository.getReaderData(comicAId);
+
+    expect(reorderedChapters.physicalFilesTouched).toBe(false);
+    expect(reorderedTargetDetail?.chapters.map((chapter) => chapter.id)).toEqual(targetChapters.map((chapter) => chapter.id).reverse());
+    expect(reorderedTargetReader?.pages[0]?.chapterId).toBe(targetChapters[1]?.id);
+
     await expect(maintenanceRepository.changeStatus(archiveComicId, "restore")).rejects.toThrow("已合并为章节");
 
     const restoreMergeResult = await mergeRepository.restoreMergedComic(archiveComicId);
