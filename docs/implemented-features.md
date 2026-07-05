@@ -50,6 +50,7 @@ This document records features that are already implemented in `apps/web`.
 
 - Reader thumbnails are implemented.
 - Comic list/detail cover images are implemented by a safe comic-id API and fall back to generated placeholders if no cover can be produced.
+- Admin comic management can upload manual cover images that take priority over generated covers.
 - Admin comic management can clear and regenerate generated cover caches for readable local comics.
 
 ### Search And Tags

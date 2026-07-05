@@ -1,7 +1,7 @@
 "use client";
 
-import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { ArrowDown, ArrowUp, EyeOff, GitMerge, GripVertical, Library, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { Box, FileInput, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
+import { ArrowDown, ArrowUp, EyeOff, GitMerge, GripVertical, Library, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
@@ -37,6 +37,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+  const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
   const [metadataDraft, setMetadataDraft] = useState(EMPTY_METADATA_DRAFT);
   const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
@@ -202,6 +203,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
       metadataQueryTitle: comic.metadataQueryTitle ?? "",
       originalTitle: comic.originalTitle ?? "",
     });
+    setSelectedCoverFile(null);
     setSelectedTagId(null);
     setSelectedMergeTargetId(null);
     setIsLoadingTags(!assignedTagsByComicId[comic.id]);
@@ -254,6 +256,41 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
       setMetadataMessage("漫画元数据已保存。");
     } catch (error) {
       setMetadataError(error instanceof Error ? error.message : "保存漫画元数据失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function uploadCover(comic: LibraryComicAdminRowRecord) {
+    if (!selectedCoverFile) {
+      return;
+    }
+
+    setPendingAction(`${comic.id}:cover:upload`);
+    setCoverError("");
+    setCoverMessage("");
+
+    try {
+      const formData = new FormData();
+      formData.append("file", selectedCoverFile);
+
+      const response = await fetch(`/api/comics/${comic.id}/cover`, {
+        method: "PUT",
+        body: formData,
+      });
+      const payload = (await response.json()) as {
+        result?: { generatedCount: number; mangaFilesTouched: boolean; removedManualCoverCount: number };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "上传封面失败。");
+      }
+
+      setSelectedCoverFile(null);
+      setCoverMessage(`已上传手动封面，并生成 ${payload.result.generatedCount} 个封面缓存。`);
+    } catch (error) {
+      setCoverError(error instanceof Error ? error.message : "上传封面失败。");
     } finally {
       setPendingAction(null);
     }
@@ -712,15 +749,43 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
                 background: "white",
               }}
             >
-              <Group justify="space-between" align="center" gap="sm">
+              <Group justify="space-between" align="flex-start" gap="sm" mb="sm">
                 <Box style={{ minWidth: 0 }}>
                   <Text size="sm" fw={700} c="ink.8">
                     封面缓存
                   </Text>
                   <Text size="xs" c="ink.5" mt={2}>
-                    清理旧封面缓存后，从当前封面页重新生成列表封面和详情封面。
+                    手动封面会优先用于首页和详情页；自动封面仍可从当前封面页重新生成。
                   </Text>
                 </Box>
+              </Group>
+
+              <Group gap="sm" align="flex-end">
+                <FileInput
+                  accept="image/*"
+                  clearable
+                  label="上传手动封面"
+                  placeholder="选择图片文件"
+                  value={selectedCoverFile}
+                  onChange={setSelectedCoverFile}
+                  disabled={editTargetIsMerged}
+                  style={{ flex: 1, minWidth: 220 }}
+                  styles={{
+                    input: {
+                      borderColor: "var(--mantine-color-pink-2)",
+                      borderRadius: "var(--mantine-radius-md)",
+                      "&:focus": { borderColor: "var(--mantine-color-pink-5)" },
+                    },
+                  }}
+                />
+                <AppButton
+                  leftSection={<Upload size={15} />}
+                  disabled={editTargetIsMerged || !selectedCoverFile}
+                  loading={pendingAction === `${editTarget.id}:cover:upload`}
+                  onClick={() => uploadCover(editTarget)}
+                >
+                  上传封面
+                </AppButton>
                 <AppButton
                   variant="outline"
                   leftSection={<RefreshCw size={15} />}
@@ -728,7 +793,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
                   loading={pendingAction === `${editTarget.id}:cover:regenerate`}
                   onClick={() => regenerateCover(editTarget)}
                 >
-                  重新生成封面
+                  重新生成
                 </AppButton>
               </Group>
 

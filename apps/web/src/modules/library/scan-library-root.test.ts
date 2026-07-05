@@ -109,7 +109,7 @@ describe("scanMangaRoot", () => {
     expect(runtimeSettings.themeMode).toBe("light");
 
     const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
-    const { getComicCover, getReaderThumbnail, regenerateComicCover } = await import("../media-assets");
+    const { getComicCover, getReaderThumbnail, regenerateComicCover, uploadComicCover } = await import("../media-assets");
     const generatedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
     const cachedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
@@ -131,10 +131,23 @@ describe("scanMangaRoot", () => {
     expect(regeneratedCover.assets.map((asset) => asset.use).sort()).toEqual(["cover", "list_thumbnail"]);
     expect(countRows(sqlite, "media_assets")).toBe(3);
 
+    const uploadedCover = await uploadComicCover({ comicId: comicAId, data: pngFixture });
+    const manualListCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail" });
+    const regeneratedAutomaticCover = await regenerateComicCover({ comicId: comicAId });
+    const manualListCoverAfterRegenerate = await getComicCover({ comicId: comicAId, use: "list_thumbnail" });
+
+    expect(uploadedCover.mangaFilesTouched).toBe(false);
+    expect(uploadedCover.generatedCount).toBe(2);
+    expect(uploadedCover.removedManualCoverCount).toBe(0);
+    expect(manualListCover?.cacheStatus).toBe("hit");
+    expect(regeneratedAutomaticCover.removedCacheCount).toBe(2);
+    expect(manualListCoverAfterRegenerate?.cacheStatus).toBe("hit");
+    expect(countRows(sqlite, "media_assets")).toBe(5);
+
     const { cleanupApplicationCache, getCacheSummary } = await import("../core/cache");
     const cacheSummary = await getCacheSummary();
 
-    expect(cacheSummary.mediaAssetCount).toBe(3);
+    expect(cacheSummary.mediaAssetCount).toBe(5);
     expect(cacheSummary.archiveFileListCount).toBe(1);
     expect(cacheSummary.maxSizeBytes).toBe(1024 * 1024);
     expect(cacheSummary.totalSizeBytes).toBeGreaterThan(0);

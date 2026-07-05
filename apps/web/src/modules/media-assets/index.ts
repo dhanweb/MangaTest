@@ -32,6 +32,7 @@ export interface ReaderThumbnailRequest {
 export interface ComicCoverRequest {
   comicId: string;
   height?: number;
+  skipManualCover?: boolean;
   use?: "cover" | "list_thumbnail";
   width?: number;
 }
@@ -53,6 +54,17 @@ export interface RegenerateComicCoverResult {
   mangaFilesTouched: false;
 }
 
+export interface UploadComicCoverResult {
+  comicId: string;
+  generatedCount: number;
+  removedManualCoverCount: number;
+  assets: Array<{
+    use: "cover" | "list_thumbnail";
+    cacheStatus: "uploaded";
+  }>;
+  mangaFilesTouched: false;
+}
+
 const DEFAULT_COVER_WIDTH = 520;
 const DEFAULT_COVER_HEIGHT = 780;
 const DEFAULT_LIST_COVER_WIDTH = 240;
@@ -60,6 +72,7 @@ const DEFAULT_LIST_COVER_HEIGHT = 360;
 const DEFAULT_READER_THUMBNAIL_WIDTH = 176;
 const DEFAULT_READER_THUMBNAIL_HEIGHT = 264;
 const GENERATION_CONCURRENCY = 2;
+const MANUAL_COVER_CACHE_PREFIX = "manual-cover";
 
 let activeGenerationCount = 0;
 const generationQueue: Array<() => void> = [];
@@ -71,6 +84,19 @@ export async function getComicCover(input: ComicCoverRequest): Promise<CachedMed
   const use = input.use ?? "cover";
   const width = normalizeDimension(input.width, use === "list_thumbnail" ? DEFAULT_LIST_COVER_WIDTH : DEFAULT_COVER_WIDTH, 1200);
   const height = normalizeDimension(input.height, use === "list_thumbnail" ? DEFAULT_LIST_COVER_HEIGHT : DEFAULT_COVER_HEIGHT, 1200);
+  const manualCover = input.skipManualCover
+    ? null
+    : await readManualCoverAsset({
+        comicId: input.comicId,
+        height,
+        use,
+        width,
+      });
+
+  if (manualCover) {
+    return manualCover;
+  }
+
   const coverPage = findComicCoverPage(input.comicId);
 
   if (!coverPage) {
@@ -170,11 +196,13 @@ export async function regenerateComicCover(input: { comicId: string }): Promise<
   const cachedCoverRows = db
     .select({
       id: mediaAssets.id,
+      cacheKey: mediaAssets.cacheKey,
       filePath: mediaAssets.filePath,
     })
     .from(mediaAssets)
     .where(and(eq(mediaAssets.comicId, input.comicId), inArray(mediaAssets.use, [...coverUses])))
-    .all();
+    .all()
+    .filter((row) => !isManualCoverCacheKey(row.cacheKey));
 
   for (const row of cachedCoverRows) {
     await rm(/*turbopackIgnore: true*/ row.filePath, { force: true }).catch(() => undefined);
@@ -186,6 +214,7 @@ export async function regenerateComicCover(input: { comicId: string }): Promise<
   for (const use of coverUses) {
     const asset = await getComicCover({
       comicId: input.comicId,
+      skipManualCover: true,
       use,
       width: use === "list_thumbnail" ? DEFAULT_LIST_COVER_WIDTH : DEFAULT_COVER_WIDTH,
       height: use === "list_thumbnail" ? DEFAULT_LIST_COVER_HEIGHT : DEFAULT_COVER_HEIGHT,
@@ -203,6 +232,87 @@ export async function regenerateComicCover(input: { comicId: string }): Promise<
     comicId: input.comicId,
     removedCacheCount: cachedCoverRows.length,
     generatedCount: generatedAssets.length,
+    assets: generatedAssets,
+    mangaFilesTouched: false,
+  };
+}
+
+export async function uploadComicCover(input: { comicId: string; data: Buffer }): Promise<UploadComicCoverResult> {
+  bootstrapDatabase();
+
+  const db = getDb();
+  const comic = db.select({ id: comics.id }).from(comics).where(eq(comics.id, input.comicId)).get();
+
+  if (!comic) {
+    throw new Error("找不到漫画记录。");
+  }
+
+  const coverUses = ["cover", "list_thumbnail"] as const;
+  const oldManualRows = db
+    .select({
+      id: mediaAssets.id,
+      cacheKey: mediaAssets.cacheKey,
+      filePath: mediaAssets.filePath,
+    })
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.comicId, input.comicId), inArray(mediaAssets.use, [...coverUses])))
+    .all()
+    .filter((row) => isManualCoverCacheKey(row.cacheKey));
+
+  for (const row of oldManualRows) {
+    await rm(/*turbopackIgnore: true*/ row.filePath, { force: true }).catch(() => undefined);
+    db.delete(mediaAssets).where(eq(mediaAssets.id, row.id)).run();
+  }
+
+  const now = new Date().toISOString();
+  const runtimeSettings = await getRuntimeSettings();
+  const generatedAssets: UploadComicCoverResult["assets"] = [];
+
+  for (const use of coverUses) {
+    const width = use === "list_thumbnail" ? DEFAULT_LIST_COVER_WIDTH : DEFAULT_COVER_WIDTH;
+    const height = use === "list_thumbnail" ? DEFAULT_LIST_COVER_HEIGHT : DEFAULT_COVER_HEIGHT;
+    const data = await sharp(input.data)
+      .rotate()
+      .resize({ width, height, fit: "cover" })
+      .webp({ quality: use === "list_thumbnail" ? 78 : 84 })
+      .toBuffer();
+    const cacheKey = createManualCoverCacheKey({
+      comicId: input.comicId,
+      height,
+      use,
+      width,
+    });
+    const cachePath = await writeMediaCacheFile(cacheKey, data, runtimeSettings.cacheDirectory, "manual-covers");
+
+    db.insert(mediaAssets)
+      .values({
+        id: randomUUID(),
+        comicId: input.comicId,
+        chapterId: null,
+        pageId: null,
+        use,
+        cacheKey,
+        width,
+        height,
+        filePath: cachePath,
+        sizeBytes: data.byteLength,
+        lastAccessAt: now,
+        expiresAt: null,
+        updatedAt: now,
+      })
+      .run();
+    generatedAssets.push({
+      use,
+      cacheStatus: "uploaded",
+    });
+  }
+
+  void cleanupApplicationCache().catch(() => undefined);
+
+  return {
+    comicId: input.comicId,
+    generatedCount: generatedAssets.length,
+    removedManualCoverCount: oldManualRows.length,
     assets: generatedAssets,
     mangaFilesTouched: false,
   };
@@ -343,6 +453,48 @@ function findComicCoverPage(comicId: string) {
 function isCoverLikePath(internalPath: string) {
   const name = path.basename(internalPath, path.extname(internalPath)).toLocaleLowerCase();
   return name === "cover" || name.startsWith("cover.") || name.startsWith("cover-") || name.startsWith("cover_");
+}
+
+async function readManualCoverAsset(input: { comicId: string; height: number; use: "cover" | "list_thumbnail"; width: number }) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const cacheKey = createManualCoverCacheKey(input);
+  const cached = db.select().from(mediaAssets).where(eq(mediaAssets.cacheKey, cacheKey)).get();
+
+  if (!cached) {
+    return null;
+  }
+
+  const data = await readFile(/*turbopackIgnore: true*/ cached.filePath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (!data) {
+    db.delete(mediaAssets).where(eq(mediaAssets.id, cached.id)).run();
+    return null;
+  }
+
+  db.update(mediaAssets)
+    .set({
+      lastAccessAt: now,
+      updatedAt: now,
+    })
+    .where(eq(mediaAssets.id, cached.id))
+    .run();
+
+  return { data, contentType: "image/webp", cacheStatus: "hit" as const };
+}
+
+function createManualCoverCacheKey(input: { comicId: string; height: number; use: "cover" | "list_thumbnail"; width: number }) {
+  return `${MANUAL_COVER_CACHE_PREFIX}:${input.comicId}:${input.use}:${input.width}x${input.height}`;
+}
+
+function isManualCoverCacheKey(cacheKey: string) {
+  return cacheKey.startsWith(`${MANUAL_COVER_CACHE_PREFIX}:`);
 }
 
 function enqueueThumbnailGeneration<T>(task: () => Promise<T>) {
