@@ -1,8 +1,8 @@
 import { randomUUID, createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import sharp from "sharp";
 
 import { cleanupApplicationCache } from "@/modules/core/cache";
@@ -40,6 +40,17 @@ export interface CachedMediaAsset {
   data: Buffer;
   contentType: string;
   cacheStatus: "hit" | "generated";
+}
+
+export interface RegenerateComicCoverResult {
+  comicId: string;
+  removedCacheCount: number;
+  generatedCount: number;
+  assets: Array<{
+    use: "cover" | "list_thumbnail";
+    cacheStatus: CachedMediaAsset["cacheStatus"];
+  }>;
+  mangaFilesTouched: false;
 }
 
 const DEFAULT_COVER_WIDTH = 520;
@@ -149,6 +160,52 @@ export async function getComicCover(input: ComicCoverRequest): Promise<CachedMed
     void cleanupApplicationCache().catch(() => undefined);
     return { data, contentType: "image/webp", cacheStatus: "generated" };
   });
+}
+
+export async function regenerateComicCover(input: { comicId: string }): Promise<RegenerateComicCoverResult> {
+  bootstrapDatabase();
+
+  const db = getDb();
+  const coverUses = ["cover", "list_thumbnail"] as const;
+  const cachedCoverRows = db
+    .select({
+      id: mediaAssets.id,
+      filePath: mediaAssets.filePath,
+    })
+    .from(mediaAssets)
+    .where(and(eq(mediaAssets.comicId, input.comicId), inArray(mediaAssets.use, [...coverUses])))
+    .all();
+
+  for (const row of cachedCoverRows) {
+    await rm(/*turbopackIgnore: true*/ row.filePath, { force: true }).catch(() => undefined);
+    db.delete(mediaAssets).where(eq(mediaAssets.id, row.id)).run();
+  }
+
+  const generatedAssets: RegenerateComicCoverResult["assets"] = [];
+
+  for (const use of coverUses) {
+    const asset = await getComicCover({
+      comicId: input.comicId,
+      use,
+      width: use === "list_thumbnail" ? DEFAULT_LIST_COVER_WIDTH : DEFAULT_COVER_WIDTH,
+      height: use === "list_thumbnail" ? DEFAULT_LIST_COVER_HEIGHT : DEFAULT_COVER_HEIGHT,
+    });
+
+    if (asset) {
+      generatedAssets.push({
+        use,
+        cacheStatus: asset.cacheStatus,
+      });
+    }
+  }
+
+  return {
+    comicId: input.comicId,
+    removedCacheCount: cachedCoverRows.length,
+    generatedCount: generatedAssets.length,
+    assets: generatedAssets,
+    mangaFilesTouched: false,
+  };
 }
 
 export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise<CachedMediaAsset | null> {

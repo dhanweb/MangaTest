@@ -109,7 +109,7 @@ describe("scanMangaRoot", () => {
     expect(runtimeSettings.themeMode).toBe("light");
 
     const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
-    const { getComicCover, getReaderThumbnail } = await import("../media-assets");
+    const { getComicCover, getReaderThumbnail, regenerateComicCover } = await import("../media-assets");
     const generatedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
     const cachedCover = await getComicCover({ comicId: comicAId, use: "list_thumbnail", width: 120, height: 180 });
     const generatedThumbnail = await getReaderThumbnail({ pageId: directoryPage.id, width: 88, height: 132 });
@@ -123,10 +123,18 @@ describe("scanMangaRoot", () => {
     expect(cachedThumbnail?.cacheStatus).toBe("hit");
     expect(countRows(sqlite, "media_assets")).toBe(2);
 
+    const regeneratedCover = await regenerateComicCover({ comicId: comicAId });
+
+    expect(regeneratedCover.mangaFilesTouched).toBe(false);
+    expect(regeneratedCover.removedCacheCount).toBe(1);
+    expect(regeneratedCover.generatedCount).toBe(2);
+    expect(regeneratedCover.assets.map((asset) => asset.use).sort()).toEqual(["cover", "list_thumbnail"]);
+    expect(countRows(sqlite, "media_assets")).toBe(3);
+
     const { cleanupApplicationCache, getCacheSummary } = await import("../core/cache");
     const cacheSummary = await getCacheSummary();
 
-    expect(cacheSummary.mediaAssetCount).toBe(2);
+    expect(cacheSummary.mediaAssetCount).toBe(3);
     expect(cacheSummary.archiveFileListCount).toBe(1);
     expect(cacheSummary.maxSizeBytes).toBe(1024 * 1024);
     expect(cacheSummary.totalSizeBytes).toBeGreaterThan(0);

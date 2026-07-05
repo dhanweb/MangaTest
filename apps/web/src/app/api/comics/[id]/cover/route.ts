@@ -1,4 +1,4 @@
-import { getComicCover } from "@/modules/media-assets";
+import { getComicCover, regenerateComicCover } from "@/modules/media-assets";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,6 +24,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       "X-MangaTest-Cache": cover.cacheStatus,
     },
   });
+}
+
+export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  try {
+    const result = await regenerateComicCover({ comicId: id });
+
+    if (result.generatedCount === 0) {
+      return Response.json({ error: "没有可用于生成封面的本地页面。", result }, { status: 404 });
+    }
+
+    return Response.json({ result });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "重新生成封面失败。" }, { status: 400 });
+  }
 }
 
 function parseCoverUse(value: string | null) {

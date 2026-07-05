@@ -1,7 +1,7 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { ArrowDown, ArrowUp, EyeOff, GitMerge, GripVertical, Library, Plus, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, EyeOff, GitMerge, GripVertical, Library, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
@@ -40,6 +40,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [isLoadingTags, setIsLoadingTags] = useState(false);
   const [isLoadingChapters, setIsLoadingChapters] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [coverError, setCoverError] = useState("");
+  const [coverMessage, setCoverMessage] = useState("");
   const [mergeError, setMergeError] = useState("");
   const [chapterError, setChapterError] = useState("");
   const [tagError, setTagError] = useState("");
@@ -178,6 +180,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
     const comicIsMerged = Boolean(comic.parentComicId || comic.mergedAsChapterId);
 
     setActionError("");
+    setCoverError("");
+    setCoverMessage("");
     setMergeError("");
     setChapterError("");
     setTagError("");
@@ -186,6 +190,32 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
     setIsLoadingTags(!assignedTagsByComicId[comic.id]);
     setIsLoadingChapters(!comicIsMerged && !chaptersByComicId[comic.id]);
     setEditTarget(comic);
+  }
+
+  async function regenerateCover(comic: LibraryComicAdminRowRecord) {
+    setPendingAction(`${comic.id}:cover:regenerate`);
+    setCoverError("");
+    setCoverMessage("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/cover`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        result?: { generatedCount: number; removedCacheCount: number; mangaFilesTouched: boolean };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "重新生成封面失败。");
+      }
+
+      setCoverMessage(`已重新生成 ${payload.result.generatedCount} 个封面缓存，清理旧缓存 ${payload.result.removedCacheCount} 个。`);
+    } catch (error) {
+      setCoverError(error instanceof Error ? error.message : "重新生成封面失败。");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   function clearChapterCache(...comicIds: Array<string | null | undefined>) {
@@ -552,6 +582,46 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
             </SimpleGrid>
 
             <AppInput label="本地路径" value={editTarget.primaryLocalPath ?? "未关联主文件"} readOnly />
+
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
+                background: "white",
+              }}
+            >
+              <Group justify="space-between" align="center" gap="sm">
+                <Box style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={700} c="ink.8">
+                    封面缓存
+                  </Text>
+                  <Text size="xs" c="ink.5" mt={2}>
+                    清理旧封面缓存后，从当前封面页重新生成列表封面和详情封面。
+                  </Text>
+                </Box>
+                <AppButton
+                  variant="outline"
+                  leftSection={<RefreshCw size={15} />}
+                  disabled={editTarget.status !== "readable" || editTarget.isPrimaryFileMissing}
+                  loading={pendingAction === `${editTarget.id}:cover:regenerate`}
+                  onClick={() => regenerateCover(editTarget)}
+                >
+                  重新生成封面
+                </AppButton>
+              </Group>
+
+              {coverMessage && (
+                <Text size="sm" c="green.7" mt="xs">
+                  {coverMessage}
+                </Text>
+              )}
+              {coverError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {coverError}
+                </Text>
+              )}
+            </Box>
 
             <Box
               p="sm"
