@@ -24,6 +24,11 @@ type AssignedComicTag = CanonicalTag & {
 
 const EMPTY_ASSIGNED_TAGS: AssignedComicTag[] = [];
 const EMPTY_CHAPTERS: LibraryChapterRecord[] = [];
+const EMPTY_METADATA_DRAFT = {
+  displayTitle: "",
+  metadataQueryTitle: "",
+  originalTitle: "",
+};
 
 export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]; comics: LibraryComicAdminRowRecord[] }) {
   const [rows, setRows] = useState(() => comics);
@@ -33,6 +38,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
+  const [metadataDraft, setMetadataDraft] = useState(EMPTY_METADATA_DRAFT);
   const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
   const [chaptersByComicId, setChaptersByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
   const [chapterDraftsByComicId, setChapterDraftsByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
@@ -42,6 +48,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [actionError, setActionError] = useState("");
   const [coverError, setCoverError] = useState("");
   const [coverMessage, setCoverMessage] = useState("");
+  const [metadataError, setMetadataError] = useState("");
+  const [metadataMessage, setMetadataMessage] = useState("");
   const [mergeError, setMergeError] = useState("");
   const [chapterError, setChapterError] = useState("");
   const [tagError, setTagError] = useState("");
@@ -137,7 +145,9 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
     }
 
     return rows.filter((comic) => {
-      const text = [comic.displayTitle, comic.fileTitle, comic.status, comic.localFileKind ?? ""].join(" ").toLowerCase();
+      const text = [comic.displayTitle, comic.fileTitle, comic.originalTitle ?? "", comic.metadataQueryTitle ?? "", comic.status, comic.localFileKind ?? ""]
+        .join(" ")
+        .toLowerCase();
       return text.includes(query);
     });
   }, [rows, search]);
@@ -182,14 +192,71 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
     setActionError("");
     setCoverError("");
     setCoverMessage("");
+    setMetadataError("");
+    setMetadataMessage("");
     setMergeError("");
     setChapterError("");
     setTagError("");
+    setMetadataDraft({
+      displayTitle: comic.displayTitle,
+      metadataQueryTitle: comic.metadataQueryTitle ?? "",
+      originalTitle: comic.originalTitle ?? "",
+    });
     setSelectedTagId(null);
     setSelectedMergeTargetId(null);
     setIsLoadingTags(!assignedTagsByComicId[comic.id]);
     setIsLoadingChapters(!comicIsMerged && !chaptersByComicId[comic.id]);
     setEditTarget(comic);
+  }
+
+  async function saveComicMetadata(comic: LibraryComicAdminRowRecord) {
+    setPendingAction(`${comic.id}:metadata`);
+    setMetadataError("");
+    setMetadataMessage("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/metadata`, {
+        method: "PATCH",
+        body: JSON.stringify(metadataDraft),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as {
+        comic?: {
+          id: string;
+          displayTitle: string;
+          fileTitle: string;
+          metadataQueryTitle: string | null;
+          originalTitle: string | null;
+          updatedAt: string;
+        };
+        error?: string;
+      };
+      const updatedComic = payload.comic;
+
+      if (!response.ok || !updatedComic) {
+        throw new Error(payload.error ?? "保存漫画元数据失败。");
+      }
+
+      const rowPatch = {
+        displayTitle: updatedComic.displayTitle,
+        metadataQueryTitle: updatedComic.metadataQueryTitle,
+        originalTitle: updatedComic.originalTitle,
+        updatedAt: updatedComic.updatedAt,
+      };
+
+      setRows((current) => current.map((row) => (row.id === updatedComic.id ? { ...row, ...rowPatch } : row)));
+      setEditTarget((current) => (current?.id === updatedComic.id ? { ...current, ...rowPatch } : current));
+      setMetadataDraft({
+        displayTitle: updatedComic.displayTitle,
+        metadataQueryTitle: updatedComic.metadataQueryTitle ?? "",
+        originalTitle: updatedComic.originalTitle ?? "",
+      });
+      setMetadataMessage("漫画元数据已保存。");
+    } catch (error) {
+      setMetadataError(error instanceof Error ? error.message : "保存漫画元数据失败。");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   async function regenerateCover(comic: LibraryComicAdminRowRecord) {
@@ -574,12 +641,66 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
               {editTarget.fileTitle}
             </Text>
 
-            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-              <AppInput label="标题" value={editTarget.displayTitle} readOnly />
-              <AppInput label="文件标题" value={editTarget.fileTitle} readOnly />
-              <AppInput label="格式" value={formatKind(editTarget.localFileKind)} readOnly />
-              <AppInput label="状态" value={statusLabel(editTarget.status, editTargetIsMerged)} readOnly />
-            </SimpleGrid>
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
+                background: "white",
+              }}
+            >
+              <Group justify="space-between" align="center" mb="sm">
+                <Box>
+                  <Text size="sm" fw={700} c="ink.8">
+                    标题与元数据
+                  </Text>
+                  <Text size="xs" c="ink.5" mt={2}>
+                    文件标题保留扫描来源，不会被这里的编辑覆盖。
+                  </Text>
+                </Box>
+                <AppButton
+                  size="xs"
+                  leftSection={<Save size={14} />}
+                  disabled={!metadataDraft.displayTitle.trim()}
+                  loading={pendingAction === `${editTarget.id}:metadata`}
+                  onClick={() => saveComicMetadata(editTarget)}
+                >
+                  保存信息
+                </AppButton>
+              </Group>
+
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                <AppInput
+                  label="展示标题"
+                  value={metadataDraft.displayTitle}
+                  onChange={(event) => setMetadataDraft((current) => ({ ...current, displayTitle: event.currentTarget.value }))}
+                />
+                <AppInput label="文件标题" value={editTarget.fileTitle} readOnly />
+                <AppInput
+                  label="原始标题"
+                  value={metadataDraft.originalTitle}
+                  onChange={(event) => setMetadataDraft((current) => ({ ...current, originalTitle: event.currentTarget.value }))}
+                />
+                <AppInput
+                  label="元数据查询标题"
+                  value={metadataDraft.metadataQueryTitle}
+                  onChange={(event) => setMetadataDraft((current) => ({ ...current, metadataQueryTitle: event.currentTarget.value }))}
+                />
+                <AppInput label="格式" value={formatKind(editTarget.localFileKind)} readOnly />
+                <AppInput label="状态" value={statusLabel(editTarget.status, editTargetIsMerged)} readOnly />
+              </SimpleGrid>
+
+              {metadataMessage && (
+                <Text size="sm" c="green.7" mt="xs">
+                  {metadataMessage}
+                </Text>
+              )}
+              {metadataError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {metadataError}
+                </Text>
+              )}
+            </Box>
 
             <AppInput label="本地路径" value={editTarget.primaryLocalPath ?? "未关联主文件"} readOnly />
 

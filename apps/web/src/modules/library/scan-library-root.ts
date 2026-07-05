@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 
 import { bootstrapDatabase, chapters, comics, getDb, localFiles, mangaRoots, pages, scanSessions } from "@/modules/core/db";
 import { enumerateMangaRootChildren } from "@/modules/local-files";
+import { normalizeSortTitle } from "@/modules/library/title-utils";
 
 export interface LibraryScanResult {
   sessionId: string;
@@ -208,8 +209,4 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
 
     throw error;
   }
-}
-
-function normalizeSortTitle(title: string) {
-  return title.trim().toLocaleLowerCase();
 }

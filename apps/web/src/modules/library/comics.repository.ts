@@ -41,6 +41,8 @@ export interface LibraryComicSearchResult {
 
 export interface LibraryComicAdminRowRecord extends LibraryComicCardRecord {
   updatedAt: string;
+  metadataQueryTitle: string | null;
+  originalTitle: string | null;
   primaryLocalPath: string | null;
   isPrimaryFileMissing: boolean;
   parentComicId: string | null;
@@ -59,6 +61,7 @@ export interface LibraryComicDetailRecord {
   id: string;
   displayTitle: string;
   fileTitle: string;
+  metadataQueryTitle: string | null;
   originalTitle: string | null;
   status: LibraryComicCardRecord["status"];
   primaryLocalFileId: string | null;
@@ -115,6 +118,7 @@ export function createComicRepository(): ComicRepository {
         ? or(
             like(comics.displayTitle, `%${query}%`),
             like(comics.fileTitle, `%${query}%`),
+            like(comics.metadataQueryTitle, `%${query}%`),
             like(comics.originalTitle, `%${query}%`),
             like(tags.canonical, `%${query.toLocaleLowerCase()}%`),
             like(tags.name, `%${query.toLocaleLowerCase()}%`),
@@ -222,6 +226,8 @@ export function createComicRepository(): ComicRepository {
           id: comics.id,
           displayTitle: comics.displayTitle,
           fileTitle: comics.fileTitle,
+          metadataQueryTitle: comics.metadataQueryTitle,
+          originalTitle: comics.originalTitle,
           status: comics.status,
           primaryLocalFileId: comics.primaryLocalFileId,
           parentComicId: comics.parentComicId,
@@ -260,6 +266,7 @@ export function createComicRepository(): ComicRepository {
           id: comics.id,
           displayTitle: comics.displayTitle,
           fileTitle: comics.fileTitle,
+          metadataQueryTitle: comics.metadataQueryTitle,
           originalTitle: comics.originalTitle,
           status: comics.status,
           primaryLocalFileId: comics.primaryLocalFileId,

@@ -179,6 +179,23 @@ describe("scanMangaRoot", () => {
 
     const { createComicRepository } = await import("./comics.repository");
     const comicRepository = createComicRepository();
+    const { createComicMetadataRepository } = await import("./comic-metadata.repository");
+    const metadataRepository = createComicMetadataRepository();
+    const updatedMetadata = await metadataRepository.updateMetadata(comicAId, {
+      displayTitle: "Comic A Edited",
+      metadataQueryTitle: "Comic A Search Alias",
+      originalTitle: "Comic A Original",
+    });
+    const metadataSearchResult = await comicRepository.searchReadableCards({ query: "Search Alias", pageSize: 12 });
+    const storedMetadata = selectComicMetadata(sqlite, comicAId);
+
+    expect(updatedMetadata.displayTitle).toBe("Comic A Edited");
+    expect(updatedMetadata.fileTitle).toBe("Comic A");
+    expect(updatedMetadata.originalTitle).toBe("Comic A Original");
+    expect(updatedMetadata.metadataQueryTitle).toBe("Comic A Search Alias");
+    expect(storedMetadata.sortTitle).toBe("comic a edited");
+    expect(metadataSearchResult.items.map((comic) => comic.id)).toContain(comicAId);
+
     const tagFilters = await comicRepository.listReadableTagFilters();
     const tagSearchResult = await comicRepository.searchReadableCards({ query: "示例作者改", pageSize: 12 });
     const taggedResult = await comicRepository.searchReadableCards({ tags: [createdTag.canonical], pageSize: 12 });
@@ -393,5 +410,19 @@ function selectComicMergeState(sqlite: Database.Database, comicId: string) {
     .get(comicId) as {
     parentComicId: string | null;
     mergedAsChapterId: string | null;
+  };
+}
+
+function selectComicMetadata(sqlite: Database.Database, comicId: string) {
+  return sqlite
+    .prepare(
+      "select display_title as displayTitle, file_title as fileTitle, original_title as originalTitle, metadata_query_title as metadataQueryTitle, sort_title as sortTitle from comics where id = ?",
+    )
+    .get(comicId) as {
+    displayTitle: string;
+    fileTitle: string;
+    originalTitle: string | null;
+    metadataQueryTitle: string | null;
+    sortTitle: string;
   };
 }
