@@ -1,11 +1,13 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { EyeOff, Library, RotateCcw, Search, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { EyeOff, Library, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
-import { AppButton, AppInput } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, LibraryComicAdminRowRecord } from "@/modules/library";
+import type { CanonicalTag } from "@/modules/tags";
+import { namespaceLabel, tagDisplayLabel } from "@/modules/tags";
 
 const PAGE_SIZE_OPTIONS = [
   { value: "10", label: "10 条/页" },
@@ -13,14 +15,68 @@ const PAGE_SIZE_OPTIONS = [
   { value: "50", label: "50 条/页" },
 ];
 
-export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }) {
+type TagRow = CanonicalTag & { comicCount: number };
+type AssignedComicTag = CanonicalTag & {
+  source: "scan" | "metadata" | "manual";
+  isUserEdited: boolean;
+  assignedAt: string;
+};
+
+const EMPTY_ASSIGNED_TAGS: AssignedComicTag[] = [];
+
+export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]; comics: LibraryComicAdminRowRecord[] }) {
   const [rows, setRows] = useState(() => comics);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
+  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+  const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [isLoadingTags, setIsLoadingTags] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [tagError, setTagError] = useState("");
+
+  const editTargetId = editTarget?.id ?? null;
+
+  useEffect(() => {
+    if (!editTargetId || assignedTagsByComicId[editTargetId]) {
+      return;
+    }
+
+    let isCanceled = false;
+
+    fetch(`/api/comics/${editTargetId}/tags`)
+      .then((response) => response.json())
+      .then((payload: { tags?: AssignedComicTag[]; error?: string }) => {
+        if (isCanceled) {
+          return;
+        }
+
+        if (!payload.tags) {
+          throw new Error(payload.error ?? "读取漫画标签失败。");
+        }
+
+        setAssignedTagsByComicId((current) => ({
+          ...current,
+          [editTargetId]: payload.tags ?? [],
+        }));
+      })
+      .catch((error) => {
+        if (!isCanceled) {
+          setTagError(error instanceof Error ? error.message : "读取漫画标签失败。");
+        }
+      })
+      .finally(() => {
+        if (!isCanceled) {
+          setIsLoadingTags(false);
+        }
+      });
+
+    return () => {
+      isCanceled = true;
+    };
+  }, [assignedTagsByComicId, editTargetId]);
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -38,6 +94,25 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
   const total = filtered.length;
   const totalPages = Math.ceil(total / limit);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
+  const currentTags = editTarget ? (assignedTagsByComicId[editTarget.id] ?? EMPTY_ASSIGNED_TAGS) : EMPTY_ASSIGNED_TAGS;
+  const availableTagOptions = useMemo(() => {
+    const assignedIds = new Set(currentTags.map((tag) => tag.id));
+
+    return availableTags
+      .filter((tag) => !assignedIds.has(tag.id))
+      .map((tag) => ({
+        value: tag.id,
+        label: `${tagDisplayLabel(tag)} · ${namespaceLabel(tag.namespace)}`,
+      }));
+  }, [availableTags, currentTags]);
+
+  function openComic(comic: LibraryComicAdminRowRecord) {
+    setActionError("");
+    setTagError("");
+    setSelectedTagId(null);
+    setIsLoadingTags(!assignedTagsByComicId[comic.id]);
+    setEditTarget(comic);
+  }
 
   async function changeComicStatus(comic: LibraryComicAdminRowRecord, action: ComicMaintenanceAction) {
     const actionKey = `${comic.id}:${action}`;
@@ -65,6 +140,59 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
       setEditTarget((current) => (current?.id === updatedComic.id ? { ...current, status: updatedComic.status } : current));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "漫画状态更新失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function addTagToComic(comic: LibraryComicAdminRowRecord) {
+    if (!selectedTagId) {
+      return;
+    }
+
+    setPendingAction(`${comic.id}:tag:add`);
+    setTagError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/tags`, {
+        method: "POST",
+        body: JSON.stringify({ tagId: selectedTagId }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { tags?: AssignedComicTag[]; error?: string };
+
+      if (!response.ok || !payload.tags) {
+        throw new Error(payload.error ?? "绑定漫画标签失败。");
+      }
+
+      setAssignedTagsByComicId((current) => ({ ...current, [comic.id]: payload.tags ?? [] }));
+      setSelectedTagId(null);
+    } catch (error) {
+      setTagError(error instanceof Error ? error.message : "绑定漫画标签失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function removeTagFromComic(comic: LibraryComicAdminRowRecord, tagId: string) {
+    setPendingAction(`${comic.id}:tag:remove:${tagId}`);
+    setTagError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/tags`, {
+        method: "DELETE",
+        body: JSON.stringify({ tagId }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { tags?: AssignedComicTag[]; error?: string };
+
+      if (!response.ok || !payload.tags) {
+        throw new Error(payload.error ?? "移除漫画标签失败。");
+      }
+
+      setAssignedTagsByComicId((current) => ({ ...current, [comic.id]: payload.tags ?? [] }));
+    } catch (error) {
+      setTagError(error instanceof Error ? error.message : "移除漫画标签失败。");
     } finally {
       setPendingAction(null);
     }
@@ -146,7 +274,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
                   <StatusBadge status={comic.status} missing={comic.isPrimaryFileMissing} />
                 </Table.Td>
                 <Table.Td>
-                  <AppButton variant="outline" size="xs" onClick={() => setEditTarget(comic)}>
+                  <AppButton variant="outline" size="xs" onClick={() => openComic(comic)}>
                     查看
                   </AppButton>
                 </Table.Td>
@@ -214,6 +342,80 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
             </SimpleGrid>
 
             <AppInput label="本地路径" value={editTarget.primaryLocalPath ?? "未关联主文件"} readOnly />
+
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
+                background: "white",
+              }}
+            >
+              <Group justify="space-between" align="flex-start" mb="xs">
+                <Box>
+                  <Text size="sm" fw={700} c="ink.8">
+                    漫画标签
+                  </Text>
+                  <Text size="xs" c="ink.5" mt={2}>
+                    绑定 canonical 标签后，前台搜索和标签筛选会立即使用这些关系。
+                  </Text>
+                </Box>
+                {isLoadingTags && (
+                  <Text size="xs" c="ink.5">
+                    读取中...
+                  </Text>
+                )}
+              </Group>
+
+              <Group gap={8} wrap="wrap" mb="sm">
+                {currentTags.length > 0 ? (
+                  currentTags.map((tag) => (
+                    <AppButton
+                      key={tag.id}
+                      variant="outline"
+                      size="xs"
+                      rightSection={<X size={13} />}
+                      loading={pendingAction === `${editTarget.id}:tag:remove:${tag.id}`}
+                      onClick={() => removeTagFromComic(editTarget, tag.id)}
+                    >
+                      {tagDisplayLabel(tag)}
+                    </AppButton>
+                  ))
+                ) : (
+                  <Text size="sm" c="ink.5">
+                    暂未绑定标签。
+                  </Text>
+                )}
+              </Group>
+
+              <Group gap="sm" align="flex-end">
+                <AppSelect
+                  searchable
+                  clearable
+                  label="添加标签"
+                  placeholder={availableTagOptions.length > 0 ? "选择标签" : "没有可添加的标签"}
+                  value={selectedTagId}
+                  onChange={setSelectedTagId}
+                  data={availableTagOptions}
+                  disabled={availableTagOptions.length === 0}
+                  style={{ flex: 1, minWidth: 220 }}
+                />
+                <AppButton
+                  leftSection={<Plus size={15} />}
+                  disabled={!selectedTagId}
+                  loading={pendingAction === `${editTarget.id}:tag:add`}
+                  onClick={() => addTagToComic(editTarget)}
+                >
+                  绑定
+                </AppButton>
+              </Group>
+
+              {tagError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {tagError}
+                </Text>
+              )}
+            </Box>
 
             <Box
               p="sm"

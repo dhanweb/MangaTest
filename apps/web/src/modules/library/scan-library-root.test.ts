@@ -140,9 +140,15 @@ describe("scanMangaRoot", () => {
     expect(tagRows.some((tag) => tag.id === createdTag.id && tag.comicCount === 0)).toBe(true);
 
     const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
-    sqlite
-      .prepare("insert into comic_tags (comic_id, tag_id, source, is_user_edited) values (?, ?, ?, ?)")
-      .run(comicAId, createdTag.id, "manual", 1);
+    const { createComicTagAssignmentRepository } = await import("../tags/comic-tags.repository");
+    const comicTagRepository = createComicTagAssignmentRepository();
+    const assignedTags = await comicTagRepository.addToComic(comicAId, createdTag.id);
+    const removedTags = await comicTagRepository.removeFromComic(comicAId, createdTag.id);
+    const reassignedTags = await comicTagRepository.addToComic(comicAId, createdTag.id);
+
+    expect(assignedTags.some((tag) => tag.id === createdTag.id && tag.source === "manual" && tag.isUserEdited)).toBe(true);
+    expect(removedTags.some((tag) => tag.id === createdTag.id)).toBe(false);
+    expect(reassignedTags.some((tag) => tag.id === createdTag.id)).toBe(true);
 
     const { createComicRepository } = await import("./comics.repository");
     const comicRepository = createComicRepository();

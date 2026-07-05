@@ -1,11 +1,12 @@
 import { createComicRepository } from "@/modules/library/comics.repository";
+import { createTagRepository } from "@/modules/tags/tags.repository";
 
 import { ComicsPanel } from "./comics-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function ComicsPage() {
-  const comics = await createComicRepository().listAdminRows();
+  const [comics, tags] = await Promise.all([createComicRepository().listAdminRows(), createTagRepository().listWithCounts()]);
 
-  return <ComicsPanel comics={comics} />;
+  return <ComicsPanel availableTags={tags} comics={comics} />;
 }
