@@ -139,6 +139,22 @@ describe("scanMangaRoot", () => {
     expect(updatedTag?.displayNameZh).toBe("示例作者改");
     expect(tagRows.some((tag) => tag.id === createdTag.id && tag.comicCount === 0)).toBe(true);
 
+    const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
+    sqlite
+      .prepare("insert into comic_tags (comic_id, tag_id, source, is_user_edited) values (?, ?, ?, ?)")
+      .run(comicAId, createdTag.id, "manual", 1);
+
+    const { createComicRepository } = await import("./comics.repository");
+    const comicRepository = createComicRepository();
+    const tagFilters = await comicRepository.listReadableTagFilters();
+    const tagSearchResult = await comicRepository.searchReadableCards({ query: "示例作者改", pageSize: 12 });
+    const taggedResult = await comicRepository.searchReadableCards({ tags: [createdTag.canonical], pageSize: 12 });
+
+    expect(tagFilters.some((tag) => tag.canonical === createdTag.canonical && tag.comicCount === 1)).toBe(true);
+    expect(tagSearchResult.items.map((comic) => comic.id)).toContain(comicAId);
+    expect(taggedResult.total).toBe(1);
+    expect(taggedResult.items[0]?.id).toBe(comicAId);
+
     const { saveReadingProgress } = await import("../reader/reading-progress");
     const savedDirectoryProgress = await saveReadingProgress({
       pageId: directoryPage.id,
@@ -174,8 +190,6 @@ describe("scanMangaRoot", () => {
     expect(thirdScan.missingCount).toBe(1);
     expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(1);
 
-    const { createComicRepository } = await import("./comics.repository");
-    const comicRepository = createComicRepository();
     const publicRowsAfterMissing = await comicRepository.searchReadableCards({ pageSize: 12 });
 
     expect(publicRowsAfterMissing.items.some((comic) => comic.fileTitle === "Comic A")).toBe(false);
@@ -194,7 +208,6 @@ describe("scanMangaRoot", () => {
 
     const { createComicMaintenanceRepository } = await import("./comic-maintenance.repository");
     const maintenanceRepository = createComicMaintenanceRepository();
-    const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
     const publicRowsAfterRepair = await comicRepository.searchReadableCards({ pageSize: 12 });
 
     expect(publicRowsAfterRepair.items.some((comic) => comic.id === comicAId)).toBe(true);

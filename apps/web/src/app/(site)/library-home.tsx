@@ -7,7 +7,8 @@ import { useMemo, useState } from "react";
 import { ComicCard } from "@/components/comic-card";
 import { SiteHeader } from "@/components/site-header";
 import { AppButton, AppLink, AppSelect } from "@/components/ui/app-components";
-import type { LibraryComicCardRecord, LibraryComicSearchResult, LibraryComicSortMode } from "@/modules/library";
+import type { LibraryComicSearchResult, LibraryComicSortMode, LibraryTagFilterRecord } from "@/modules/library";
+import { namespaceLabel } from "@/modules/tags";
 import { useRouter } from "next/navigation";
 
 const sortOptions: Array<{ label: string; value: LibraryComicSortMode }> = [
@@ -16,71 +17,51 @@ const sortOptions: Array<{ label: string; value: LibraryComicSortMode }> = [
   { label: "页数", value: "pages" },
 ];
 
-const fallbackFilterGroups = [
-  {
-    label: "格式",
-    values: [
-      { value: "format:directory", label: "目录" },
-      { value: "format:zip", label: "ZIP" },
-      { value: "format:cbz", label: "CBZ" },
-    ],
-  },
-  {
-    label: "状态",
-    values: [{ value: "status:readable", label: "本地可读" }],
-  },
-];
-
 export function LibraryHome({
   initialQuery,
+  initialSelectedTags,
   initialSort,
   result,
+  tagFilters,
 }: {
   initialQuery: string;
+  initialSelectedTags: string[];
   initialSort: LibraryComicSortMode;
   result: LibraryComicSearchResult;
+  tagFilters: LibraryTagFilterRecord[];
 }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
   const [sortMode, setSortMode] = useState<LibraryComicSortMode>(initialSort);
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const comics = result.items;
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
+  const selectedTags = initialSelectedTags;
 
   const filterGroups = useMemo(() => {
-    const availableFormats = Array.from(
-      new Set(comics.map((comic) => comic.localFileKind).filter((kind): kind is "directory" | "zip" | "cbz" => kind !== null)),
-    );
+    const groups = new Map<string, Array<{ value: string; label: string; count: number }>>();
 
-    if (availableFormats.length === 0) {
-      return fallbackFilterGroups;
+    for (const tag of tagFilters) {
+      const group = groups.get(tag.namespace) ?? [];
+      group.push({
+        value: tag.canonical,
+        label: tag.label,
+        count: tag.comicCount,
+      });
+      groups.set(tag.namespace, group);
     }
 
-    return [
-      {
-        label: "格式",
-        values: availableFormats.map((kind) => ({ value: `format:${kind}`, label: formatKind(kind) })),
-      },
-      {
-        label: "状态",
-        values: [{ value: "status:readable", label: "本地可读" }],
-      },
-    ];
-  }, [comics]);
+    return Array.from(groups, ([namespace, values]) => ({
+      label: namespaceLabel(namespace),
+      values,
+    }));
+  }, [tagFilters]);
 
-  const filteredComics = useMemo(() => {
-    const next = comics.filter((comic) => {
-      return selectedTags.every((tag) => matchesFilterTag(comic, tag));
-    });
-
-    return next;
-  }, [comics, selectedTags]);
-
-  function applySearch(next: { page?: number; query?: string; sort?: LibraryComicSortMode }) {
+  function applySearch(next: { page?: number; query?: string; sort?: LibraryComicSortMode; tags?: string[] }) {
     const params = new URLSearchParams();
     const nextQuery = next.query ?? query;
     const nextSort = next.sort ?? sortMode;
     const nextPage = next.page ?? result.page;
+    const nextTags = next.tags ?? selectedTags;
 
     if (nextQuery.trim()) {
       params.set("q", nextQuery.trim());
@@ -92,6 +73,10 @@ export function LibraryHome({
 
     if (nextPage > 1) {
       params.set("page", String(nextPage));
+    }
+
+    for (const tag of nextTags) {
+      params.append("tag", tag);
     }
 
     router.push(params.size ? `/?${params.toString()}` : "/");
@@ -177,55 +162,59 @@ export function LibraryHome({
           }}
           aria-label="标签快捷搜索"
         >
-          {filterGroups.map((group) => (
-            <Box
-              key={group.label}
-              style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "8px 0" }}
-              className="tag-filter-row"
-            >
-              <Text component="strong" size="13px" ta="right" c="#8d5a6e" fw={700}>
-                {group.label}:
-              </Text>
-              <Group gap={8} wrap="wrap">
-                {group.values.map((item) => {
-                  const isSelected = selectedTags.includes(item.value);
-                  return (
-                    <AppButton
-                      key={item.value}
-                      variant={isSelected ? "filled" : "outline"}
-                      size="xs"
-                      onClick={() =>
-                        setSelectedTags(
-                          isSelected ? selectedTags.filter((tag) => tag !== item.value) : [...selectedTags, item.value],
-                        )
-                      }
-                    >
-                      {item.label}
-                    </AppButton>
-                  );
-                })}
-              </Group>
-            </Box>
-          ))}
+          {filterGroups.length > 0 ? (
+            filterGroups.map((group) => (
+              <Box
+                key={group.label}
+                style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "8px 0" }}
+                className="tag-filter-row"
+              >
+                <Text component="strong" size="13px" ta="right" c="#8d5a6e" fw={700}>
+                  {group.label}:
+                </Text>
+                <Group gap={8} wrap="wrap">
+                  {group.values.map((item) => {
+                    const isSelected = selectedTags.includes(item.value);
+                    const nextTags = isSelected ? selectedTags.filter((tag) => tag !== item.value) : [...selectedTags, item.value];
+
+                    return (
+                      <AppButton
+                        key={item.value}
+                        variant={isSelected ? "filled" : "outline"}
+                        size="xs"
+                        onClick={() => applySearch({ page: 1, tags: nextTags })}
+                      >
+                        {item.label} ({item.count})
+                      </AppButton>
+                    );
+                  })}
+                </Group>
+              </Box>
+            ))
+          ) : (
+            <Text size="sm" c="ink.5">
+              还没有绑定到漫画的标签。扫描入库后，可在后台标签管理里维护 canonical 标签。
+            </Text>
+          )}
         </Box>
 
         <Flex justify="space-between" mb={24} className="result-summary">
           <Text size="sm" c="ink.5">
             共 {result.total} 本
-            {filteredComics.length !== comics.length ? `，当前页筛选后 ${filteredComics.length} 本` : ""}
+            {selectedTags.length > 0 ? `，已筛选 ${selectedTags.length} 个标签` : ""}
           </Text>
           {selectedTags.length > 0 && (
-            <AppButton variant="transparent" size="xs" onClick={() => setSelectedTags([])} leftSection={<X size={14} />}>
+            <AppButton variant="transparent" size="xs" onClick={() => applySearch({ page: 1, tags: [] })} leftSection={<X size={14} />}>
               清除筛选
             </AppButton>
           )}
         </Flex>
 
-        {filteredComics.length > 0 ? (
+        {comics.length > 0 ? (
           <>
             <PaginationBar currentPage={result.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
             <Box component="section" aria-label="漫画列表" className="comic-grid">
-              {filteredComics.map((comic, index) => (
+              {comics.map((comic, index) => (
                 <ComicCard comic={comic} index={index} key={comic.id} />
               ))}
             </Box>
@@ -280,24 +269,4 @@ function PaginationBar({
       </AppButton>
     </Group>
   );
-}
-
-function matchesFilterTag(comic: LibraryComicCardRecord, tag: string) {
-  if (tag.startsWith("format:")) {
-    return comic.localFileKind === tag.slice("format:".length);
-  }
-
-  if (tag === "status:readable") {
-    return comic.status === "readable";
-  }
-
-  return true;
-}
-
-function formatKind(kind: "directory" | "zip" | "cbz") {
-  if (kind === "directory") {
-    return "目录";
-  }
-
-  return kind.toUpperCase();
 }

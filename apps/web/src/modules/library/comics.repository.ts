@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, chapters, comics, getDb, localFiles, pages } from "@/modules/core/db";
+import { bootstrapDatabase, chapters, comicTags, comics, getDb, localFiles, pages, tags } from "@/modules/core/db";
 
 export interface LibraryComicCardRecord {
   id: string;
@@ -14,11 +14,20 @@ export interface LibraryComicCardRecord {
   addedAt: string;
 }
 
+export interface LibraryTagFilterRecord {
+  id: string;
+  namespace: string;
+  canonical: string;
+  label: string;
+  comicCount: number;
+}
+
 export type LibraryComicSortMode = "recent" | "title" | "pages";
 
 export interface LibraryComicSearchInput {
   query?: string;
   sort?: LibraryComicSortMode;
+  tags?: string[];
   page?: number;
   pageSize?: number;
 }
@@ -79,6 +88,7 @@ export interface ReaderComicRecord {
 export interface ComicRepository {
   listReadableCards(limit?: number): Promise<LibraryComicCardRecord[]>;
   searchReadableCards(input?: LibraryComicSearchInput): Promise<LibraryComicSearchResult>;
+  listReadableTagFilters(limit?: number): Promise<LibraryTagFilterRecord[]>;
   listAdminRows(limit?: number): Promise<LibraryComicAdminRowRecord[]>;
   getDetail(id: string): Promise<LibraryComicDetailRecord | null>;
   getReaderData(id: string): Promise<ReaderComicRecord | null>;
@@ -97,13 +107,28 @@ export function createComicRepository(): ComicRepository {
       const page = Math.max(1, Math.trunc(input.page ?? 1));
       const pageSize = Math.max(12, Math.min(96, Math.trunc(input.pageSize ?? 48)));
       const query = input.query?.trim();
-      const whereClause = query
-        ? and(
-            eq(comics.status, "readable"),
-            eq(localFiles.isMissing, false),
-            or(like(comics.displayTitle, `%${query}%`), like(comics.fileTitle, `%${query}%`), like(comics.originalTitle, `%${query}%`)),
+      const selectedTags = normalizeSelectedTags(input.tags);
+      const baseWhere = and(eq(comics.status, "readable"), eq(localFiles.isMissing, false));
+      const queryWhere = query
+        ? or(
+            like(comics.displayTitle, `%${query}%`),
+            like(comics.fileTitle, `%${query}%`),
+            like(comics.originalTitle, `%${query}%`),
+            like(tags.canonical, `%${query.toLocaleLowerCase()}%`),
+            like(tags.name, `%${query.toLocaleLowerCase()}%`),
+            like(tags.displayNameZh, `%${query}%`),
           )
-        : and(eq(comics.status, "readable"), eq(localFiles.isMissing, false));
+        : undefined;
+      const selectedTagWhere = selectedTags.map(
+        (canonical) => sql`exists (
+          select 1
+          from comic_tags selected_comic_tags
+          inner join tags selected_tags on selected_tags.id = selected_comic_tags.tag_id
+          where selected_comic_tags.comic_id = ${comics.id}
+            and selected_tags.canonical = ${canonical}
+        )`,
+      );
+      const whereClause = and(baseWhere, queryWhere, ...selectedTagWhere);
       const pageCountSql = sql<number>`count(distinct ${pages.id})`;
       const sort = input.sort ?? "recent";
       const orderBy =
@@ -129,6 +154,8 @@ export function createComicRepository(): ComicRepository {
         .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
         .leftJoin(chapters, eq(chapters.comicId, comics.id))
         .leftJoin(pages, eq(pages.chapterId, chapters.id))
+        .leftJoin(comicTags, eq(comicTags.comicId, comics.id))
+        .leftJoin(tags, eq(tags.id, comicTags.tagId))
         .where(whereClause)
         .groupBy(comics.id)
         .orderBy(...orderBy)
@@ -139,6 +166,8 @@ export function createComicRepository(): ComicRepository {
         .select({ count: sql<number>`count(distinct ${comics.id})` })
         .from(comics)
         .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+        .leftJoin(comicTags, eq(comicTags.comicId, comics.id))
+        .leftJoin(tags, eq(tags.id, comicTags.tagId))
         .where(whereClause)
         .get();
 
@@ -152,6 +181,34 @@ export function createComicRepository(): ComicRepository {
         pageSize,
         total: Number(totalRow?.count ?? 0),
       };
+    },
+
+    async listReadableTagFilters(limit = 24) {
+      bootstrapDatabase();
+      const db = getDb();
+      const comicCountSql = sql<number>`count(distinct ${comicTags.comicId})`;
+      const rows = db
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          canonical: tags.canonical,
+          label: sql<string>`coalesce(${tags.displayNameZh}, ${tags.name}, ${tags.canonical})`,
+          comicCount: comicCountSql,
+        })
+        .from(tags)
+        .innerJoin(comicTags, eq(comicTags.tagId, tags.id))
+        .innerJoin(comics, eq(comics.id, comicTags.comicId))
+        .innerJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+        .where(and(eq(comics.status, "readable"), eq(localFiles.isMissing, false)))
+        .groupBy(tags.id)
+        .orderBy(desc(comicCountSql), asc(tags.namespace), asc(tags.name))
+        .limit(limit)
+        .all();
+
+      return rows.map((row) => ({
+        ...row,
+        comicCount: Number(row.comicCount),
+      }));
     },
 
     async listAdminRows(limit = 200) {
@@ -293,4 +350,12 @@ export function createComicRepository(): ComicRepository {
       };
     },
   };
+}
+
+function normalizeSelectedTags(input: string[] | undefined) {
+  if (!input) {
+    return [];
+  }
+
+  return Array.from(new Set(input.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean))).slice(0, 12);
 }
