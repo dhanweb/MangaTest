@@ -43,6 +43,8 @@ export interface LibraryComicAdminRowRecord extends LibraryComicCardRecord {
   updatedAt: string;
   primaryLocalPath: string | null;
   isPrimaryFileMissing: boolean;
+  parentComicId: string | null;
+  mergedAsChapterId: string | null;
 }
 
 export interface LibraryChapterRecord {
@@ -222,6 +224,8 @@ export function createComicRepository(): ComicRepository {
           fileTitle: comics.fileTitle,
           status: comics.status,
           primaryLocalFileId: comics.primaryLocalFileId,
+          parentComicId: comics.parentComicId,
+          mergedAsChapterId: comics.mergedAsChapterId,
           localFileKind: localFiles.kind,
           primaryLocalPath: localFiles.absolutePath,
           isPrimaryFileMissing: localFiles.isMissing,

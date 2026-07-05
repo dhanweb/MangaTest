@@ -1,7 +1,7 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { EyeOff, Library, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { EyeOff, GitMerge, Library, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
@@ -31,10 +31,12 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
+  const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
   const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [isLoadingTags, setIsLoadingTags] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [mergeError, setMergeError] = useState("");
   const [tagError, setTagError] = useState("");
 
   const editTargetId = editTarget?.id ?? null;
@@ -95,6 +97,20 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   const totalPages = Math.ceil(total / limit);
   const paginated = filtered.slice((page - 1) * limit, page * limit);
   const currentTags = editTarget ? (assignedTagsByComicId[editTarget.id] ?? EMPTY_ASSIGNED_TAGS) : EMPTY_ASSIGNED_TAGS;
+  const editTargetIsMerged = Boolean(editTarget?.parentComicId || editTarget?.mergedAsChapterId);
+  const parentComic = editTarget?.parentComicId ? rows.find((comic) => comic.id === editTarget.parentComicId) : null;
+  const mergeTargetOptions = useMemo(() => {
+    if (!editTarget) {
+      return [];
+    }
+
+    return rows
+      .filter((comic) => comic.id !== editTarget.id && comic.status === "readable" && !comic.parentComicId && !comic.mergedAsChapterId)
+      .map((comic) => ({
+        value: comic.id,
+        label: comic.displayTitle,
+      }));
+  }, [editTarget, rows]);
   const availableTagOptions = useMemo(() => {
     const assignedIds = new Set(currentTags.map((tag) => tag.id));
 
@@ -108,8 +124,10 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
 
   function openComic(comic: LibraryComicAdminRowRecord) {
     setActionError("");
+    setMergeError("");
     setTagError("");
     setSelectedTagId(null);
+    setSelectedMergeTargetId(null);
     setIsLoadingTags(!assignedTagsByComicId[comic.id]);
     setEditTarget(comic);
   }
@@ -140,6 +158,59 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
       setEditTarget((current) => (current?.id === updatedComic.id ? { ...current, status: updatedComic.status } : current));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "漫画状态更新失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function mergeComicAsChapter(comic: LibraryComicAdminRowRecord) {
+    if (!selectedMergeTargetId) {
+      return;
+    }
+
+    setPendingAction(`${comic.id}:merge`);
+    setMergeError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ targetComicId: selectedMergeTargetId }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { comics?: LibraryComicAdminRowRecord[]; error?: string };
+
+      if (!response.ok || !payload.comics) {
+        throw new Error(payload.error ?? "合并章节失败。");
+      }
+
+      setRows(payload.comics);
+      setEditTarget(payload.comics.find((row) => row.id === comic.id) ?? null);
+      setSelectedMergeTargetId(null);
+    } catch (error) {
+      setMergeError(error instanceof Error ? error.message : "合并章节失败。");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function restoreMergedComic(comic: LibraryComicAdminRowRecord) {
+    setPendingAction(`${comic.id}:merge:restore`);
+    setMergeError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comic.id}/merge`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json()) as { comics?: LibraryComicAdminRowRecord[]; error?: string };
+
+      if (!response.ok || !payload.comics) {
+        throw new Error(payload.error ?? "恢复合并漫画失败。");
+      }
+
+      setRows(payload.comics);
+      setEditTarget(payload.comics.find((row) => row.id === comic.id) ?? null);
+    } catch (error) {
+      setMergeError(error instanceof Error ? error.message : "恢复合并漫画失败。");
     } finally {
       setPendingAction(null);
     }
@@ -271,7 +342,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
                   <Text size="sm">{comic.pageCount}</Text>
                 </Table.Td>
                 <Table.Td>
-                  <StatusBadge status={comic.status} missing={comic.isPrimaryFileMissing} />
+                  <StatusBadge status={comic.status} missing={comic.isPrimaryFileMissing} merged={Boolean(comic.parentComicId || comic.mergedAsChapterId)} />
                 </Table.Td>
                 <Table.Td>
                   <AppButton variant="outline" size="xs" onClick={() => openComic(comic)}>
@@ -338,7 +409,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
               <AppInput label="标题" value={editTarget.displayTitle} readOnly />
               <AppInput label="文件标题" value={editTarget.fileTitle} readOnly />
               <AppInput label="格式" value={formatKind(editTarget.localFileKind)} readOnly />
-              <AppInput label="状态" value={statusLabel(editTarget.status)} readOnly />
+              <AppInput label="状态" value={statusLabel(editTarget.status, editTargetIsMerged)} readOnly />
             </SimpleGrid>
 
             <AppInput label="本地路径" value={editTarget.primaryLocalPath ?? "未关联主文件"} readOnly />
@@ -422,6 +493,66 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
               style={{
                 border: "1px solid var(--mantine-color-pink-1)",
                 borderRadius: 10,
+                background: "white",
+              }}
+            >
+              <Text size="sm" fw={700} c="ink.8">
+                章节合并
+              </Text>
+              <Text size="xs" c="ink.5" mt={2} mb="sm">
+                合并只移动数据库章节归属，不移动、不复制、不删除真实文件。MVP 仅支持单章节漫画。
+              </Text>
+
+              {editTargetIsMerged ? (
+                <Group justify="space-between" align="center">
+                  <Text size="sm" c="ink.6">
+                    已合并到：{parentComic?.displayTitle ?? editTarget.parentComicId}
+                  </Text>
+                  <AppButton
+                    variant="outline"
+                    leftSection={<RotateCcw size={15} />}
+                    loading={pendingAction === `${editTarget.id}:merge:restore`}
+                    onClick={() => restoreMergedComic(editTarget)}
+                  >
+                    恢复为独立漫画
+                  </AppButton>
+                </Group>
+              ) : (
+                <Group gap="sm" align="flex-end">
+                  <AppSelect
+                    searchable
+                    clearable
+                    label="合并到目标漫画"
+                    placeholder={mergeTargetOptions.length > 0 ? "选择目标漫画" : "没有可合并的目标"}
+                    value={selectedMergeTargetId}
+                    onChange={setSelectedMergeTargetId}
+                    data={mergeTargetOptions}
+                    disabled={editTarget.status !== "readable" || mergeTargetOptions.length === 0}
+                    style={{ flex: 1, minWidth: 220 }}
+                  />
+                  <AppButton
+                    leftSection={<GitMerge size={15} />}
+                    disabled={editTarget.status !== "readable" || !selectedMergeTargetId}
+                    loading={pendingAction === `${editTarget.id}:merge`}
+                    onClick={() => mergeComicAsChapter(editTarget)}
+                  >
+                    合并为章节
+                  </AppButton>
+                </Group>
+              )}
+
+              {mergeError && (
+                <Text size="sm" c="red.7" mt="xs">
+                  {mergeError}
+                </Text>
+              )}
+            </Box>
+
+            <Box
+              p="sm"
+              style={{
+                border: "1px solid var(--mantine-color-pink-1)",
+                borderRadius: 10,
                 background: "var(--mantine-color-pink-0)",
               }}
             >
@@ -443,7 +574,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
               <AppButton variant="outline" onClick={() => setEditTarget(null)}>
                 关闭
               </AppButton>
-              {editTarget.status === "hidden" || editTarget.status === "deleted" ? (
+              {!editTargetIsMerged && (editTarget.status === "hidden" || editTarget.status === "deleted") ? (
                 <AppButton
                   variant="outline"
                   leftSection={<RotateCcw size={15} />}
@@ -452,7 +583,7 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
                 >
                   恢复记录
                 </AppButton>
-              ) : (
+              ) : !editTargetIsMerged ? (
                 <AppButton
                   variant="outline"
                   leftSection={<EyeOff size={15} />}
@@ -461,8 +592,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
                 >
                   隐藏
                 </AppButton>
-              )}
-              {editTarget.status !== "deleted" && (
+              ) : null}
+              {!editTargetIsMerged && editTarget.status !== "deleted" && (
                 <AppButton
                   color="red"
                   variant="outline"
@@ -481,8 +612,8 @@ export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]
   );
 }
 
-function StatusBadge({ status, missing }: { status: LibraryComicAdminRowRecord["status"]; missing: boolean }) {
-  const problem = missing || status !== "readable";
+function StatusBadge({ status, missing, merged }: { status: LibraryComicAdminRowRecord["status"]; missing: boolean; merged: boolean }) {
+  const problem = missing || merged || status !== "readable";
 
   return (
     <Box
@@ -499,12 +630,16 @@ function StatusBadge({ status, missing }: { status: LibraryComicAdminRowRecord["
         color: problem ? "#d93a4e" : "#00894a",
       }}
     >
-      {missing ? "缺文件" : statusLabel(status)}
+      {missing ? "缺文件" : statusLabel(status, merged)}
     </Box>
   );
 }
 
-function statusLabel(status: LibraryComicAdminRowRecord["status"]) {
+function statusLabel(status: LibraryComicAdminRowRecord["status"], merged = false) {
+  if (merged) {
+    return "已合并";
+  }
+
   const labels: Record<LibraryComicAdminRowRecord["status"], string> = {
     readable: "就绪",
     missing_local_file: "缺文件",

@@ -33,6 +33,8 @@ export function createComicMaintenanceRepository(): ComicMaintenanceRepository {
           status: comics.status,
           hiddenAt: comics.hiddenAt,
           deletedAt: comics.deletedAt,
+          parentComicId: comics.parentComicId,
+          mergedAsChapterId: comics.mergedAsChapterId,
         })
         .from(comics)
         .where(eq(comics.id, comicId))
@@ -44,6 +46,10 @@ export function createComicMaintenanceRepository(): ComicMaintenanceRepository {
 
       if (action === "hide" && existing.status === "deleted") {
         throw new Error("已软删除的漫画需要先恢复，才能隐藏。");
+      }
+
+      if (existing.parentComicId || existing.mergedAsChapterId) {
+        throw new Error("已合并为章节的漫画需要先恢复为独立漫画。");
       }
 
       const now = new Date().toISOString();

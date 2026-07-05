@@ -180,6 +180,39 @@ describe("scanMangaRoot", () => {
     expect(taggedResult.total).toBe(1);
     expect(taggedResult.items[0]?.id).toBe(comicAId);
 
+    const { createComicMaintenanceRepository } = await import("./comic-maintenance.repository");
+    const maintenanceRepository = createComicMaintenanceRepository();
+    const archiveComicId = selectComicIdByFileTitle(sqlite, "Archive Comic");
+    const { createComicMergeRepository } = await import("./comic-merge.repository");
+    const mergeRepository = createComicMergeRepository();
+    const mergeResult = await mergeRepository.mergeAsChapter(archiveComicId, comicAId);
+    const mergedTargetDetail = await comicRepository.getDetail(comicAId);
+    const mergedTargetReader = await comicRepository.getReaderData(comicAId);
+    const publicRowsAfterMerge = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(mergeResult.physicalFilesTouched).toBe(false);
+    expect(mergeResult.targetComicId).toBe(comicAId);
+    expect(selectComicStatus(sqlite, archiveComicId).status).toBe("hidden");
+    expect(selectComicMergeState(sqlite, archiveComicId).parentComicId).toBe(comicAId);
+    expect(mergedTargetDetail?.chapterCount).toBe(2);
+    expect(mergedTargetReader?.pages.length).toBe(4);
+    expect(publicRowsAfterMerge.items.some((comic) => comic.id === archiveComicId)).toBe(false);
+    expect(countRows(sqlite, "operation_logs", "operation = 'merge_chapter'")).toBe(1);
+
+    await expect(maintenanceRepository.changeStatus(archiveComicId, "restore")).rejects.toThrow("已合并为章节");
+
+    const restoreMergeResult = await mergeRepository.restoreMergedComic(archiveComicId);
+    const restoredTargetDetail = await comicRepository.getDetail(comicAId);
+    const restoredSourceDetail = await comicRepository.getDetail(archiveComicId);
+    const publicRowsAfterMergeRestore = await comicRepository.searchReadableCards({ pageSize: 12 });
+
+    expect(restoreMergeResult.physicalFilesTouched).toBe(false);
+    expect(selectComicStatus(sqlite, archiveComicId).status).toBe("readable");
+    expect(selectComicMergeState(sqlite, archiveComicId).parentComicId).toBeNull();
+    expect(restoredTargetDetail?.chapterCount).toBe(1);
+    expect(restoredSourceDetail?.chapterCount).toBe(1);
+    expect(publicRowsAfterMergeRestore.items.some((comic) => comic.id === archiveComicId)).toBe(true);
+
     const { saveReadingProgress } = await import("../reader/reading-progress");
     const savedDirectoryProgress = await saveReadingProgress({
       pageId: directoryPage.id,
@@ -231,8 +264,6 @@ describe("scanMangaRoot", () => {
     expect(countRows(sqlite, "local_files", "is_missing = 1")).toBe(0);
     expect(countRows(sqlite, "operation_logs", "operation = 'path_repair'")).toBe(1);
 
-    const { createComicMaintenanceRepository } = await import("./comic-maintenance.repository");
-    const maintenanceRepository = createComicMaintenanceRepository();
     const publicRowsAfterRepair = await comicRepository.searchReadableCards({ pageSize: 12 });
 
     expect(publicRowsAfterRepair.items.some((comic) => comic.id === comicAId)).toBe(true);
@@ -263,7 +294,7 @@ describe("scanMangaRoot", () => {
     expect(restoredStatus.hiddenAt).toBeNull();
     expect(restoredStatus.deletedAt).toBeNull();
     expect(publicRowsAfterRestore.items.some((comic) => comic.id === comicAId)).toBe(true);
-    expect(countRows(sqlite, "operation_logs", "operation = 'restore'")).toBe(1);
+    expect(countRows(sqlite, "operation_logs", "operation = 'restore'")).toBe(2);
 
     const { createSqliteBackupDownload } = await import("../core/db/backup");
     const backup = await createSqliteBackupDownload();
@@ -331,5 +362,14 @@ function selectComicStatus(sqlite: Database.Database, comicId: string) {
     status: string;
     hiddenAt: string | null;
     deletedAt: string | null;
+  };
+}
+
+function selectComicMergeState(sqlite: Database.Database, comicId: string) {
+  return sqlite
+    .prepare("select parent_comic_id as parentComicId, merged_as_chapter_id as mergedAsChapterId from comics where id = ?")
+    .get(comicId) as {
+    parentComicId: string | null;
+    mergedAsChapterId: string | null;
   };
 }
