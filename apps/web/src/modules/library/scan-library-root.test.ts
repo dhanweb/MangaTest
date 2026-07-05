@@ -209,6 +209,22 @@ describe("scanMangaRoot", () => {
     expect(storedMetadata.sortTitle).toBe("comic a edited");
     expect(metadataSearchResult.items.map((comic) => comic.id)).toContain(comicAId);
 
+    const duplicateComicId = randomUUID();
+    sqlite
+      .prepare(
+        "insert into comics (id, display_title, file_title, sort_title, status) values (?, ?, ?, ?, ?)",
+      )
+      .run(duplicateComicId, "Comic A Duplicate", "Comic A duplicate folder", storedMetadata.sortTitle, "readable");
+
+    const { createDuplicateCandidateRepository } = await import("./duplicate-candidates.repository");
+    const duplicateGroups = await createDuplicateCandidateRepository().listGroups();
+    const duplicateGroup = duplicateGroups.find((group) => group.sortTitle === storedMetadata.sortTitle);
+
+    expect(duplicateGroup?.totalCount).toBe(2);
+    expect(duplicateGroup?.candidates.map((candidate) => candidate.id).sort()).toEqual([comicAId, duplicateComicId].sort());
+
+    sqlite.prepare("delete from comics where id = ?").run(duplicateComicId);
+
     const tagFilters = await comicRepository.listReadableTagFilters();
     const tagSearchResult = await comicRepository.searchReadableCards({ query: "示例作者改", pageSize: 12 });
     const taggedResult = await comicRepository.searchReadableCards({ tags: [createdTag.canonical], pageSize: 12 });

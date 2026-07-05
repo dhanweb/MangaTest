@@ -14,6 +14,7 @@ export * from "./comic-chapter-order.repository";
 export * from "./comic-merge.repository";
 export * from "./comic-metadata.repository";
 export * from "./comic-maintenance.repository";
+export * from "./duplicate-candidates.repository";
 export * from "./manga-roots";
 export * from "./manga-roots.repository";
 export * from "./scan-library-root";

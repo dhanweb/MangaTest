@@ -1,21 +1,32 @@
 "use client";
 
 import { ActionIcon, Box, Group, Modal, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { FileWarning, FolderSync, RefreshCcw, Search, Wrench } from "lucide-react";
+import { EyeOff, FileWarning, FolderSync, RefreshCcw, Search, Trash2, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput } from "@/components/ui/app-components";
+import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord } from "@/modules/library";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
 const ISSUE_CONFIG: Record<FileMaintenanceIssueRecord["issueType"], { label: string; bg: string; color: string }> = {
   missing: { label: "文件缺失", bg: "#ffe1e1", color: "#ec3c45" },
 };
+const STATUS_LABELS: Record<DuplicateCandidateGroupRecord["candidates"][number]["status"], string> = {
+  deleted: "已删除",
+  hidden: "已隐藏",
+  missing_local_file: "缺文件",
+  readable: "可读",
+  remote_only: "远程",
+};
 
-export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] }) {
+export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: DuplicateCandidateGroupRecord[]; issues: FileMaintenanceIssueRecord[] }) {
   const [items, setItems] = useState(issues);
+  const [duplicateItems, setDuplicateItems] = useState(duplicateGroups);
   const [search, setSearch] = useState("");
   const [repairTarget, setRepairTarget] = useState<FileMaintenanceIssueRecord | null>(null);
   const [repairPath, setRepairPath] = useState("");
+  const [duplicateError, setDuplicateError] = useState("");
+  const [pendingDuplicateAction, setPendingDuplicateAction] = useState<string | null>(null);
   const [repairError, setRepairError] = useState("");
   const [isRepairing, setIsRepairing] = useState(false);
 
@@ -32,8 +43,23 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
         ISSUE_CONFIG[issue.issueType].label.includes(query),
     );
   }, [items, search]);
+  const filteredDuplicateGroups = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return duplicateItems;
+    }
+
+    return duplicateItems.filter(
+      (group) =>
+        group.sortTitle.includes(query) ||
+        group.candidates.some((candidate) =>
+          [candidate.displayTitle, candidate.fileTitle, candidate.primaryLocalPath ?? "", STATUS_LABELS[candidate.status]].join(" ").toLowerCase().includes(query),
+        ),
+    );
+  }, [duplicateItems, search]);
 
   const missing = items.filter((issue) => issue.issueType === "missing").length;
+  const duplicateCandidateCount = duplicateItems.length;
 
   function openRepair(issue: FileMaintenanceIssueRecord) {
     setRepairTarget(issue);
@@ -67,6 +93,40 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
     setRepairTarget(null);
   }
 
+  async function changeDuplicateComicStatus(comicId: string, action: Extract<ComicMaintenanceAction, "hide" | "soft_delete">) {
+    const actionKey = `${comicId}:${action}`;
+    setPendingDuplicateAction(actionKey);
+    setDuplicateError("");
+
+    try {
+      const response = await fetch(`/api/comics/${comicId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ action }),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as {
+        comic?: { id: string; status: DuplicateCandidateGroupRecord["candidates"][number]["status"] };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.comic) {
+        throw new Error(payload.error ?? "处理重复候选失败。");
+      }
+
+      setDuplicateItems((current) =>
+        current.map((group) => ({
+          ...group,
+          readableCount: group.candidates.filter((candidate) => (candidate.id === comicId ? payload.comic?.status === "readable" : candidate.status === "readable")).length,
+          candidates: group.candidates.map((candidate) => (candidate.id === comicId ? { ...candidate, status: payload.comic?.status ?? candidate.status } : candidate)),
+        })),
+      );
+    } catch (error) {
+      setDuplicateError(error instanceof Error ? error.message : "处理重复候选失败。");
+    } finally {
+      setPendingDuplicateAction(null);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -84,7 +144,7 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
       <Group gap="xl" mb="lg" px="md" py="sm" style={{ background: "var(--mantine-color-pink-0)", borderRadius: 10 }}>
         <Stat label="文件缺失" value={missing} color="#ec3c45" />
         <Stat label="文件变更" value={0} color="#b87a00" />
-        <Stat label="疑似重复" value={0} color="#4f46e5" />
+        <Stat label="疑似重复" value={duplicateCandidateCount} color="#4f46e5" />
         <Stat label="孤立文件" value={0} color="#7c3aed" />
       </Group>
 
@@ -220,6 +280,104 @@ export function FilesPanel({ issues }: { issues: FileMaintenanceIssueRecord[] })
         </Table>
       </Box>
 
+      <Box mt="xl">
+        <Group justify="space-between" align="flex-start" mb="sm">
+          <Box>
+            <Text component="h2" size="lg" fw={900} c="ink.8" m={0}>
+              疑似重复
+            </Text>
+            <Text size="sm" c="ink.5" mt={2}>
+              按规范化标题分组；处理只更新漫画记录状态，不移动、不删除真实文件。
+            </Text>
+          </Box>
+        </Group>
+
+        {duplicateError && (
+          <Text size="sm" c="red.7" mb="sm">
+            {duplicateError}
+          </Text>
+        )}
+
+        <Stack gap="sm">
+          {filteredDuplicateGroups.map((group) => (
+            <Box key={group.sortTitle} style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, overflow: "hidden" }}>
+              <Group justify="space-between" px="md" py="sm" style={{ background: "var(--mantine-color-pink-0)" }}>
+                <Box>
+                  <Text size="sm" fw={900} c="ink.8">
+                    {group.sortTitle}
+                  </Text>
+                  <Text size="xs" c="ink.5">
+                    {group.totalCount} 条候选 · {group.readableCount} 条可读
+                  </Text>
+                </Box>
+              </Group>
+              <Table verticalSpacing="sm" horizontalSpacing="md">
+                <Table.Tbody>
+                  {group.candidates.map((candidate) => (
+                    <Table.Tr key={candidate.id}>
+                      <Table.Td>
+                        <Text size="sm" fw={700}>
+                          {candidate.displayTitle}
+                        </Text>
+                        <Text size="xs" c="ink.5">
+                          {candidate.fileTitle}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                          {candidate.primaryLocalPath ?? "未关联主文件"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td w={92}>
+                        <StatusBadge status={candidate.status} />
+                      </Table.Td>
+                      <Table.Td w={90}>
+                        <Text size="sm">{candidate.pageCount} 页</Text>
+                      </Table.Td>
+                      <Table.Td w={110}>
+                        <Group gap={4} wrap="nowrap">
+                          <Tooltip label="隐藏候选" withArrow>
+                            <ActionIcon
+                              variant="subtle"
+                              color="pink"
+                              size="md"
+                              disabled={candidate.status === "hidden" || candidate.status === "deleted"}
+                              loading={pendingDuplicateAction === `${candidate.id}:hide`}
+                              onClick={() => changeDuplicateComicStatus(candidate.id, "hide")}
+                              aria-label="隐藏候选"
+                            >
+                              <EyeOff size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="软删除候选" withArrow>
+                            <ActionIcon
+                              variant="subtle"
+                              color="red"
+                              size="md"
+                              disabled={candidate.status === "deleted"}
+                              loading={pendingDuplicateAction === `${candidate.id}:soft_delete`}
+                              onClick={() => changeDuplicateComicStatus(candidate.id, "soft_delete")}
+                              aria-label="软删除候选"
+                            >
+                              <Trash2 size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Box>
+          ))}
+          {filteredDuplicateGroups.length === 0 && (
+            <Text size="sm" c="ink.5" ta="center" py="md">
+              没有找到疑似重复候选
+            </Text>
+          )}
+        </Stack>
+      </Box>
+
       <Modal
         opened={repairTarget !== null}
         onClose={() => setRepairTarget(null)}
@@ -273,6 +431,30 @@ function IssueBadge({ type }: { type: FileMaintenanceIssueRecord["issueType"] })
       }}
     >
       {config.label}
+    </Box>
+  );
+}
+
+function StatusBadge({ status }: { status: DuplicateCandidateGroupRecord["candidates"][number]["status"] }) {
+  const isProblem = status !== "readable";
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: isProblem ? "#ffe3e6" : "#e4f9ed",
+        color: isProblem ? "#d93a4e" : "#00894a",
+      }}
+    >
+      {STATUS_LABELS[status]}
     </Box>
   );
 }
