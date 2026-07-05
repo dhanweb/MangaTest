@@ -67,6 +67,7 @@ This document records features that are already implemented in `apps/web`.
 - Admin home shows scan status, missing file count, duplicate candidate count, storage/cache summary, and recent operation logs.
 - File maintenance lists missing local files.
 - File maintenance lists duplicate candidate groups by normalized title and can hide or soft-delete candidate comic records without touching physical files.
+- File maintenance can trigger scans for all enabled manga roots and refresh maintenance data after scanning.
 - Missing local file paths can be repaired by updating database paths only; the app does not move, copy, or delete physical files.
 - Comic records can be hidden, soft-deleted, and restored.
 - Admin comic management can edit `display_title`, `original_title`, and `metadata_query_title` while preserving the scanned `file_title`.

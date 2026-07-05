@@ -5,7 +5,7 @@ import { EyeOff, FileWarning, FolderSync, RefreshCcw, Search, Trash2, Wrench } f
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput } from "@/components/ui/app-components";
-import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord } from "@/modules/library";
+import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord, ScanAllMangaRootsResult } from "@/modules/library";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
 const ISSUE_CONFIG: Record<FileMaintenanceIssueRecord["issueType"], { label: string; bg: string; color: string }> = {
@@ -29,6 +29,9 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   const [pendingDuplicateAction, setPendingDuplicateAction] = useState<string | null>(null);
   const [repairError, setRepairError] = useState("");
   const [isRepairing, setIsRepairing] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanMessage, setScanMessage] = useState("");
+  const [scanError, setScanError] = useState("");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -127,6 +130,41 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
   }
 
+  async function scanAllRoots() {
+    if (isScanning) {
+      return;
+    }
+
+    setIsScanning(true);
+    setScanMessage("");
+    setScanError("");
+
+    try {
+      const response = await fetch("/api/local-files/scan", { method: "POST" });
+      const payload = (await response.json()) as { result?: ScanAllMangaRootsResult; error?: string };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "扫描全部漫画根目录失败。");
+      }
+
+      const result = payload.result;
+      const message =
+        result.enabledRootCount === 0
+          ? "没有启用的漫画根目录可扫描。"
+          : `扫描完成：成功 ${result.scannedRootCount} 个根目录，失败 ${result.failedRootCount} 个，新增 ${result.addedCount} 本，标记缺失 ${result.missingCount} 个。`;
+
+      setScanMessage(result.failedRootCount > 0 ? `${message} 失败项已记录在扫描会话中。` : message);
+
+      if (result.enabledRootCount > 0) {
+        window.setTimeout(() => window.location.reload(), 900);
+      }
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "扫描全部漫画根目录失败。");
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -187,11 +225,17 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           <AppButton variant="outline" disabled leftSection={<RefreshCcw size={16} />}>
             重新扫描
           </AppButton>
-          <AppButton disabled leftSection={<FolderSync size={16} />}>
+          <AppButton loading={isScanning} onClick={scanAllRoots} leftSection={<FolderSync size={16} />}>
             全部扫描
           </AppButton>
         </Group>
       </Group>
+
+      {(scanMessage || scanError) && (
+        <Text size="sm" c={scanError ? "red.7" : "green.7"} mb="md">
+          {scanError || scanMessage}
+        </Text>
+      )}
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
         <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">

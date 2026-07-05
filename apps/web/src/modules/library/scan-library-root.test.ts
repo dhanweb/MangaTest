@@ -308,6 +308,31 @@ describe("scanMangaRoot", () => {
     expect(secondScan.missingCount).toBe(0);
     expect(countRows(sqlite, "cache_entries", "kind = 'archive_file_list'")).toBe(1);
 
+    const { scanAllEnabledMangaRoots } = await import("./scan-all-manga-roots");
+    sqlite
+      .prepare("insert into manga_roots (id, absolute_path, scan_mode, is_enabled) values (?, ?, ?, ?)")
+      .run(randomUUID(), path.join(workspace, "Disabled Root"), "children_as_comics", 0);
+
+    const scanAllEnabledOnly = await scanAllEnabledMangaRoots();
+
+    expect(scanAllEnabledOnly.enabledRootCount).toBe(1);
+    expect(scanAllEnabledOnly.scannedRootCount).toBe(1);
+    expect(scanAllEnabledOnly.failedRootCount).toBe(0);
+    expect(scanAllEnabledOnly.addedCount).toBe(0);
+
+    const missingRootId = randomUUID();
+    sqlite
+      .prepare("insert into manga_roots (id, absolute_path, scan_mode, is_enabled) values (?, ?, ?, ?)")
+      .run(missingRootId, path.join(workspace, "Missing Root"), "children_as_comics", 1);
+
+    const scanAllWithFailure = await scanAllEnabledMangaRoots();
+
+    expect(scanAllWithFailure.enabledRootCount).toBe(2);
+    expect(scanAllWithFailure.scannedRootCount).toBe(1);
+    expect(scanAllWithFailure.failedRootCount).toBe(1);
+    expect(scanAllWithFailure.roots.find((scanRoot) => scanRoot.mangaRootId === missingRootId)?.status).toBe("failed");
+    expect(countRows(sqlite, "scan_sessions", "status = 'failed'")).toBe(1);
+
     await rm(directoryComicPath, { recursive: true, force: true });
 
     const thirdScan = await scanMangaRoot(root.id);
