@@ -16,6 +16,7 @@ assert(manifest.permissions.includes("storage"), "storage permission is required
 const referencedFiles = [
   manifest.action.default_popup,
   manifest.background?.service_worker,
+  "src/content/site-adapters.js",
   "src/content/collect-page-metadata.js",
   "src/popup/popup.css",
   "src/popup/popup.js",

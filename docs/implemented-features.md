@@ -73,6 +73,8 @@ This document records features that are already implemented in `apps/web`.
 - `apps/extension` contains a Chrome Manifest V3 extension that can be loaded unpacked during development.
 - The extension popup stores the local MangaTest service URL, metadata import token, and source-site name.
 - The extension can collect a generic manga detail-page metadata preview from the active tab and submit it to `/api/metadata/import`.
+- The extension supports a site-adapter layer before falling back to generic metadata collection.
+- The extension can query `/api/metadata/status` to show whether the current source is already imported, remote-only, missing, or locally readable.
 
 ### Admin And Maintenance
 
@@ -97,7 +99,7 @@ This document records features that are already implemented in `apps/web`.
 
 ## Not Implemented Yet
 
-- Site-specific browser extension adapters and list-page batch collection.
+- Additional site-specific browser extension adapters and list-page batch collection.
 - OpenList, 115, aria2, magnet, torrent, and cloud download workflows.
 - File watching and startup auto-scan.
 - Physical file deletion.

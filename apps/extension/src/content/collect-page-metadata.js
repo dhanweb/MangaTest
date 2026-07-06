@@ -3,6 +3,7 @@
   const MAX_RESOURCES = 16;
 
   function collectPageMetadata() {
+    const adapterMetadata = collectWithSiteAdapter();
     const sourceUrl = getCanonicalUrl();
     const title = firstText([
       selectText("h1"),
@@ -16,8 +17,9 @@
       selectText('link[rel="image_src"]', "href"),
       findLikelyCoverImage(),
     ]);
-
-    return {
+    const genericMetadata = {
+      adapterId: "generic",
+      site: location.hostname.replace(/^www\./, ""),
       sourceUrl,
       sourceId: createSourceId(sourceUrl),
       title: title || sourceUrl,
@@ -26,6 +28,82 @@
       tags: collectTags(),
       resources: collectResources(),
     };
+
+    return mergeMetadata(genericMetadata, adapterMetadata);
+  }
+
+  function collectWithSiteAdapter() {
+    const adapters = Array.isArray(window.MangaTestSiteAdapters) ? window.MangaTestSiteAdapters : [];
+    const adapter = adapters.find((candidate) => {
+      try {
+        return candidate.matches();
+      } catch {
+        return false;
+      }
+    });
+
+    if (!adapter) {
+      return null;
+    }
+
+    try {
+      return adapter.collect();
+    } catch {
+      return {
+        adapterId: adapter.id,
+      };
+    }
+  }
+
+  function mergeMetadata(genericMetadata, adapterMetadata) {
+    if (!adapterMetadata) {
+      return genericMetadata;
+    }
+
+    return {
+      ...genericMetadata,
+      ...pickPresent(adapterMetadata, ["adapterId", "site", "sourceUrl", "sourceId", "title", "originalTitle", "coverUrl"]),
+      tags: mergeTags(adapterMetadata.tags, genericMetadata.tags),
+      resources: mergeResources(adapterMetadata.resources, genericMetadata.resources),
+    };
+  }
+
+  function pickPresent(input, keys) {
+    const output = {};
+
+    for (const key of keys) {
+      if (typeof input[key] === "string" && input[key].trim()) {
+        output[key] = input[key].trim();
+      }
+    }
+
+    return output;
+  }
+
+  function mergeTags(primary = [], fallback = []) {
+    const tags = new Map();
+
+    for (const tag of [...primary, ...fallback]) {
+      if (!tag?.namespace || !tag?.name) {
+        continue;
+      }
+      addTag(tags, tag.namespace, tag.name);
+    }
+
+    return Array.from(tags.values()).slice(0, MAX_TAGS);
+  }
+
+  function mergeResources(primary = [], fallback = []) {
+    const resources = new Map();
+
+    for (const resource of [...primary, ...fallback]) {
+      if (!resource?.type || !resource?.url) {
+        continue;
+      }
+      addResource(resources, resource.type, resource.url, resource.label);
+    }
+
+    return Array.from(resources.values()).slice(0, MAX_RESOURCES);
   }
 
   function collectTags() {

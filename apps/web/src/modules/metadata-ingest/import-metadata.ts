@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, comicResources, comics, comicSources, getDb } from "@/modules/core/db";
+import { bootstrapDatabase, comicResources, comics, comicSources, getDb, localFiles } from "@/modules/core/db";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
 import { createComicTagAssignmentRepository } from "@/modules/tags/comic-tags.repository";
 import { createTagRepository } from "@/modules/tags/tags.repository";
@@ -42,6 +42,25 @@ export interface MetadataImportResult {
   tagCount: number;
   resourceCount: number;
   localReadable: boolean;
+}
+
+export interface MetadataSourceStatusInput {
+  site: string;
+  sourceUrl?: string | null;
+  sourceId?: string | null;
+}
+
+export interface MetadataSourceStatusResult {
+  imported: boolean;
+  matchedBy: "source_id" | "source_url" | null;
+  comicId: string | null;
+  comicStatus: MetadataImportResult["comicStatus"] | null;
+  displayTitle: string | null;
+  sourceRecordId: string | null;
+  hasLocalFile: boolean;
+  isPrimaryFileMissing: boolean;
+  localReadable: boolean;
+  resourceCount: number;
 }
 
 interface NormalizedMetadataPayload {
@@ -197,7 +216,56 @@ export async function importMetadataPayload(input: MetadataIngestPayload): Promi
   };
 }
 
+export async function checkMetadataSourceStatus(input: MetadataSourceStatusInput): Promise<MetadataSourceStatusResult> {
+  bootstrapDatabase();
+
+  const payload = normalizeSourceStatusInput(input);
+  const sourceMatch = findExistingSourceWithMatch(payload);
+
+  if (!sourceMatch.source) {
+    return createEmptySourceStatus();
+  }
+
+  const db = getDb();
+  const row = db
+    .select({
+      comicId: comics.id,
+      comicStatus: comics.status,
+      displayTitle: comics.displayTitle,
+      primaryLocalFileId: comics.primaryLocalFileId,
+      isPrimaryFileMissing: localFiles.isMissing,
+    })
+    .from(comics)
+    .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+    .where(eq(comics.id, sourceMatch.source.comicId))
+    .get();
+  const resourceRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(comicResources)
+    .where(eq(comicResources.comicSourceId, sourceMatch.source.id))
+    .get();
+  const hasLocalFile = Boolean(row?.primaryLocalFileId);
+  const isPrimaryFileMissing = Boolean(row?.isPrimaryFileMissing);
+
+  return {
+    imported: true,
+    matchedBy: sourceMatch.matchedBy,
+    comicId: row?.comicId ?? sourceMatch.source.comicId,
+    comicStatus: row?.comicStatus ?? null,
+    displayTitle: row?.displayTitle ?? null,
+    sourceRecordId: sourceMatch.source.id,
+    hasLocalFile,
+    isPrimaryFileMissing,
+    localReadable: row?.comicStatus === "readable" && hasLocalFile && !isPrimaryFileMissing,
+    resourceCount: Number(resourceRow?.count ?? 0),
+  };
+}
+
 function findExistingSource(payload: NormalizedMetadataPayload) {
+  return findExistingSourceWithMatch(payload).source;
+}
+
+function findExistingSourceWithMatch(payload: { site: string; sourceId: string | null; sourceUrl: string | null }) {
   const db = getDb();
 
   if (payload.sourceId) {
@@ -208,15 +276,25 @@ function findExistingSource(payload: NormalizedMetadataPayload) {
       .get();
 
     if (bySourceId) {
-      return bySourceId;
+      return {
+        source: bySourceId,
+        matchedBy: "source_id" as const,
+      };
     }
   }
 
-  return db
-    .select()
-    .from(comicSources)
-    .where(and(eq(comicSources.site, payload.site), eq(comicSources.sourceUrl, payload.sourceUrl)))
-    .get();
+  const bySourceUrl = payload.sourceUrl
+    ? db
+        .select()
+        .from(comicSources)
+        .where(and(eq(comicSources.site, payload.site), eq(comicSources.sourceUrl, payload.sourceUrl)))
+        .get()
+    : null;
+
+  return {
+    source: bySourceUrl ?? null,
+    matchedBy: bySourceUrl ? ("source_url" as const) : null,
+  };
 }
 
 function normalizeMetadataPayload(input: MetadataIngestPayload): NormalizedMetadataPayload {
@@ -243,6 +321,41 @@ function normalizeMetadataPayload(input: MetadataIngestPayload): NormalizedMetad
     coverUrl,
     tags,
     resources,
+  };
+}
+
+function normalizeSourceStatusInput(input: MetadataSourceStatusInput) {
+  if (!input || typeof input !== "object") {
+    throw new Error("Metadata status payload 无效。");
+  }
+
+  const site = normalizeRequiredText(input.site, "来源站点").toLowerCase();
+  const sourceId = normalizeOptionalText(input.sourceId);
+  const sourceUrl = input.sourceUrl ? normalizeHttpUrl(input.sourceUrl, "来源 URL") : null;
+
+  if (!sourceId && !sourceUrl) {
+    throw new Error("来源 ID 和来源 URL 至少需要提供一个。");
+  }
+
+  return {
+    site,
+    sourceId,
+    sourceUrl,
+  };
+}
+
+function createEmptySourceStatus(): MetadataSourceStatusResult {
+  return {
+    imported: false,
+    matchedBy: null,
+    comicId: null,
+    comicStatus: null,
+    displayTitle: null,
+    sourceRecordId: null,
+    hasLocalFile: false,
+    isPrimaryFileMissing: false,
+    localReadable: false,
+    resourceCount: 0,
   };
 }
 

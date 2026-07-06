@@ -211,10 +211,19 @@ describe("scanMangaRoot", () => {
     expect(storedMetadata.sortTitle).toBe("comic a edited");
     expect(metadataSearchResult.items.map((comic) => comic.id)).toContain(comicAId);
 
-    const { importMetadataPayload, validateMetadataImportToken } = await import("../metadata-ingest");
+    const { checkMetadataSourceStatus, importMetadataPayload, validateMetadataImportToken } = await import("../metadata-ingest");
 
     await expect(validateMetadataImportToken("wrong-token")).rejects.toThrow("导入令牌无效");
     await expect(validateMetadataImportToken("test-import-token")).resolves.toBeUndefined();
+
+    const metadataStatusBeforeImport = await checkMetadataSourceStatus({
+      site: "examplesite",
+      sourceId: "gallery-123",
+      sourceUrl: "https://example.test/g/gallery-123",
+    });
+
+    expect(metadataStatusBeforeImport.imported).toBe(false);
+    expect(metadataStatusBeforeImport.localReadable).toBe(false);
 
     const metadataImport = await importMetadataPayload({
       comicId: comicAId,
@@ -252,6 +261,20 @@ describe("scanMangaRoot", () => {
     expect(selectComicTagSource(sqlite, comicAId, "artist:sample artist").source).toBe("manual");
     expect(selectComicTagSource(sqlite, comicAId, "group:metadata group").source).toBe("metadata");
 
+    const metadataStatusAfterImport = await checkMetadataSourceStatus({
+      site: "examplesite",
+      sourceId: "gallery-123",
+      sourceUrl: "https://example.test/g/gallery-123",
+    });
+
+    expect(metadataStatusAfterImport.imported).toBe(true);
+    expect(metadataStatusAfterImport.matchedBy).toBe("source_id");
+    expect(metadataStatusAfterImport.comicId).toBe(comicAId);
+    expect(metadataStatusAfterImport.comicStatus).toBe("readable");
+    expect(metadataStatusAfterImport.hasLocalFile).toBe(true);
+    expect(metadataStatusAfterImport.localReadable).toBe(true);
+    expect(metadataStatusAfterImport.resourceCount).toBe(1);
+
     const repeatedMetadataImport = await importMetadataPayload({
       site: "examplesite",
       sourceId: "gallery-123",
@@ -284,6 +307,18 @@ describe("scanMangaRoot", () => {
     expect(remoteOnlyImport.comicStatus).toBe("remote_only");
     expect(remoteOnlyImport.localReadable).toBe(false);
     expect(remoteOnlyPublicRows.total).toBe(0);
+
+    const remoteOnlyStatus = await checkMetadataSourceStatus({
+      site: "examplesite",
+      sourceUrl: "https://example.test/g/remote-only",
+    });
+
+    expect(remoteOnlyStatus.imported).toBe(true);
+    expect(remoteOnlyStatus.matchedBy).toBe("source_url");
+    expect(remoteOnlyStatus.comicId).toBe(remoteOnlyImport.comicId);
+    expect(remoteOnlyStatus.comicStatus).toBe("remote_only");
+    expect(remoteOnlyStatus.hasLocalFile).toBe(false);
+    expect(remoteOnlyStatus.localReadable).toBe(false);
 
     const duplicateComicId = randomUUID();
     sqlite

@@ -90,6 +90,7 @@ input:focus {
 
 dl {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   margin: 0;
 }
