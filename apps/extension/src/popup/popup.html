@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MangaTest</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>MangaTest</h1>
+        <p id="page-host">当前页面</p>
+      </header>
+
+      <label>
+        <span>本地服务</span>
+        <input id="server-url" autocomplete="off" placeholder="http://127.0.0.1:4317" />
+      </label>
+
+      <label>
+        <span>导入令牌</span>
+        <input id="import-token" autocomplete="off" type="password" placeholder="在 MangaTest 安全设置中配置" />
+      </label>
+
+      <label>
+        <span>来源站点</span>
+        <input id="site-name" autocomplete="off" placeholder="自动从域名推断" />
+      </label>
+
+      <section id="preview" hidden>
+        <strong id="preview-title"></strong>
+        <dl>
+          <div>
+            <dt>标签</dt>
+            <dd id="preview-tags">0</dd>
+          </div>
+          <div>
+            <dt>资源</dt>
+            <dd id="preview-resources">0</dd>
+          </div>
+        </dl>
+      </section>
+
+      <div class="actions">
+        <button id="collect-button" type="button">采集预览</button>
+        <button id="submit-button" type="button">提交入库</button>
+      </div>
+
+      <p id="status" role="status"></p>
+    </main>
+
+    <script src="./popup.js" defer></script>
+  </body>
+</html>

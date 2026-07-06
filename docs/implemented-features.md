@@ -68,6 +68,12 @@ This document records features that are already implemented in `apps/web`.
 - Metadata imports can enrich an explicit existing comic or create a remote-only comic when no local comic is matched.
 - Metadata imports save source records, redacted resource display fields, canonical tags, and comic tag bindings without overwriting user-edited display titles or manual tag bindings.
 
+### Browser Extension
+
+- `apps/extension` contains a Chrome Manifest V3 extension that can be loaded unpacked during development.
+- The extension popup stores the local MangaTest service URL, metadata import token, and source-site name.
+- The extension can collect a generic manga detail-page metadata preview from the active tab and submit it to `/api/metadata/import`.
+
 ### Admin And Maintenance
 
 - Admin home shows scan status, missing file count, duplicate candidate count, storage/cache summary, and recent operation logs.
@@ -91,7 +97,7 @@ This document records features that are already implemented in `apps/web`.
 
 ## Not Implemented Yet
 
-- Browser extension UI and site adapters.
+- Site-specific browser extension adapters and list-page batch collection.
 - OpenList, 115, aria2, magnet, torrent, and cloud download workflows.
 - File watching and startup auto-scan.
 - Physical file deletion.

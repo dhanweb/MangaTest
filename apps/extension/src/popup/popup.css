@@ -1,0 +1,156 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Inter, "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  color: #24141f;
+  background: #fff8fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  background: #fff8fb;
+}
+
+main {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+}
+
+header {
+  display: grid;
+  gap: 2px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0;
+}
+
+#page-host {
+  color: #7c5166;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #5e4051;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid #f7c9dc;
+  border-radius: 8px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #24141f;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+input:focus {
+  border-color: #ef3b91;
+  box-shadow: 0 0 0 2px rgba(239, 59, 145, 0.14);
+}
+
+#preview {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #f7c9dc;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+#preview[hidden] {
+  display: none;
+}
+
+#preview-title {
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+dl {
+  display: flex;
+  gap: 14px;
+  margin: 0;
+}
+
+dl div {
+  display: flex;
+  gap: 4px;
+}
+
+dt,
+dd {
+  margin: 0;
+  color: #7c5166;
+  font-size: 12px;
+}
+
+dd {
+  color: #24141f;
+  font-weight: 800;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+button {
+  min-height: 36px;
+  border: 1px solid #ef3b91;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #c21870;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+button:last-child {
+  background: #ef3b91;
+  color: #ffffff;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#status {
+  min-height: 18px;
+  color: #7c5166;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+#status[data-tone="error"] {
+  color: #c92a2a;
+}
+
+#status[data-tone="success"] {
+  color: #087f5b;
+}

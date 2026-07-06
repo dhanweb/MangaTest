@@ -1,0 +1,8 @@
+{
+  "name": "extension",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "check": "node scripts/check-extension.mjs && node --check src/background/service-worker.js && node --check src/content/collect-page-metadata.js && node --check src/popup/popup.js"
+  }
+}

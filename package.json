@@ -10,6 +10,7 @@
     "build:web": "npm run build -w apps/web",
     "lint:web": "npm run lint -w apps/web",
     "typecheck:web": "npm run typecheck -w apps/web",
+    "check:extension": "npm run check -w apps/extension",
     "dev:prototype": "npm run dev -w apps/prototype",
     "build:prototype": "npm run build -w apps/prototype",
     "lint:prototype": "npm run lint -w apps/prototype"

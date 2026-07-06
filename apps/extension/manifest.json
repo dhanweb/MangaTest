@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "MangaTest Metadata Collector",
+  "description": "Collect metadata from the current manga detail page and submit it to the local MangaTest service.",
+  "version": "0.1.0",
+  "action": {
+    "default_popup": "src/popup/popup.html"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  }
+}
