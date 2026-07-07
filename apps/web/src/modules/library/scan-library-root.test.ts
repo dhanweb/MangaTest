@@ -295,6 +295,39 @@ describe("scanMangaRoot", () => {
     expect(countRows(sqlite, "comic_resources", `comic_id = '${comicAId}'`)).toBe(1);
     expect(selectComicResource(sqlite, comicAId).displayLabel).toBe("更新磁链");
 
+    const archiveComicId = selectComicIdByFileTitle(sqlite, "Archive Comic");
+    const localTitleStatusBeforeImport = await checkMetadataSourceStatus({
+      site: "examplesite",
+      sourceUrl: "https://example.test/g/archive-comic",
+      title: "Archive Comic",
+    });
+
+    expect(localTitleStatusBeforeImport.imported).toBe(false);
+    expect(localTitleStatusBeforeImport.localMatchComicId).toBe(archiveComicId);
+    expect(localTitleStatusBeforeImport.localMatchReadable).toBe(true);
+
+    const localTitleImport = await importMetadataPayload({
+      site: "ExampleSite",
+      sourceUrl: "https://example.test/g/archive-comic",
+      title: "Archive Comic",
+      tags: [{ namespace: "group", name: "Archive Metadata Group" }],
+    });
+
+    expect(localTitleImport.createdComic).toBe(false);
+    expect(localTitleImport.matchedBy).toBe("local_title");
+    expect(localTitleImport.comicId).toBe(archiveComicId);
+    expect(localTitleImport.localReadable).toBe(true);
+    expect(countRows(sqlite, "comics")).toBe(2);
+
+    const localTitleStatusAfterImport = await checkMetadataSourceStatus({
+      site: "examplesite",
+      sourceUrl: "https://example.test/g/archive-comic",
+    });
+
+    expect(localTitleStatusAfterImport.imported).toBe(true);
+    expect(localTitleStatusAfterImport.comicId).toBe(archiveComicId);
+    expect(localTitleStatusAfterImport.localReadable).toBe(true);
+
     const remoteOnlyImport = await importMetadataPayload({
       site: "ExampleSite",
       sourceUrl: "https://example.test/g/remote-only",
@@ -347,7 +380,6 @@ describe("scanMangaRoot", () => {
 
     const { createComicMaintenanceRepository } = await import("./comic-maintenance.repository");
     const maintenanceRepository = createComicMaintenanceRepository();
-    const archiveComicId = selectComicIdByFileTitle(sqlite, "Archive Comic");
     const { createComicMergeRepository } = await import("./comic-merge.repository");
     const mergeRepository = createComicMergeRepository();
     const mergeResult = await mergeRepository.mergeAsChapter(archiveComicId, comicAId);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, comicResources, comics, comicSources, getDb, localFiles } from "@/modules/core/db";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
@@ -37,7 +37,7 @@ export interface MetadataImportResult {
   comicId: string;
   comicStatus: "readable" | "missing_local_file" | "remote_only" | "hidden" | "deleted";
   sourceRecordId: string;
-  matchedBy: "comic_id" | "source" | "created_remote";
+  matchedBy: "comic_id" | "source" | "local_title" | "created_remote";
   createdComic: boolean;
   tagCount: number;
   resourceCount: number;
@@ -48,6 +48,8 @@ export interface MetadataSourceStatusInput {
   site: string;
   sourceUrl?: string | null;
   sourceId?: string | null;
+  title?: string | null;
+  originalTitle?: string | null;
 }
 
 export interface MetadataSourceStatusResult {
@@ -61,6 +63,11 @@ export interface MetadataSourceStatusResult {
   isPrimaryFileMissing: boolean;
   localReadable: boolean;
   resourceCount: number;
+  localMatchComicId: string | null;
+  localMatchDisplayTitle: string | null;
+  localMatchStatus: MetadataImportResult["comicStatus"] | null;
+  localMatchReadable: boolean;
+  localMatchCandidateCount: number;
 }
 
 interface NormalizedMetadataPayload {
@@ -75,6 +82,16 @@ interface NormalizedMetadataPayload {
   resources: Array<Required<MetadataIngestResourceInput> & { redactedResource: string }>;
 }
 
+interface ImportComicMatchRecord {
+  id: string;
+  displayTitle: string;
+  originalTitle: string | null;
+  metadataQueryTitle: string | null;
+  status: MetadataImportResult["comicStatus"];
+  primaryLocalFileId: string | null;
+  isPrimaryFileMissing: boolean;
+}
+
 export async function importMetadataPayload(input: MetadataIngestPayload): Promise<MetadataImportResult> {
   bootstrapDatabase();
 
@@ -82,16 +99,22 @@ export async function importMetadataPayload(input: MetadataIngestPayload): Promi
   const db = getDb();
   const now = new Date().toISOString();
   const existingSource = findExistingSource(payload);
-  const explicitComic = payload.comicId
-    ? db.select().from(comics).where(eq(comics.id, payload.comicId)).get()
-    : null;
+  const explicitComic = payload.comicId ? getImportComicById(payload.comicId) : null;
 
   if (payload.comicId && !explicitComic) {
     throw new Error("找不到要补充 metadata 的漫画记录。");
   }
 
-  const matchedComic = explicitComic ?? (existingSource ? db.select().from(comics).where(eq(comics.id, existingSource.comicId)).get() : null);
-  const matchedBy: MetadataImportResult["matchedBy"] = explicitComic ? "comic_id" : existingSource ? "source" : "created_remote";
+  const sourceComic = existingSource ? getImportComicById(existingSource.comicId) : null;
+  const localTitleMatch = !explicitComic && !existingSource ? findLocalTitleMatch(payload).match : null;
+  const matchedComic = explicitComic ?? sourceComic ?? localTitleMatch;
+  const matchedBy: MetadataImportResult["matchedBy"] = explicitComic
+    ? "comic_id"
+    : existingSource
+      ? "source"
+      : localTitleMatch
+        ? "local_title"
+        : "created_remote";
   const comicId = matchedComic?.id ?? randomUUID();
   const createdComic = !matchedComic;
   const sourceRecordId = existingSource?.id ?? randomUUID();
@@ -198,7 +221,7 @@ export async function importMetadataPayload(input: MetadataIngestPayload): Promi
     await comicTagRepository.addMetadataToComic(comicId, tag.id);
   }
 
-  const comic = db.select({ status: comics.status, primaryLocalFileId: comics.primaryLocalFileId }).from(comics).where(eq(comics.id, comicId)).get();
+  const comic = getImportComicById(comicId);
 
   if (!comic) {
     throw new Error("保存 metadata 后找不到漫画记录。");
@@ -212,7 +235,7 @@ export async function importMetadataPayload(input: MetadataIngestPayload): Promi
     createdComic,
     tagCount: payload.tags.length,
     resourceCount: payload.resources.length,
-    localReadable: comic.status === "readable" && Boolean(comic.primaryLocalFileId),
+    localReadable: comic.status === "readable" && Boolean(comic.primaryLocalFileId) && !comic.isPrimaryFileMissing,
   };
 }
 
@@ -223,7 +246,8 @@ export async function checkMetadataSourceStatus(input: MetadataSourceStatusInput
   const sourceMatch = findExistingSourceWithMatch(payload);
 
   if (!sourceMatch.source) {
-    return createEmptySourceStatus();
+    const localTitleMatch = findLocalTitleMatch(payload);
+    return createEmptySourceStatus(localTitleMatch.match, localTitleMatch.candidateCount);
   }
 
   const db = getDb();
@@ -258,6 +282,11 @@ export async function checkMetadataSourceStatus(input: MetadataSourceStatusInput
     isPrimaryFileMissing,
     localReadable: row?.comicStatus === "readable" && hasLocalFile && !isPrimaryFileMissing,
     resourceCount: Number(resourceRow?.count ?? 0),
+    localMatchComicId: null,
+    localMatchDisplayTitle: null,
+    localMatchStatus: null,
+    localMatchReadable: false,
+    localMatchCandidateCount: 0,
   };
 }
 
@@ -332,6 +361,8 @@ function normalizeSourceStatusInput(input: MetadataSourceStatusInput) {
   const site = normalizeRequiredText(input.site, "来源站点").toLowerCase();
   const sourceId = normalizeOptionalText(input.sourceId);
   const sourceUrl = input.sourceUrl ? normalizeHttpUrl(input.sourceUrl, "来源 URL") : null;
+  const title = normalizeOptionalText(input.title);
+  const originalTitle = normalizeOptionalText(input.originalTitle);
 
   if (!sourceId && !sourceUrl) {
     throw new Error("来源 ID 和来源 URL 至少需要提供一个。");
@@ -341,10 +372,12 @@ function normalizeSourceStatusInput(input: MetadataSourceStatusInput) {
     site,
     sourceId,
     sourceUrl,
+    title,
+    originalTitle,
   };
 }
 
-function createEmptySourceStatus(): MetadataSourceStatusResult {
+function createEmptySourceStatus(localMatch: ImportComicMatchRecord | null = null, localMatchCandidateCount = 0): MetadataSourceStatusResult {
   return {
     imported: false,
     matchedBy: null,
@@ -356,6 +389,76 @@ function createEmptySourceStatus(): MetadataSourceStatusResult {
     isPrimaryFileMissing: false,
     localReadable: false,
     resourceCount: 0,
+    localMatchComicId: localMatch?.id ?? null,
+    localMatchDisplayTitle: localMatch?.displayTitle ?? null,
+    localMatchStatus: localMatch?.status ?? null,
+    localMatchReadable: Boolean(localMatch && localMatch.status === "readable" && localMatch.primaryLocalFileId && !localMatch.isPrimaryFileMissing),
+    localMatchCandidateCount,
+  };
+}
+
+function getImportComicById(comicId: string): ImportComicMatchRecord | null {
+  const row = getDb()
+    .select({
+      id: comics.id,
+      displayTitle: comics.displayTitle,
+      originalTitle: comics.originalTitle,
+      metadataQueryTitle: comics.metadataQueryTitle,
+      status: comics.status,
+      primaryLocalFileId: comics.primaryLocalFileId,
+      isPrimaryFileMissing: localFiles.isMissing,
+    })
+    .from(comics)
+    .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+    .where(eq(comics.id, comicId))
+    .get();
+
+  return row
+    ? {
+        ...row,
+        isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing),
+      }
+    : null;
+}
+
+function findLocalTitleMatch(input: { title: string | null; originalTitle: string | null }) {
+  const sortTitles = Array.from(new Set([input.title, input.originalTitle].map((title) => (title ? normalizeSortTitle(title) : "")).filter(Boolean)));
+
+  if (sortTitles.length === 0) {
+    return {
+      match: null,
+      candidateCount: 0,
+    };
+  }
+
+  const rows = getDb()
+    .select({
+      id: comics.id,
+      displayTitle: comics.displayTitle,
+      originalTitle: comics.originalTitle,
+      metadataQueryTitle: comics.metadataQueryTitle,
+      status: comics.status,
+      primaryLocalFileId: comics.primaryLocalFileId,
+      isPrimaryFileMissing: localFiles.isMissing,
+    })
+    .from(comics)
+    .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+    .where(
+      and(
+        inArray(comics.sortTitle, sortTitles),
+        sql`${comics.primaryLocalFileId} is not null`,
+        or(eq(comics.status, "readable"), eq(comics.status, "missing_local_file")),
+      ),
+    )
+    .all()
+    .map((row) => ({
+      ...row,
+      isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing),
+    }));
+
+  return {
+    match: rows.length === 1 ? rows[0] : null,
+    candidateCount: rows.length,
   };
 }
 

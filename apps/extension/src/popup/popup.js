@@ -98,7 +98,7 @@ async function submitMetadata() {
     }
 
     const result = payload.result;
-    const status = result.createdComic ? "已创建远程记录" : "已更新漫画 metadata";
+    const status = result.createdComic ? "已创建远程记录" : result.matchedBy === "local_title" ? "已匹配本地漫画" : "已更新漫画 metadata";
 
     latestMetadataStatus = {
       imported: true,
@@ -153,6 +153,8 @@ async function fetchMetadataStatus(metadata) {
       site: metadata.site,
       sourceId: metadata.sourceId,
       sourceUrl: metadata.sourceUrl,
+      title: metadata.title,
+      originalTitle: metadata.originalTitle,
     }),
     headers: {
       Authorization: `Bearer ${elements.importToken.value.trim()}`,
@@ -170,6 +172,16 @@ async function fetchMetadataStatus(metadata) {
 
 function renderImportStatus(status) {
   if (!status?.imported) {
+    if (status?.localMatchComicId) {
+      elements.previewImportStatus.textContent = status.localMatchReadable ? "可匹配本地" : "可匹配缺失记录";
+      return;
+    }
+
+    if (status?.localMatchCandidateCount > 1) {
+      elements.previewImportStatus.textContent = "多个本地候选";
+      return;
+    }
+
     elements.previewImportStatus.textContent = "未入库";
     return;
   }

@@ -66,6 +66,7 @@ This document records features that are already implemented in `apps/web`.
 
 - `/api/metadata/import` accepts token-protected metadata submissions for future browser extension detail-page imports.
 - Metadata imports can enrich an explicit existing comic or create a remote-only comic when no local comic is matched.
+- Metadata imports can match a single existing local comic by normalized metadata title when no source record exists yet.
 - Metadata imports save source records, redacted resource display fields, canonical tags, and comic tag bindings without overwriting user-edited display titles or manual tag bindings.
 
 ### Browser Extension
@@ -74,7 +75,7 @@ This document records features that are already implemented in `apps/web`.
 - The extension popup stores the local MangaTest service URL, metadata import token, and source-site name.
 - The extension can collect a generic manga detail-page metadata preview from the active tab and submit it to `/api/metadata/import`.
 - The extension supports a site-adapter layer before falling back to generic metadata collection.
-- The extension can query `/api/metadata/status` to show whether the current source is already imported, remote-only, missing, or locally readable.
+- The extension can query `/api/metadata/status` to show whether the current source is already imported, title-matchable to a local comic, remote-only, missing, or locally readable.
 
 ### Admin And Maintenance
 
