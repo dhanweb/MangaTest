@@ -256,10 +256,38 @@ describe("scanMangaRoot", () => {
     expect(metadataAfterImport.metadataQueryTitle).toBe("Comic A Search Alias");
     expect(countRows(sqlite, "comic_sources", "site = 'examplesite'")).toBe(1);
     expect(metadataResource.resourceUrl).toContain("PrivateName");
+    expect(metadataResource.resourceType).toBe("magnet");
     expect(metadataResource.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
     expect(metadataResource.redactedResource).not.toContain("PrivateName");
     expect(selectComicTagSource(sqlite, comicAId, "artist:sample artist").source).toBe("manual");
     expect(selectComicTagSource(sqlite, comicAId, "group:metadata group").source).toBe("metadata");
+
+    const { createDownloadTask, listDownloadableResources, listDownloadTasks } = await import("../downloads");
+    const downloadableResourcesBeforeTask = await listDownloadableResources();
+    const downloadableResource = downloadableResourcesBeforeTask.find((resource) => resource.id === metadataResource.id);
+
+    expect(downloadableResource?.comicTitle).toBe("Comic A Edited");
+    expect(downloadableResource?.resourceType).toBe("magnet");
+    expect(downloadableResource?.defaultProvider).toBe("aria2");
+    expect(downloadableResource?.compatibleProviders).toEqual(["aria2"]);
+    expect(downloadableResource?.activeTaskCount).toBe(0);
+
+    const createdDownloadTask = await createDownloadTask({ comicResourceId: metadataResource.id });
+    const duplicateDownloadTask = await createDownloadTask({ comicResourceId: metadataResource.id, provider: "aria2" });
+    const downloadTasks = await listDownloadTasks();
+    const downloadableResourcesAfterTask = await listDownloadableResources();
+
+    expect(createdDownloadTask.created).toBe(true);
+    expect(createdDownloadTask.task.status).toBe("queued");
+    expect(createdDownloadTask.task.provider).toBe("aria2");
+    expect(createdDownloadTask.task.comicTitle).toBe("Comic A Edited");
+    expect(createdDownloadTask.task.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
+    expect(duplicateDownloadTask.created).toBe(false);
+    expect(duplicateDownloadTask.task.id).toBe(createdDownloadTask.task.id);
+    expect(downloadTasks.map((task) => task.id)).toContain(createdDownloadTask.task.id);
+    expect(downloadableResourcesAfterTask.find((resource) => resource.id === metadataResource.id)?.activeTaskCount).toBe(1);
+    expect(countRows(sqlite, "download_tasks")).toBe(1);
+    await expect(createDownloadTask({ comicResourceId: metadataResource.id, provider: "openlist" })).rejects.toThrow("不能使用 openlist 下载");
 
     const metadataStatusAfterImport = await checkMetadataSourceStatus({
       site: "examplesite",
@@ -627,9 +655,11 @@ function selectComicMetadata(sqlite: Database.Database, comicId: string) {
 function selectComicResource(sqlite: Database.Database, comicId: string) {
   return sqlite
     .prepare(
-      "select display_label as displayLabel, resource_url as resourceUrl, redacted_resource as redactedResource from comic_resources where comic_id = ? limit 1",
+      "select id, resource_type as resourceType, display_label as displayLabel, resource_url as resourceUrl, redacted_resource as redactedResource from comic_resources where comic_id = ? limit 1",
     )
     .get(comicId) as {
+    id: string;
+    resourceType: string;
     displayLabel: string | null;
     resourceUrl: string | null;
     redactedResource: string | null;

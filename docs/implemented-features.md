@@ -19,6 +19,7 @@ This document records features that are already implemented in `apps/web`.
 - File maintenance: `http://127.0.0.1:4317/admin/files`
 - Comic management: `http://127.0.0.1:4317/admin/comics`
 - Tag management: `http://127.0.0.1:4317/admin/tags`
+- Download tasks: `http://127.0.0.1:4317/admin/downloads`
 - Settings: `http://127.0.0.1:4317/admin/settings`
 
 ## Implemented In `apps/web`
@@ -77,6 +78,14 @@ This document records features that are already implemented in `apps/web`.
 - The extension supports a site-adapter layer before falling back to generic metadata collection.
 - The extension can query `/api/metadata/status` to show whether the current source is already imported, title-matchable to a local comic, remote-only, missing, or locally readable.
 
+### Downloads
+
+- `/api/downloads` lists imported downloadable resources and queued download tasks.
+- Admin download tasks can create queued `download_task` records from `comic_resource` records.
+- Download task creation chooses the default provider from resource type: magnet/torrent uses aria2, HTTP uses builtin HTTP, and OpenList resources use OpenList.
+- Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.
+- Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
+
 ### Admin And Maintenance
 
 - Admin home shows scan status, missing file count, duplicate candidate count, storage/cache summary, and recent operation logs.
@@ -101,7 +110,7 @@ This document records features that are already implemented in `apps/web`.
 ## Not Implemented Yet
 
 - Additional site-specific browser extension adapters and list-page batch collection.
-- OpenList, 115, aria2, magnet, torrent, and cloud download workflows.
+- Provider execution for OpenList, 115, aria2, builtin HTTP, magnet, torrent, and cloud download workflows.
 - File watching and startup auto-scan.
 - Physical file deletion.
 - Multi-user accounts or login.
