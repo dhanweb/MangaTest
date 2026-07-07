@@ -25,6 +25,10 @@ export interface CreateDownloadTaskResult {
   task: DownloadTaskRecord;
 }
 
+export interface UpdateDownloadTaskResult {
+  task: DownloadTaskRecord;
+}
+
 export interface DownloadableResourceRecord {
   id: string;
   comicId: string;
@@ -237,6 +241,103 @@ export async function listDownloadableResources(limit = 100): Promise<Downloadab
       updatedAt: row.updatedAt,
     };
   });
+}
+
+export async function retryDownloadTask(taskId: string): Promise<UpdateDownloadTaskResult> {
+  bootstrapDatabase();
+
+  const id = normalizeRequiredText(taskId, "任务 ID");
+  const task = getDownloadTaskById(id);
+
+  if (!task) {
+    throw new Error("找不到下载任务。");
+  }
+
+  if (task.status !== "failed" && task.status !== "canceled") {
+    throw new Error("只有失败或已取消的任务可以重试。");
+  }
+
+  if (!task.resourceType) {
+    throw new Error("这个下载任务缺少资源记录，无法重试。");
+  }
+
+  if (!isProviderCompatibleWithResourceType(task.provider, task.resourceType)) {
+    throw new Error("下载任务的 provider 与资源类型不兼容，无法重试。");
+  }
+
+  const existingActiveTask = getDb()
+    .select({ id: downloadTasks.id })
+    .from(downloadTasks)
+    .where(
+      and(
+        eq(downloadTasks.comicResourceId, task.comicResourceId),
+        eq(downloadTasks.provider, task.provider),
+        inArray(downloadTasks.status, ACTIVE_TASK_STATUSES),
+        sql`${downloadTasks.id} <> ${id}`,
+      ),
+    )
+    .get();
+
+  if (existingActiveTask) {
+    throw new Error("这个资源已有活动下载任务，不能重复重试。");
+  }
+
+  const now = new Date().toISOString();
+  getDb()
+    .update(downloadTasks)
+    .set({
+      status: "queued",
+      errorMessage: null,
+      retryCount: task.retryCount + 1,
+      updatedAt: now,
+    })
+    .where(eq(downloadTasks.id, id))
+    .run();
+
+  const updatedTask = getDownloadTaskById(id);
+  if (!updatedTask) {
+    throw new Error("读取重试后的下载任务失败。");
+  }
+
+  return {
+    task: updatedTask,
+  };
+}
+
+export async function cancelDownloadTask(taskId: string): Promise<UpdateDownloadTaskResult> {
+  bootstrapDatabase();
+
+  const id = normalizeRequiredText(taskId, "任务 ID");
+  const task = getDownloadTaskById(id);
+
+  if (!task) {
+    throw new Error("找不到下载任务。");
+  }
+
+  if (task.status !== "queued" && task.status !== "running") {
+    throw new Error("只有排队中或运行中的任务可以取消。");
+  }
+
+  const now = new Date().toISOString();
+  const nextStatus: DownloadTaskStatus = task.status === "running" ? "cancel_requested" : "canceled";
+
+  getDb()
+    .update(downloadTasks)
+    .set({
+      status: nextStatus,
+      updatedAt: now,
+    })
+    .where(eq(downloadTasks.id, id))
+    .run();
+
+  const updatedTask = getDownloadTaskById(id);
+  if (!updatedTask) {
+    throw new Error("读取取消后的下载任务失败。");
+  }
+
+  return {
+    task: updatedTask,
+  };
 }
 
 export function getDefaultProviderForResourceType(resourceType: ComicResourceType): DownloadProvider {

@@ -262,7 +262,7 @@ describe("scanMangaRoot", () => {
     expect(selectComicTagSource(sqlite, comicAId, "artist:sample artist").source).toBe("manual");
     expect(selectComicTagSource(sqlite, comicAId, "group:metadata group").source).toBe("metadata");
 
-    const { createDownloadTask, listDownloadableResources, listDownloadTasks } = await import("../downloads");
+    const { cancelDownloadTask, createDownloadTask, listDownloadableResources, listDownloadTasks, retryDownloadTask } = await import("../downloads");
     const downloadableResourcesBeforeTask = await listDownloadableResources();
     const downloadableResource = downloadableResourcesBeforeTask.find((resource) => resource.id === metadataResource.id);
 
@@ -288,6 +288,26 @@ describe("scanMangaRoot", () => {
     expect(downloadableResourcesAfterTask.find((resource) => resource.id === metadataResource.id)?.activeTaskCount).toBe(1);
     expect(countRows(sqlite, "download_tasks")).toBe(1);
     await expect(createDownloadTask({ comicResourceId: metadataResource.id, provider: "openlist" })).rejects.toThrow("不能使用 openlist 下载");
+
+    const canceledDownloadTask = await cancelDownloadTask(createdDownloadTask.task.id);
+    const downloadableResourcesAfterCancel = await listDownloadableResources();
+    const recreatedDownloadTask = await createDownloadTask({ comicResourceId: metadataResource.id });
+
+    await expect(retryDownloadTask(createdDownloadTask.task.id)).rejects.toThrow("已有活动下载任务");
+
+    const canceledRecreatedDownloadTask = await cancelDownloadTask(recreatedDownloadTask.task.id);
+    const retriedDownloadTask = await retryDownloadTask(createdDownloadTask.task.id);
+    const downloadableResourcesAfterRetry = await listDownloadableResources();
+
+    expect(canceledDownloadTask.task.status).toBe("canceled");
+    expect(downloadableResourcesAfterCancel.find((resource) => resource.id === metadataResource.id)?.activeTaskCount).toBe(0);
+    expect(recreatedDownloadTask.created).toBe(true);
+    expect(recreatedDownloadTask.task.id).not.toBe(createdDownloadTask.task.id);
+    expect(canceledRecreatedDownloadTask.task.status).toBe("canceled");
+    expect(retriedDownloadTask.task.status).toBe("queued");
+    expect(retriedDownloadTask.task.retryCount).toBe(1);
+    expect(downloadableResourcesAfterRetry.find((resource) => resource.id === metadataResource.id)?.activeTaskCount).toBe(1);
+    await expect(retryDownloadTask(createdDownloadTask.task.id)).rejects.toThrow("只有失败或已取消的任务可以重试");
 
     const metadataStatusAfterImport = await checkMetadataSourceStatus({
       site: "examplesite",

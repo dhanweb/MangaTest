@@ -84,7 +84,9 @@ This document records features that are already implemented in `apps/web`.
 - Admin download tasks can create queued `download_task` records from `comic_resource` records.
 - Download task creation chooses the default provider from resource type: magnet/torrent uses aria2, HTTP uses builtin HTTP, and OpenList resources use OpenList.
 - Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.
+- Queued download tasks can be canceled, and failed or canceled tasks can be manually retried back into the queue.
 - Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
+- Download admin UI can cancel queued/running tasks and retry failed/canceled tasks without invoking provider execution.
 
 ### Admin And Maintenance
 

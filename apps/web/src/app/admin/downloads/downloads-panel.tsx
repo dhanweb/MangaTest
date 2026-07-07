@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { CheckCircle2, CloudDownload, Plus, Search } from "lucide-react";
+import { CheckCircle2, CloudDownload, Plus, RotateCcw, Search, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
@@ -45,6 +45,7 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
   const [provider, setProvider] = useState<DownloadProvider>(() => resources[0]?.defaultProvider ?? "aria2");
   const [targetDirectory, setTargetDirectory] = useState("");
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null);
+  const [pendingTaskAction, setPendingTaskAction] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -148,6 +149,33 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
       setError(caught instanceof Error ? caught.message : "创建下载任务失败。");
     } finally {
       setPendingResourceId(null);
+    }
+  }
+
+  async function updateTaskStatus(task: DownloadTaskRecord, action: "cancel" | "retry") {
+    const actionKey = `${task.id}:${action}`;
+
+    setPendingTaskAction(actionKey);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch(`/api/downloads/${encodeURIComponent(task.id)}/${action}`, { method: "POST" });
+      const payload = (await response.json()) as DownloadsApiResponse;
+
+      if (!response.ok || !payload.task) {
+        throw new Error(payload.error ?? (action === "cancel" ? "取消下载任务失败。" : "重试下载任务失败。"));
+      }
+
+      const updatedTask = payload.task;
+
+      setTaskItems((current) => upsertTask(current, updatedTask));
+      setMessage(action === "cancel" ? "已更新下载任务取消状态。" : "已重新加入下载队列。");
+      await refreshDownloads(updatedTask.comicResourceId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : action === "cancel" ? "取消下载任务失败。" : "重试下载任务失败。");
+    } finally {
+      setPendingTaskAction(null);
     }
   }
 
@@ -394,6 +422,9 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
                   <Table.Th fw={900} c="#8d5a6e" w={136}>
                     更新时间
                   </Table.Th>
+                  <Table.Th fw={900} c="#8d5a6e" w={96}>
+                    操作
+                  </Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -438,11 +469,14 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
                         {formatDate(task.updatedAt)}
                       </Text>
                     </Table.Td>
+                    <Table.Td>
+                      <TaskActions task={task} pendingTaskAction={pendingTaskAction} onUpdateTask={updateTaskStatus} />
+                    </Table.Td>
                   </Table.Tr>
                 ))}
                 {filteredTasks.length === 0 && (
                   <Table.Tr>
-                    <Table.Td colSpan={6}>
+                    <Table.Td colSpan={7}>
                       <Text size="sm" c="ink.5" ta="center" py="md">
                         还没有下载任务
                       </Text>
@@ -455,6 +489,50 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
         </Box>
       </Stack>
     </Box>
+  );
+}
+
+function TaskActions({
+  onUpdateTask,
+  pendingTaskAction,
+  task,
+}: {
+  onUpdateTask: (task: DownloadTaskRecord, action: "cancel" | "retry") => void;
+  pendingTaskAction: string | null;
+  task: DownloadTaskRecord;
+}) {
+  const canCancel = task.status === "queued" || task.status === "running";
+  const canRetry = task.status === "failed" || task.status === "canceled";
+
+  return (
+    <Group gap={4} wrap="nowrap">
+      <Tooltip label={canCancel ? "取消任务" : "当前状态不能取消"} withArrow>
+        <ActionIcon
+          variant="subtle"
+          color="red"
+          size="md"
+          disabled={!canCancel}
+          loading={pendingTaskAction === `${task.id}:cancel`}
+          onClick={() => onUpdateTask(task, "cancel")}
+          aria-label={`取消 ${task.comicTitle} 的下载任务`}
+        >
+          <XCircle size={15} />
+        </ActionIcon>
+      </Tooltip>
+      <Tooltip label={canRetry ? "重新排队" : "只有失败或已取消的任务可以重试"} withArrow>
+        <ActionIcon
+          variant="subtle"
+          color="pink"
+          size="md"
+          disabled={!canRetry}
+          loading={pendingTaskAction === `${task.id}:retry`}
+          onClick={() => onUpdateTask(task, "retry")}
+          aria-label={`重试 ${task.comicTitle} 的下载任务`}
+        >
+          <RotateCcw size={15} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
   );
 }
 
