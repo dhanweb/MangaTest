@@ -12,7 +12,7 @@ export interface AdminHealthSummary {
   cache: CacheSummary;
   readableComics: number;
   localFiles: number;
-  recentDangerousOperations: number;
+  recentOperationCount: number;
   recentOperations: AdminOperationLogRecord[];
   latestScanFinishedAt: string | null;
   latestScanError: string | null;
@@ -64,7 +64,7 @@ export async function getAdminHealthSummary(): Promise<AdminHealthSummary> {
     cache,
     readableComics: Number(readableRow?.count ?? 0),
     localFiles: Number(localFileRow?.count ?? 0),
-    recentDangerousOperations: Number(operationRow?.count ?? 0),
+    recentOperationCount: Number(operationRow?.count ?? 0),
     recentOperations,
     latestScanFinishedAt: latestScan?.finishedAt ?? null,
     latestScanError: latestScan?.errorSummary ?? null,

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, comicResources, comics, comicSources, downloadTasks, getDb } from "@/modules/core/db";
+import { bootstrapDatabase, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
 import { getRuntimeSettings } from "@/modules/core/settings";
 
 export const DOWNLOAD_PROVIDERS = ["openlist", "builtin-http", "aria2"] as const;
@@ -14,6 +14,9 @@ export type DownloadTaskStatus = (typeof DOWNLOAD_TASK_STATUSES)[number];
 
 export const COMIC_RESOURCE_TYPES = ["magnet", "torrent", "http", "openlist"] as const;
 export type ComicResourceType = (typeof COMIC_RESOURCE_TYPES)[number];
+
+const DOWNLOAD_TASK_EVENT_OPERATIONS = ["download_task_create", "download_task_cancel", "download_task_retry"] as const;
+export type DownloadTaskEventOperation = (typeof DOWNLOAD_TASK_EVENT_OPERATIONS)[number];
 
 export interface CreateDownloadTaskInput {
   comicResourceId: string;
@@ -64,6 +67,37 @@ export interface DownloadTaskRecord {
   retryCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DownloadTaskEventRecord {
+  id: string;
+  operation: DownloadTaskEventOperation;
+  taskId: string;
+  summary: string;
+  comicTitle: string | null;
+  resourceLabel: string | null;
+  redactedResource: string | null;
+  provider: DownloadProvider | null;
+  previousStatus: DownloadTaskStatus | null;
+  status: DownloadTaskStatus | null;
+  retryCount: number | null;
+  createdAt: string;
+}
+
+interface DownloadTaskEventDetail {
+  taskId: string;
+  comicResourceId: string;
+  comicId: string | null;
+  comicTitle: string;
+  resourceType: ComicResourceType | null;
+  resourceLabel: string;
+  redactedResource: string;
+  sourceSite: string | null;
+  provider: DownloadProvider;
+  previousStatus: DownloadTaskStatus | null;
+  status: DownloadTaskStatus;
+  targetDirectory: string | null;
+  retryCount: number;
 }
 
 const COMPATIBLE_PROVIDERS: Record<ComicResourceType, DownloadProvider[]> = {
@@ -132,6 +166,10 @@ export async function createDownloadTask(input: CreateDownloadTaskInput): Promis
     throw new Error("创建下载任务失败。");
   }
 
+  recordDownloadTaskEvent(task, "download_task_create", {
+    status: task.status,
+  });
+
   return {
     created: true,
     task,
@@ -184,6 +222,50 @@ export async function listDownloadTasks(limit = 100): Promise<DownloadTaskRecord
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
+}
+
+export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEventRecord[]> {
+  bootstrapDatabase();
+
+  const rows = getDb()
+    .select({
+      id: operationLogs.id,
+      operation: operationLogs.operation,
+      targetId: operationLogs.targetId,
+      summary: operationLogs.summary,
+      detailJson: operationLogs.detailJson,
+      createdAt: operationLogs.createdAt,
+    })
+    .from(operationLogs)
+    .where(and(eq(operationLogs.targetType, "download_task"), inArray(operationLogs.operation, [...DOWNLOAD_TASK_EVENT_OPERATIONS])))
+    .orderBy(desc(operationLogs.createdAt))
+    .limit(normalizeLimit(limit))
+    .all();
+
+  return rows.flatMap((row) => {
+    if (!isDownloadTaskEventOperation(row.operation)) {
+      return [];
+    }
+
+    const detail = parseDownloadTaskEventDetail(row.detailJson);
+
+    return [
+      {
+        id: row.id,
+        operation: row.operation,
+        taskId: detail?.taskId ?? row.targetId,
+        summary: row.summary,
+        comicTitle: detail?.comicTitle ?? null,
+        resourceLabel: detail?.resourceLabel ?? null,
+        redactedResource: detail?.redactedResource ?? null,
+        provider: detail?.provider ?? null,
+        previousStatus: detail?.previousStatus ?? null,
+        status: detail?.status ?? null,
+        retryCount: detail?.retryCount ?? null,
+        createdAt: row.createdAt,
+      },
+    ];
+  });
 }
 
 export async function listDownloadableResources(limit = 100): Promise<DownloadableResourceRecord[]> {
@@ -300,6 +382,11 @@ export async function retryDownloadTask(taskId: string): Promise<UpdateDownloadT
     throw new Error("读取重试后的下载任务失败。");
   }
 
+  recordDownloadTaskEvent(updatedTask, "download_task_retry", {
+    previousStatus: task.status,
+    status: updatedTask.status,
+  });
+
   return {
     task: updatedTask,
   };
@@ -335,6 +422,11 @@ export async function cancelDownloadTask(taskId: string): Promise<UpdateDownload
   if (!updatedTask) {
     throw new Error("读取取消后的下载任务失败。");
   }
+
+  recordDownloadTaskEvent(updatedTask, "download_task_cancel", {
+    previousStatus: task.status,
+    status: updatedTask.status,
+  });
 
   return {
     task: updatedTask,
@@ -420,6 +512,97 @@ function getResourceById(comicResourceId: string) {
     : null;
 }
 
+function recordDownloadTaskEvent(
+  task: DownloadTaskRecord,
+  operation: DownloadTaskEventOperation,
+  transition: { previousStatus?: DownloadTaskStatus; status: DownloadTaskStatus },
+) {
+  const detail: DownloadTaskEventDetail = {
+    taskId: task.id,
+    comicResourceId: task.comicResourceId,
+    comicId: task.comicId,
+    comicTitle: task.comicTitle,
+    resourceType: task.resourceType,
+    resourceLabel: task.resourceLabel,
+    redactedResource: task.redactedResource,
+    sourceSite: task.sourceSite,
+    provider: task.provider,
+    previousStatus: transition.previousStatus ?? null,
+    status: transition.status,
+    targetDirectory: task.targetDirectory,
+    retryCount: task.retryCount,
+  };
+
+  getDb()
+    .insert(operationLogs)
+    .values({
+      id: randomUUID(),
+      operation,
+      targetType: "download_task",
+      targetId: task.id,
+      summary: formatDownloadTaskEventSummary(operation, task, transition.previousStatus),
+      detailJson: JSON.stringify(detail),
+    })
+    .run();
+}
+
+function formatDownloadTaskEventSummary(operation: DownloadTaskEventOperation, task: DownloadTaskRecord, previousStatus?: DownloadTaskStatus) {
+  if (operation === "download_task_cancel") {
+    return `取消下载任务：${task.comicTitle}（${formatDownloadTaskStatus(previousStatus)} -> ${formatDownloadTaskStatus(task.status)}）`;
+  }
+
+  if (operation === "download_task_retry") {
+    return `重试下载任务：${task.comicTitle}（第 ${task.retryCount} 次）`;
+  }
+
+  return `创建 ${task.provider} 下载任务：${task.comicTitle}`;
+}
+
+function formatDownloadTaskStatus(status: DownloadTaskStatus | undefined) {
+  const labels: Record<DownloadTaskStatus, string> = {
+    cancel_requested: "取消中",
+    canceled: "已取消",
+    completed: "已完成",
+    failed: "失败",
+    queued: "排队中",
+    running: "运行中",
+  };
+
+  return status ? labels[status] : "未知";
+}
+
+function parseDownloadTaskEventDetail(value: string | null): DownloadTaskEventDetail | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<DownloadTaskEventDetail>;
+
+    if (!parsed.taskId || typeof parsed.taskId !== "string") {
+      return null;
+    }
+
+    return {
+      taskId: parsed.taskId,
+      comicResourceId: typeof parsed.comicResourceId === "string" ? parsed.comicResourceId : "",
+      comicId: typeof parsed.comicId === "string" ? parsed.comicId : null,
+      comicTitle: typeof parsed.comicTitle === "string" ? parsed.comicTitle : "未知漫画",
+      resourceType: parsed.resourceType && isComicResourceType(parsed.resourceType) ? parsed.resourceType : null,
+      resourceLabel: typeof parsed.resourceLabel === "string" ? parsed.resourceLabel : "资源",
+      redactedResource: typeof parsed.redactedResource === "string" ? parsed.redactedResource : "资源已脱敏",
+      sourceSite: typeof parsed.sourceSite === "string" ? parsed.sourceSite : null,
+      provider: parsed.provider && isDownloadProvider(parsed.provider) ? parsed.provider : "aria2",
+      previousStatus: parsed.previousStatus && isDownloadTaskStatus(parsed.previousStatus) ? parsed.previousStatus : null,
+      status: parsed.status && isDownloadTaskStatus(parsed.status) ? parsed.status : "queued",
+      targetDirectory: typeof parsed.targetDirectory === "string" ? parsed.targetDirectory : null,
+      retryCount: typeof parsed.retryCount === "number" ? parsed.retryCount : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeRequiredText(value: unknown, label: string) {
   if (typeof value !== "string") {
     throw new Error(`${label}不能为空。`);
@@ -500,4 +683,8 @@ function isDownloadTaskStatus(value: unknown): value is DownloadTaskStatus {
 
 function isComicResourceType(value: unknown): value is ComicResourceType {
   return COMIC_RESOURCE_TYPES.includes(value as ComicResourceType);
+}
+
+function isDownloadTaskEventOperation(value: unknown): value is DownloadTaskEventOperation {
+  return DOWNLOAD_TASK_EVENT_OPERATIONS.includes(value as DownloadTaskEventOperation);
 }

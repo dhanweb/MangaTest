@@ -37,7 +37,7 @@ export default async function AdminPage() {
           <InfoRow label="最近状态" value={formatScanStatus(summary.scanStatus)} />
           <InfoRow label="完成时间" value={summary.latestScanFinishedAt ? formatDate(summary.latestScanFinishedAt) : "暂无"} />
           <InfoRow label="错误信息" value={summary.latestScanError ?? "无"} tone={summary.latestScanError ? "warn" : "normal"} />
-          <InfoRow label="危险操作日志" value={`${summary.recentDangerousOperations} 条`} />
+          <InfoRow label="操作日志" value={`${summary.recentOperationCount} 条`} />
         </StatusPanel>
 
         <StatusPanel title="缓存状态" actionHref="/admin/settings" actionLabel="缓存设置">
@@ -168,6 +168,9 @@ function formatScanStatus(status: string) {
 function formatOperation(operation: string) {
   const labels: Record<string, string> = {
     cache_cleanup: "缓存清理",
+    download_task_cancel: "取消下载",
+    download_task_create: "创建下载",
+    download_task_retry: "重试下载",
     hide: "隐藏",
     merge_chapter: "合并章节",
     path_repair: "路径修复",

@@ -5,7 +5,15 @@ import { CheckCircle2, CloudDownload, Plus, RotateCcw, Search, XCircle } from "l
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
-import type { ComicResourceType, DownloadableResourceRecord, DownloadProvider, DownloadTaskRecord, DownloadTaskStatus } from "@/modules/downloads";
+import type {
+  ComicResourceType,
+  DownloadableResourceRecord,
+  DownloadProvider,
+  DownloadTaskEventOperation,
+  DownloadTaskEventRecord,
+  DownloadTaskRecord,
+  DownloadTaskStatus,
+} from "@/modules/downloads";
 
 const PROVIDER_LABELS: Record<DownloadProvider, string> = {
   "aria2": "aria2",
@@ -29,15 +37,31 @@ const TASK_STATUS_CONFIG: Record<DownloadTaskStatus, { label: string; bg: string
   running: { label: "运行中", bg: "#e7f0ff", color: "#2563eb" },
 };
 
+const EVENT_OPERATION_CONFIG: Record<DownloadTaskEventOperation, { label: string; bg: string; color: string }> = {
+  download_task_cancel: { label: "取消", bg: "#ffe1e1", color: "#d93a4e" },
+  download_task_create: { label: "创建", bg: "var(--mantine-color-pink-0)", color: "var(--mantine-color-pink-6)" },
+  download_task_retry: { label: "重试", bg: "#e7f0ff", color: "#2563eb" },
+};
+
 type DownloadsApiResponse = {
   resources?: DownloadableResourceRecord[];
+  events?: DownloadTaskEventRecord[];
   tasks?: DownloadTaskRecord[];
   task?: DownloadTaskRecord;
   created?: boolean;
   error?: string;
 };
 
-export function DownloadsPanel({ resources, tasks }: { resources: DownloadableResourceRecord[]; tasks: DownloadTaskRecord[] }) {
+export function DownloadsPanel({
+  events,
+  resources,
+  tasks,
+}: {
+  events: DownloadTaskEventRecord[];
+  resources: DownloadableResourceRecord[];
+  tasks: DownloadTaskRecord[];
+}) {
+  const [eventItems, setEventItems] = useState(events);
   const [resourceItems, setResourceItems] = useState(resources);
   const [taskItems, setTaskItems] = useState(tasks);
   const [search, setSearch] = useState("");
@@ -98,6 +122,27 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
         .includes(query),
     );
   }, [taskItems, search]);
+  const filteredEvents = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return eventItems;
+    }
+
+    return eventItems.filter((event) =>
+      [
+        EVENT_OPERATION_CONFIG[event.operation].label,
+        event.summary,
+        event.comicTitle ?? "",
+        event.resourceLabel ?? "",
+        event.redactedResource ?? "",
+        event.provider ? PROVIDER_LABELS[event.provider] : "",
+        event.status ? TASK_STATUS_CONFIG[event.status].label : "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [eventItems, search]);
 
   const activeTaskCount = taskItems.filter((task) => task.status === "queued" || task.status === "running" || task.status === "cancel_requested").length;
   const failedTaskCount = taskItems.filter((task) => task.status === "failed").length;
@@ -187,6 +232,7 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
       return;
     }
 
+    setEventItems(payload.events ?? []);
     setResourceItems(payload.resources);
     setTaskItems(payload.tasks);
 
@@ -297,6 +343,73 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
             />
           </Box>
         </Group>
+
+        <Box>
+          <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
+            最近活动
+          </Text>
+          <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
+            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+              <Table.Thead>
+                <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
+                  <Table.Th fw={900} c="#8d5a6e" w={92}>
+                    事件
+                  </Table.Th>
+                  <Table.Th fw={900} c="#8d5a6e">
+                    摘要
+                  </Table.Th>
+                  <Table.Th fw={900} c="#8d5a6e">
+                    资源
+                  </Table.Th>
+                  <Table.Th fw={900} c="#8d5a6e" w={136}>
+                    时间
+                  </Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {filteredEvents.map((event) => (
+                  <Table.Tr key={event.id}>
+                    <Table.Td>
+                      <EventOperationBadge operation={event.operation} />
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={700}>
+                        {event.summary}
+                      </Text>
+                      <Text size="xs" c="ink.5">
+                        {event.provider ? PROVIDER_LABELS[event.provider] : "未知 provider"}
+                        {event.status ? ` · ${TASK_STATUS_CONFIG[event.status].label}` : ""}
+                        {event.retryCount && event.retryCount > 0 ? ` · 重试 ${event.retryCount} 次` : ""}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" fw={600}>
+                        {event.comicTitle ?? "未知漫画"}
+                      </Text>
+                      <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                        {event.resourceLabel ?? "资源"} · {event.redactedResource ?? "资源已脱敏"}
+                      </Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" c="ink.5">
+                        {formatDate(event.createdAt)}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+                {filteredEvents.length === 0 && (
+                  <Table.Tr>
+                    <Table.Td colSpan={4}>
+                      <Text size="sm" c="ink.5" ta="center" py="md">
+                        暂无下载活动
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                )}
+              </Table.Tbody>
+            </Table>
+          </Box>
+        </Box>
 
         <Box>
           <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
@@ -570,6 +683,30 @@ function ResourceTypeBadge({ type }: { type: ComicResourceType }) {
 
 function StatusBadge({ status }: { status: DownloadTaskStatus }) {
   const config = TASK_STATUS_CONFIG[status];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
+function EventOperationBadge({ operation }: { operation: DownloadTaskEventOperation }) {
+  const config = EVENT_OPERATION_CONFIG[operation];
 
   return (
     <Box

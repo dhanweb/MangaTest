@@ -1,14 +1,14 @@
 import { revalidatePath } from "next/cache";
 
-import { createDownloadTask, listDownloadableResources, listDownloadTasks, type DownloadProvider } from "@/modules/downloads";
+import { createDownloadTask, listDownloadableResources, listDownloadTaskEvents, listDownloadTasks, type DownloadProvider } from "@/modules/downloads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [resources, tasks] = await Promise.all([listDownloadableResources(), listDownloadTasks()]);
+  const [resources, tasks, events] = await Promise.all([listDownloadableResources(), listDownloadTasks(), listDownloadTaskEvents()]);
 
-  return Response.json({ resources, tasks });
+  return Response.json({ resources, tasks, events });
 }
 
 export async function POST(request: Request) {
