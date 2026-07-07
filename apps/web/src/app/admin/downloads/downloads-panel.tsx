@@ -240,7 +240,7 @@ export function DownloadsPanel({ resources, tasks }: { resources: DownloadableRe
             />
             <AppInput
               label="目标目录"
-              placeholder="可选，必须为绝对路径"
+              placeholder="留空使用默认目录"
               value={targetDirectory}
               onChange={(event) => setTargetDirectory(event.currentTarget.value)}
               styles={{ root: { flex: "1 1 260px", minWidth: 220 } }}

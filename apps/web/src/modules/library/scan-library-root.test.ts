@@ -96,6 +96,10 @@ describe("scanMangaRoot", () => {
       readerThumbnailTtlDays: 7,
       themeMode: "dark",
       metadataImportToken: "test-import-token",
+      downloadDefaultTargetDirectory: path.join(workspace, "downloads"),
+      openlistEnabled: true,
+      openlistBaseUrl: "http://127.0.0.1:5244/",
+      openlistToken: "test-openlist-token",
     });
     const runtimeSettings = await getRuntimeSettings();
 
@@ -109,6 +113,10 @@ describe("scanMangaRoot", () => {
     expect(savedSettings.themeMode).toBe("light");
     expect(runtimeSettings.themeMode).toBe("light");
     expect(runtimeSettings.metadataImportToken).toBe("test-import-token");
+    expect(runtimeSettings.downloadDefaultTargetDirectory).toBe(path.join(workspace, "downloads"));
+    expect(runtimeSettings.openlistEnabled).toBe(true);
+    expect(runtimeSettings.openlistBaseUrl).toBe("http://127.0.0.1:5244/");
+    expect(runtimeSettings.openlistToken).toBe("test-openlist-token");
 
     const comicAId = selectComicIdByFileTitle(sqlite, "Comic A");
     const { getComicCover, getReaderThumbnail, regenerateComicCover, uploadComicCover } = await import("../media-assets");
@@ -282,6 +290,7 @@ describe("scanMangaRoot", () => {
     expect(createdDownloadTask.task.provider).toBe("aria2");
     expect(createdDownloadTask.task.comicTitle).toBe("Comic A Edited");
     expect(createdDownloadTask.task.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
+    expect(createdDownloadTask.task.targetDirectory).toBe(path.join(workspace, "downloads"));
     expect(duplicateDownloadTask.created).toBe(false);
     expect(duplicateDownloadTask.task.id).toBe(createdDownloadTask.task.id);
     expect(downloadTasks.map((task) => task.id)).toContain(createdDownloadTask.task.id);

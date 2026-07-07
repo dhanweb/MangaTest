@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { getRuntimeSettings, saveRuntimeSettings } from "@/modules/core/settings";
 import type { RuntimeSettingsInput } from "@/modules/core/settings/repository";
 
@@ -57,7 +59,35 @@ export async function PATCH(request: Request) {
     input.metadataImportToken = payload.metadataImportToken.trim();
   }
 
-  return Response.json({ settings: await saveRuntimeSettings(input) });
+  if (typeof payload.downloadDefaultTargetDirectory === "string") {
+    const normalizedDownloadTarget = normalizeOptionalAbsolutePath(payload.downloadDefaultTargetDirectory);
+    if (normalizedDownloadTarget.error) {
+      return Response.json({ error: normalizedDownloadTarget.error }, { status: 400 });
+    }
+    input.downloadDefaultTargetDirectory = normalizedDownloadTarget.value;
+  }
+
+  if (typeof payload.openlistEnabled === "boolean") {
+    input.openlistEnabled = payload.openlistEnabled;
+  }
+
+  if (typeof payload.openlistBaseUrl === "string") {
+    const normalizedOpenListBaseUrl = normalizeOptionalHttpUrl(payload.openlistBaseUrl);
+    if (normalizedOpenListBaseUrl.error) {
+      return Response.json({ error: normalizedOpenListBaseUrl.error }, { status: 400 });
+    }
+    input.openlistBaseUrl = normalizedOpenListBaseUrl.value;
+  }
+
+  if (typeof payload.openlistToken === "string") {
+    input.openlistToken = payload.openlistToken.trim();
+  }
+
+  try {
+    return Response.json({ settings: await saveRuntimeSettings(input) });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to save settings." }, { status: 400 });
+  }
 }
 
 function clampNumber(value: number, min: number, max: number) {
@@ -66,4 +96,36 @@ function clampNumber(value: number, min: number, max: number) {
   }
 
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function normalizeOptionalAbsolutePath(value: string) {
+  const text = value.trim();
+
+  if (!text) {
+    return { value: "", error: null };
+  }
+
+  if (!path.isAbsolute(text)) {
+    return { value: "", error: "默认下载目录必须是绝对路径。" };
+  }
+
+  return { value: path.normalize(text), error: null };
+}
+
+function normalizeOptionalHttpUrl(value: string) {
+  const text = value.trim();
+
+  if (!text) {
+    return { value: "", error: null };
+  }
+
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return { value: "", error: "OpenList 服务地址必须是 http 或 https URL。" };
+    }
+    return { value: url.toString(), error: null };
+  } catch {
+    return { value: "", error: "OpenList 服务地址必须是有效 URL。" };
+  }
 }

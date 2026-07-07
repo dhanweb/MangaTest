@@ -82,6 +82,7 @@ This document records features that are already implemented in `apps/web`.
 
 - `/api/downloads` lists imported downloadable resources and queued download tasks.
 - Admin download tasks can create queued `download_task` records from `comic_resource` records.
+- Download task creation uses the configured default download directory when no per-task target directory is provided.
 - Download task creation chooses the default provider from resource type: magnet/torrent uses aria2, HTTP uses builtin HTTP, and OpenList resources use OpenList.
 - Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.
 - Queued download tasks can be canceled, and failed or canceled tasks can be manually retried back into the queue.
@@ -107,6 +108,7 @@ This document records features that are already implemented in `apps/web`.
 
 - Runtime settings persist cache directory, cache size, reader thumbnail TTL, reader preload behavior, reader sidebar default, immersive reader default, listen host, and theme mode.
 - Runtime settings persist the browser metadata import token used by `/api/metadata/import`.
+- Runtime settings persist download default target directory plus OpenList enabled/base URL/token fields for future provider execution.
 - MVP theme mode is fixed to light to avoid unadapted dark-mode contrast regressions.
 
 ## Not Implemented Yet

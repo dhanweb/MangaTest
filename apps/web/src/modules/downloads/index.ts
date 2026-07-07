@@ -4,6 +4,7 @@ import path from "node:path";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, comicResources, comics, comicSources, downloadTasks, getDb } from "@/modules/core/db";
+import { getRuntimeSettings } from "@/modules/core/settings";
 
 export const DOWNLOAD_PROVIDERS = ["openlist", "builtin-http", "aria2"] as const;
 export type DownloadProvider = (typeof DOWNLOAD_PROVIDERS)[number];
@@ -78,7 +79,7 @@ export async function createDownloadTask(input: CreateDownloadTaskInput): Promis
   bootstrapDatabase();
 
   const comicResourceId = normalizeRequiredText(input.comicResourceId, "资源 ID");
-  const targetDirectory = normalizeTargetDirectory(input.targetDirectory);
+  const targetDirectory = await resolveDownloadTargetDirectory(input.targetDirectory);
   const db = getDb();
   const resource = getResourceById(comicResourceId);
 
@@ -447,6 +448,18 @@ function normalizeTargetDirectory(value: string | null | undefined) {
   }
 
   return path.normalize(text);
+}
+
+async function resolveDownloadTargetDirectory(inputTargetDirectory: string | null | undefined) {
+  const explicitTargetDirectory = normalizeTargetDirectory(inputTargetDirectory);
+
+  if (explicitTargetDirectory) {
+    return explicitTargetDirectory;
+  }
+
+  const settings = await getRuntimeSettings();
+
+  return normalizeTargetDirectory(settings.downloadDefaultTargetDirectory);
 }
 
 function normalizeLimit(value: number) {

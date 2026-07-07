@@ -10,7 +10,7 @@ import type { RuntimeSettings } from "@/modules/core/settings/types";
 
 type SettingsTab = (typeof TABS)[number];
 
-const TABS = ["常规设置", "阅读设置", "扫描设置", "安全设置"] as const;
+const TABS = ["常规设置", "阅读设置", "扫描设置", "下载设置", "安全设置"] as const;
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
@@ -18,6 +18,7 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [savedMessage, setSavedMessage] = useState("");
+  const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
 
   useEffect(() => {
@@ -40,20 +41,27 @@ export default function SettingsPage() {
   async function saveSettings() {
     setIsSaving(true);
     setSavedMessage("");
+    setSaveError("");
 
-    const response = await fetch("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify(runtimeSettings),
-      headers: { "Content-Type": "application/json" },
-    });
-    const payload = (await response.json()) as { settings?: RuntimeSettings };
+    try {
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(runtimeSettings),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { settings?: RuntimeSettings; error?: string };
 
-    if (payload.settings) {
+      if (!response.ok || !payload.settings) {
+        throw new Error(payload.error ?? "设置保存失败。");
+      }
+
       setRuntimeSettings(payload.settings);
       setSavedMessage("设置已保存");
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "设置保存失败。");
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
   }
 
   async function exportSqliteBackup() {
@@ -138,6 +146,7 @@ export default function SettingsPage() {
             isSaving={isSaving}
             onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
+            saveError={saveError}
             savedMessage={savedMessage}
             settings={runtimeSettings}
           />
@@ -147,11 +156,22 @@ export default function SettingsPage() {
             isSaving={isSaving}
             onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
+            saveError={saveError}
             savedMessage={savedMessage}
             settings={runtimeSettings}
           />
         )}
         {activeTab === "扫描设置" && <ScanSettings />}
+        {activeTab === "下载设置" && (
+          <DownloadSettings
+            isSaving={isSaving}
+            onSave={saveSettings}
+            onSettingsChange={setRuntimeSettings}
+            saveError={saveError}
+            savedMessage={savedMessage}
+            settings={runtimeSettings}
+          />
+        )}
         {activeTab === "安全设置" && (
           <SecuritySettings
             backupMessage={backupMessage}
@@ -160,6 +180,7 @@ export default function SettingsPage() {
             onExportBackup={exportSqliteBackup}
             onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
+            saveError={saveError}
             savedMessage={savedMessage}
             settings={runtimeSettings}
           />
@@ -214,12 +235,14 @@ function GeneralSettings({
   isSaving,
   onSave,
   onSettingsChange,
+  saveError,
   savedMessage,
   settings,
 }: {
   isSaving: boolean;
   onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
+  saveError: string;
   savedMessage: string;
   settings: RuntimeSettings;
 }) {
@@ -275,6 +298,11 @@ function GeneralSettings({
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
+        {saveError && (
+          <Text size="sm" c="red.7">
+            {saveError}
+          </Text>
+        )}
         {savedMessage && (
           <Text size="sm" c="green.7">
             {savedMessage}
@@ -292,12 +320,14 @@ function ReaderSettings({
   isSaving,
   onSave,
   onSettingsChange,
+  saveError,
   savedMessage,
   settings,
 }: {
   isSaving: boolean;
   onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
+  saveError: string;
   savedMessage: string;
   settings: RuntimeSettings;
 }) {
@@ -385,6 +415,11 @@ function ReaderSettings({
       </SettingsGroup>
 
       <Group justify="flex-end" mt="md">
+        {saveError && (
+          <Text size="sm" c="red.7">
+            {saveError}
+          </Text>
+        )}
         {savedMessage && (
           <Text size="sm" c="green.7">
             {savedMessage}
@@ -392,6 +427,89 @@ function ReaderSettings({
         )}
         <AppButton loading={isSaving} onClick={onSave}>
           保存阅读设置
+        </AppButton>
+      </Group>
+    </>
+  );
+}
+
+function DownloadSettings({
+  isSaving,
+  onSave,
+  onSettingsChange,
+  saveError,
+  savedMessage,
+  settings,
+}: {
+  isSaving: boolean;
+  onSave: () => void;
+  onSettingsChange: (settings: RuntimeSettings) => void;
+  saveError: string;
+  savedMessage: string;
+  settings: RuntimeSettings;
+}) {
+  return (
+    <>
+      <SettingsGroup title="下载入库">
+        <SettingsRow label="默认下载目录" note="任务未指定目标目录时使用的绝对路径。">
+          <AppInput
+            value={settings.downloadDefaultTargetDirectory}
+            onChange={(event) => onSettingsChange({ ...settings, downloadDefaultTargetDirectory: event.currentTarget.value })}
+            placeholder="例如 D:\\Manga\\下载入库"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="OpenList">
+        <SettingsRow label="启用 OpenList" note="只保存连接配置；任务执行仍由后续 provider 实现。">
+          <AppSwitch
+            checked={settings.openlistEnabled}
+            onChange={(event) => onSettingsChange({ ...settings, openlistEnabled: event.currentTarget.checked })}
+            aria-label="启用 OpenList"
+          />
+        </SettingsRow>
+        <SettingsRow label="服务地址" note="OpenList API 的 http 或 https 地址。">
+          <AppInput
+            value={settings.openlistBaseUrl}
+            onChange={(event) => onSettingsChange({ ...settings, openlistBaseUrl: event.currentTarget.value })}
+            placeholder="http://127.0.0.1:5244"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+        <SettingsRow label="访问 token" note="仅保存在本地 SQLite 设置表。">
+          <AppInput
+            type="password"
+            value={settings.openlistToken}
+            onChange={(event) => onSettingsChange({ ...settings, openlistToken: event.currentTarget.value })}
+            placeholder="未配置"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="Provider">
+        <SettingsRow label="aria2" note="后续用于磁链和 torrent 任务。">
+          <AppSwitch disabled aria-label="aria2 provider" />
+        </SettingsRow>
+        <SettingsRow label="内置 HTTP" note="后续用于直链下载任务。">
+          <AppSwitch disabled aria-label="内置 HTTP provider" />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <Group justify="flex-end" mt="md">
+        {saveError && (
+          <Text size="sm" c="red.7">
+            {saveError}
+          </Text>
+        )}
+        {savedMessage && (
+          <Text size="sm" c="green.7">
+            {savedMessage}
+          </Text>
+        )}
+        <AppButton loading={isSaving} onClick={onSave}>
+          保存下载设置
         </AppButton>
       </Group>
     </>
@@ -466,6 +584,7 @@ function SecuritySettings({
   onExportBackup,
   onSave,
   onSettingsChange,
+  saveError,
   savedMessage,
   settings,
 }: {
@@ -475,6 +594,7 @@ function SecuritySettings({
   onExportBackup: () => void;
   onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
+  saveError: string;
   savedMessage: string;
   settings: RuntimeSettings;
 }) {
@@ -528,6 +648,11 @@ function SecuritySettings({
         {backupMessage && (
           <Text size="sm" c={backupMessage.includes("失败") ? "red.7" : "green.7"}>
             {backupMessage}
+          </Text>
+        )}
+        {saveError && (
+          <Text size="sm" c="red.7">
+            {saveError}
           </Text>
         )}
         {savedMessage && (

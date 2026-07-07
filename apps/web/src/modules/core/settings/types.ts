@@ -19,4 +19,8 @@ export interface RuntimeSettings {
   readerImmersiveDefault: boolean;
   themeMode: "system" | "light" | "dark";
   metadataImportToken: string;
+  downloadDefaultTargetDirectory: string;
+  openlistEnabled: boolean;
+  openlistBaseUrl: string;
+  openlistToken: string;
 }

@@ -13,6 +13,10 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   readerImmersiveDefault: false,
   themeMode: "light",
   metadataImportToken: "",
+  downloadDefaultTargetDirectory: "",
+  openlistEnabled: false,
+  openlistBaseUrl: "",
+  openlistToken: "",
 };
 
 export const settingDefinitions = [
@@ -85,5 +89,33 @@ export const settingDefinitions = [
     description: "浏览器插件提交详情页 metadata 时必须携带的本地写入令牌。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.metadataImportToken,
+  },
+  {
+    key: "downloadDefaultTargetDirectory",
+    label: "默认下载目录",
+    description: "下载任务未指定目标目录时使用的绝对路径。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.downloadDefaultTargetDirectory,
+  },
+  {
+    key: "openlistEnabled",
+    label: "启用 OpenList",
+    description: "允许下载模块后续使用 OpenList provider。",
+    valueType: "boolean",
+    defaultValue: defaultRuntimeSettings.openlistEnabled,
+  },
+  {
+    key: "openlistBaseUrl",
+    label: "OpenList 服务地址",
+    description: "OpenList API 的 http 或 https 地址。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.openlistBaseUrl,
+  },
+  {
+    key: "openlistToken",
+    label: "OpenList token",
+    description: "OpenList provider 使用的本地访问令牌。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.openlistToken,
   },
 ] satisfies Array<SettingDefinition<RuntimeSettings[keyof RuntimeSettings]>>;
