@@ -270,9 +270,17 @@ describe("scanMangaRoot", () => {
     expect(selectComicTagSource(sqlite, comicAId, "artist:sample artist").source).toBe("manual");
     expect(selectComicTagSource(sqlite, comicAId, "group:metadata group").source).toBe("metadata");
 
-    const { cancelDownloadTask, createDownloadTask, listDownloadableResources, listDownloadTaskEvents, listDownloadTasks, retryDownloadTask } = await import(
-      "../downloads"
-    );
+    const {
+      cancelDownloadTask,
+      createDownloadTask,
+      listDownloadableResources,
+      listDownloadProviderAdapters,
+      listDownloadTaskEvents,
+      listDownloadTasks,
+      planNextDownloadDispatch,
+      retryDownloadTask,
+      runDownloadWorkerTick,
+    } = await import("../downloads");
     const downloadableResourcesBeforeTask = await listDownloadableResources();
     const downloadableResource = downloadableResourcesBeforeTask.find((resource) => resource.id === metadataResource.id);
 
@@ -286,6 +294,9 @@ describe("scanMangaRoot", () => {
     const duplicateDownloadTask = await createDownloadTask({ comicResourceId: metadataResource.id, provider: "aria2" });
     const downloadTasks = await listDownloadTasks();
     const downloadTaskEventsAfterCreate = await listDownloadTaskEvents();
+    const providerAdapters = listDownloadProviderAdapters();
+    const dispatchPlanAfterCreate = await planNextDownloadDispatch();
+    const workerTickAfterCreate = await runDownloadWorkerTick();
     const downloadableResourcesAfterTask = await listDownloadableResources();
 
     expect(createdDownloadTask.created).toBe(true);
@@ -304,6 +315,16 @@ describe("scanMangaRoot", () => {
     expect(downloadTaskEventsAfterCreate[0]?.operation).toBe("download_task_create");
     expect(downloadTaskEventsAfterCreate[0]?.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
     expect(JSON.stringify(downloadTaskEventsAfterCreate)).not.toContain("PrivateName");
+    expect(providerAdapters.map((adapter) => adapter.provider).sort()).toEqual(["aria2", "builtin-http", "openlist"]);
+    expect(dispatchPlanAfterCreate.status).toBe("blocked");
+    expect(dispatchPlanAfterCreate.provider).toBe("aria2");
+    expect(dispatchPlanAfterCreate.task?.id).toBe(createdDownloadTask.task.id);
+    expect(dispatchPlanAfterCreate.resource?.redactedResource).toBe("magnet:?xt=urn:btih:ABCDEF12...");
+    expect(dispatchPlanAfterCreate.readiness?.code).toBe("provider_not_implemented");
+    expect(JSON.stringify(dispatchPlanAfterCreate)).not.toContain("PrivateName");
+    expect(workerTickAfterCreate.executed).toBe(false);
+    expect(workerTickAfterCreate.plan.task?.id).toBe(createdDownloadTask.task.id);
+    expect(selectDownloadTaskStatus(sqlite, createdDownloadTask.task.id)).toBe("queued");
     await expect(createDownloadTask({ comicResourceId: metadataResource.id, provider: "openlist" })).rejects.toThrow("不能使用 openlist 下载");
 
     const canceledDownloadTask = await cancelDownloadTask(createdDownloadTask.task.id);
@@ -316,6 +337,7 @@ describe("scanMangaRoot", () => {
     const retriedDownloadTask = await retryDownloadTask(createdDownloadTask.task.id);
     const downloadableResourcesAfterRetry = await listDownloadableResources();
     const downloadTaskEventsAfterRetry = await listDownloadTaskEvents();
+    const dispatchPlanAfterRetry = await planNextDownloadDispatch();
 
     expect(canceledDownloadTask.task.status).toBe("canceled");
     expect(downloadableResourcesAfterCancel.find((resource) => resource.id === metadataResource.id)?.activeTaskCount).toBe(0);
@@ -332,6 +354,8 @@ describe("scanMangaRoot", () => {
     expect(downloadTaskEventsAfterRetry.filter((event) => event.operation === "download_task_cancel")).toHaveLength(2);
     expect(downloadTaskEventsAfterRetry.filter((event) => event.operation === "download_task_retry")).toHaveLength(1);
     expect(downloadTaskEventsAfterRetry.find((event) => event.operation === "download_task_retry")?.retryCount).toBe(1);
+    expect(dispatchPlanAfterRetry.task?.id).toBe(createdDownloadTask.task.id);
+    expect(dispatchPlanAfterRetry.status).toBe("blocked");
     await expect(retryDownloadTask(createdDownloadTask.task.id)).rejects.toThrow("只有失败或已取消的任务可以重试");
 
     const metadataStatusAfterImport = await checkMetadataSourceStatus({
@@ -725,4 +749,9 @@ function selectComicTagSource(sqlite: Database.Database, comicId: string, canoni
     source: string;
     isUserEdited: number;
   };
+}
+
+function selectDownloadTaskStatus(sqlite: Database.Database, taskId: string) {
+  const row = sqlite.prepare("select status from download_tasks where id = ?").get(taskId) as { status: string } | undefined;
+  return row?.status ?? null;
 }

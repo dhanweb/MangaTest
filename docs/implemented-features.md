@@ -87,9 +87,12 @@ This document records features that are already implemented in `apps/web`.
 - Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.
 - Queued download tasks can be canceled, and failed or canceled tasks can be manually retried back into the queue.
 - Download task create, cancel, and retry actions write operation log entries with redacted resource details.
+- Download provider adapters are registered for OpenList, aria2, and builtin HTTP as provider-boundary stubs.
+- Download worker preflight can select the next queued task and report provider readiness without executing external downloads.
 - Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
 - Download admin UI can cancel queued/running tasks and retry failed/canceled tasks without invoking provider execution.
 - Download admin UI shows recent task activity for create, cancel, and retry events.
+- Download admin UI shows the current worker dispatch preflight status for the next queued task.
 
 ### Admin And Maintenance
 

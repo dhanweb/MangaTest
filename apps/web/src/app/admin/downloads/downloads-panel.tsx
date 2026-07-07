@@ -8,6 +8,7 @@ import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import type {
   ComicResourceType,
   DownloadableResourceRecord,
+  DownloadDispatchPlan,
   DownloadProvider,
   DownloadTaskEventOperation,
   DownloadTaskEventRecord,
@@ -43,8 +44,15 @@ const EVENT_OPERATION_CONFIG: Record<DownloadTaskEventOperation, { label: string
   download_task_retry: { label: "重试", bg: "#e7f0ff", color: "#2563eb" },
 };
 
+const DISPATCH_STATUS_CONFIG: Record<DownloadDispatchPlan["status"], { label: string; bg: string; color: string }> = {
+  blocked: { label: "阻塞", bg: "#fff4d6", color: "#b86b00" },
+  idle: { label: "空闲", bg: "#edf2f7", color: "#53606c" },
+  ready: { label: "就绪", bg: "#e4f9ed", color: "#00894a" },
+};
+
 type DownloadsApiResponse = {
   resources?: DownloadableResourceRecord[];
+  dispatchPlan?: DownloadDispatchPlan;
   events?: DownloadTaskEventRecord[];
   tasks?: DownloadTaskRecord[];
   task?: DownloadTaskRecord;
@@ -53,15 +61,18 @@ type DownloadsApiResponse = {
 };
 
 export function DownloadsPanel({
+  dispatchPlan,
   events,
   resources,
   tasks,
 }: {
+  dispatchPlan: DownloadDispatchPlan;
   events: DownloadTaskEventRecord[];
   resources: DownloadableResourceRecord[];
   tasks: DownloadTaskRecord[];
 }) {
   const [eventItems, setEventItems] = useState(events);
+  const [dispatchPlanItem, setDispatchPlanItem] = useState(dispatchPlan);
   const [resourceItems, setResourceItems] = useState(resources);
   const [taskItems, setTaskItems] = useState(tasks);
   const [search, setSearch] = useState("");
@@ -233,6 +244,9 @@ export function DownloadsPanel({
     }
 
     setEventItems(payload.events ?? []);
+    if (payload.dispatchPlan) {
+      setDispatchPlanItem(payload.dispatchPlan);
+    }
     setResourceItems(payload.resources);
     setTaskItems(payload.tasks);
 
@@ -263,6 +277,8 @@ export function DownloadsPanel({
       </Group>
 
       <Stack gap="md">
+        <DispatchPlanPanel dispatchPlan={dispatchPlanItem} />
+
         <Box style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, padding: 16 }}>
           <Group align="flex-end" gap="sm" wrap="wrap">
             <AppSelect
@@ -649,6 +665,52 @@ function TaskActions({
   );
 }
 
+function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPlan }) {
+  const task = dispatchPlan.task;
+  const resource = dispatchPlan.resource;
+
+  return (
+    <Box style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, padding: 16 }}>
+      <Group justify="space-between" align="flex-start" gap="md" wrap="wrap">
+        <Box style={{ minWidth: 0, flex: "1 1 320px" }}>
+          <Text component="h2" size="lg" fw={900} c="ink.8" mb={4}>
+            调度预检
+          </Text>
+          <Text size="sm" c="ink.6">
+            {dispatchPlan.reason}
+          </Text>
+        </Box>
+        <DispatchStatusBadge status={dispatchPlan.status} />
+      </Group>
+
+      <Group gap="lg" mt="md" wrap="wrap">
+        <CompactInfo label="Provider" value={dispatchPlan.adapterLabel ?? dispatchPlan.provider ?? "暂无"} />
+        <CompactInfo label="下一任务" value={task ? task.comicTitle : "暂无排队任务"} />
+        <CompactInfo label="资源" value={resource ? `${RESOURCE_TYPE_LABELS[resource.resourceType]} · ${resource.displayLabel}` : "暂无"} />
+        <CompactInfo label="预检时间" value={formatDate(dispatchPlan.checkedAt)} />
+      </Group>
+      {resource && (
+        <Text size="xs" c="ink.5" mt="sm" style={{ overflowWrap: "anywhere" }}>
+          {resource.redactedResource}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+function CompactInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <Box style={{ minWidth: 140, maxWidth: 320 }}>
+      <Text size="xs" c="ink.4" fw={700}>
+        {label}
+      </Text>
+      <Text size="sm" fw={800} c="ink.8" style={{ overflowWrap: "anywhere" }}>
+        {value}
+      </Text>
+    </Box>
+  );
+}
+
 function upsertTask(items: DownloadTaskRecord[], task: DownloadTaskRecord) {
   const existingIndex = items.findIndex((item) => item.id === task.id);
 
@@ -707,6 +769,30 @@ function StatusBadge({ status }: { status: DownloadTaskStatus }) {
 
 function EventOperationBadge({ operation }: { operation: DownloadTaskEventOperation }) {
   const config = EVENT_OPERATION_CONFIG[operation];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
+function DispatchStatusBadge({ status }: { status: DownloadDispatchPlan["status"] }) {
+  const config = DISPATCH_STATUS_CONFIG[status];
 
   return (
     <Box

@@ -1,14 +1,26 @@
 import { revalidatePath } from "next/cache";
 
-import { createDownloadTask, listDownloadableResources, listDownloadTaskEvents, listDownloadTasks, type DownloadProvider } from "@/modules/downloads";
+import {
+  createDownloadTask,
+  listDownloadableResources,
+  listDownloadTaskEvents,
+  listDownloadTasks,
+  planNextDownloadDispatch,
+  type DownloadProvider,
+} from "@/modules/downloads";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [resources, tasks, events] = await Promise.all([listDownloadableResources(), listDownloadTasks(), listDownloadTaskEvents()]);
+  const [resources, tasks, events, dispatchPlan] = await Promise.all([
+    listDownloadableResources(),
+    listDownloadTasks(),
+    listDownloadTaskEvents(),
+    planNextDownloadDispatch(),
+  ]);
 
-  return Response.json({ resources, tasks, events });
+  return Response.json({ resources, tasks, events, dispatchPlan });
 }
 
 export async function POST(request: Request) {

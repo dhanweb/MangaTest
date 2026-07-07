@@ -6,6 +6,12 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { bootstrapDatabase, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
 import { getRuntimeSettings } from "@/modules/core/settings";
 
+import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
+import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
+
+export { getDownloadProviderAdapter, listDownloadProviderAdapters };
+export type { DownloadProviderAdapter, DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
+
 export const DOWNLOAD_PROVIDERS = ["openlist", "builtin-http", "aria2"] as const;
 export type DownloadProvider = (typeof DOWNLOAD_PROVIDERS)[number];
 
@@ -82,6 +88,35 @@ export interface DownloadTaskEventRecord {
   status: DownloadTaskStatus | null;
   retryCount: number | null;
   createdAt: string;
+}
+
+export type DownloadDispatchPlanStatus = "idle" | "blocked" | "ready";
+
+export interface DownloadDispatchResourceRecord {
+  id: string;
+  comicId: string | null;
+  comicTitle: string;
+  resourceType: ComicResourceType;
+  displayLabel: string;
+  redactedResource: string;
+  sourceSite: string | null;
+}
+
+export interface DownloadDispatchPlan {
+  status: DownloadDispatchPlanStatus;
+  reason: string;
+  checkedAt: string;
+  provider: DownloadProvider | null;
+  adapterLabel: string | null;
+  task: DownloadTaskRecord | null;
+  resource: DownloadDispatchResourceRecord | null;
+  readiness: DownloadProviderReadiness | null;
+}
+
+export interface DownloadWorkerTickResult {
+  executed: boolean;
+  reason: string;
+  plan: DownloadDispatchPlan;
 }
 
 interface DownloadTaskEventDetail {
@@ -266,6 +301,100 @@ export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEv
       },
     ];
   });
+}
+
+export async function planNextDownloadDispatch(): Promise<DownloadDispatchPlan> {
+  bootstrapDatabase();
+
+  const nextTaskRow = getDb()
+    .select({ id: downloadTasks.id })
+    .from(downloadTasks)
+    .where(eq(downloadTasks.status, "queued"))
+    .orderBy(downloadTasks.createdAt)
+    .limit(1)
+    .get();
+
+  if (!nextTaskRow) {
+    return createDownloadDispatchPlan({
+      status: "idle",
+      reason: "当前没有排队中的下载任务。",
+    });
+  }
+
+  const task = getDownloadTaskById(nextTaskRow.id);
+
+  if (!task) {
+    return createDownloadDispatchPlan({
+      status: "blocked",
+      reason: "读取下一条下载任务失败。",
+    });
+  }
+
+  const adapter = getDownloadProviderAdapter(task.provider);
+  const adapterLabel = adapter?.label ?? null;
+  const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
+
+  if (!resource) {
+    return createDownloadDispatchPlan({
+      status: "blocked",
+      reason: "下载任务缺少可用的资源记录。",
+      provider: task.provider,
+      adapterLabel,
+      task,
+    });
+  }
+
+  if (!adapter) {
+    return createDownloadDispatchPlan({
+      status: "blocked",
+      reason: `找不到 ${task.provider} 的下载 provider adapter。`,
+      provider: task.provider,
+      task,
+      resource: toDownloadDispatchResourceRecord(resource),
+    });
+  }
+
+  if (!adapter.supportedResourceTypes.includes(resource.resourceType)) {
+    return createDownloadDispatchPlan({
+      status: "blocked",
+      reason: `资源类型 ${resource.resourceType} 不能交给 ${adapter.label} provider。`,
+      provider: task.provider,
+      adapterLabel: adapter.label,
+      task,
+      resource: toDownloadDispatchResourceRecord(resource),
+      readiness: {
+        canDispatch: false,
+        code: "incompatible_resource",
+        reason: "资源类型与 provider 不兼容。",
+      },
+    });
+  }
+
+  const settings = await getRuntimeSettings();
+  const readiness = await adapter.prepare({ task, resource, settings });
+
+  return createDownloadDispatchPlan({
+    status: readiness.canDispatch ? "ready" : "blocked",
+    reason: readiness.reason,
+    provider: task.provider,
+    adapterLabel: adapter.label,
+    task,
+    resource: toDownloadDispatchResourceRecord(resource),
+    readiness,
+  });
+}
+
+export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult> {
+  const plan = await planNextDownloadDispatch();
+
+  return {
+    executed: false,
+    reason:
+      plan.status === "ready"
+        ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
+        : plan.reason,
+    plan,
+  };
 }
 
 export async function listDownloadableResources(limit = 100): Promise<DownloadableResourceRecord[]> {
@@ -510,6 +639,75 @@ function getResourceById(comicResourceId: string) {
         resourceType: normalizeResourceType(row.resourceType),
       }
     : null;
+}
+
+function getDownloadProviderResourceSnapshot(comicResourceId: string): DownloadProviderResourceSnapshot | null {
+  const row = getDb()
+    .select({
+      id: comicResources.id,
+      comicId: comicResources.comicId,
+      comicTitle: comics.displayTitle,
+      resourceType: comicResources.resourceType,
+      displayLabel: comicResources.displayLabel,
+      redactedResource: comicResources.redactedResource,
+      resourceUrl: comicResources.resourceUrl,
+      sourceSite: comicSources.site,
+    })
+    .from(comicResources)
+    .leftJoin(comics, eq(comics.id, comicResources.comicId))
+    .leftJoin(comicSources, eq(comicSources.id, comicResources.comicSourceId))
+    .where(eq(comicResources.id, comicResourceId))
+    .get();
+
+  if (!row) {
+    return null;
+  }
+
+  const resourceType = normalizeResourceType(row.resourceType);
+
+  return {
+    id: row.id,
+    comicId: row.comicId,
+    comicTitle: row.comicTitle ?? "未知漫画",
+    resourceType,
+    displayLabel: row.displayLabel?.trim() || resourceType,
+    redactedResource: row.redactedResource?.trim() || "资源已脱敏",
+    resourceUrl: row.resourceUrl,
+    sourceSite: row.sourceSite,
+  };
+}
+
+function toDownloadDispatchResourceRecord(resource: DownloadProviderResourceSnapshot): DownloadDispatchResourceRecord {
+  return {
+    id: resource.id,
+    comicId: resource.comicId,
+    comicTitle: resource.comicTitle,
+    resourceType: resource.resourceType,
+    displayLabel: resource.displayLabel,
+    redactedResource: resource.redactedResource,
+    sourceSite: resource.sourceSite,
+  };
+}
+
+function createDownloadDispatchPlan(input: {
+  status: DownloadDispatchPlanStatus;
+  reason: string;
+  provider?: DownloadProvider | null;
+  adapterLabel?: string | null;
+  task?: DownloadTaskRecord | null;
+  resource?: DownloadDispatchResourceRecord | null;
+  readiness?: DownloadProviderReadiness | null;
+}): DownloadDispatchPlan {
+  return {
+    status: input.status,
+    reason: input.reason,
+    checkedAt: new Date().toISOString(),
+    provider: input.provider ?? null,
+    adapterLabel: input.adapterLabel ?? null,
+    task: input.task ?? null,
+    resource: input.resource ?? null,
+    readiness: input.readiness ?? null,
+  };
 }
 
 function recordDownloadTaskEvent(
