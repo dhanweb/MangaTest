@@ -1,5 +1,8 @@
 import type { DownloadProviderAdapter } from "../types";
 
+export { checkOpenListConnection } from "./connection";
+export type { OpenListConnectionCheckResult, OpenListConnectionStatus, OpenListEndpointCheck } from "./connection";
+
 export const openlistProviderAdapter: DownloadProviderAdapter = {
   provider: "openlist",
   label: "OpenList",

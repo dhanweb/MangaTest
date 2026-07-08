@@ -7,16 +7,28 @@ import { useEffect, useState } from "react";
 import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
+import type { OpenListConnectionCheckResult, OpenListConnectionStatus } from "@/modules/downloads/providers/openlist";
 
 type SettingsTab = (typeof TABS)[number];
 
 const TABS = ["常规设置", "阅读设置", "扫描设置", "下载设置", "安全设置"] as const;
+
+const OPENLIST_STATUS_CONFIG: Record<OpenListConnectionStatus, { label: string; color: string }> = {
+  disabled: { label: "未启用", color: "#53606c" },
+  invalid_response: { label: "响应异常", color: "#b86b00" },
+  missing_settings: { label: "缺少配置", color: "#b86b00" },
+  reachable: { label: "连接正常", color: "#00894a" },
+  unauthorized: { label: "认证失败", color: "#d93a4e" },
+  unreachable: { label: "不可达", color: "#d93a4e" },
+};
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [isCheckingOpenList, setIsCheckingOpenList] = useState(false);
+  const [openListCheckResult, setOpenListCheckResult] = useState<OpenListConnectionCheckResult | null>(null);
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -96,6 +108,35 @@ export default function SettingsPage() {
     }
   }
 
+  async function checkOpenListConnection() {
+    setIsCheckingOpenList(true);
+    setOpenListCheckResult(null);
+
+    try {
+      const response = await fetch("/api/settings/openlist/check", { method: "POST" });
+      const payload = (await response.json()) as { result?: OpenListConnectionCheckResult; error?: string };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "OpenList 连接校验失败。");
+      }
+
+      setOpenListCheckResult(payload.result);
+    } catch (error) {
+      setOpenListCheckResult({
+        ok: false,
+        status: "unreachable",
+        checkedAt: new Date().toISOString(),
+        baseUrl: runtimeSettings.openlistBaseUrl.trim() || null,
+        tokenConfigured: Boolean(runtimeSettings.openlistToken.trim()),
+        message: error instanceof Error ? error.message : "OpenList 连接校验失败。",
+        publicApi: null,
+        accountApi: null,
+      });
+    } finally {
+      setIsCheckingOpenList(false);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -164,7 +205,10 @@ export default function SettingsPage() {
         {activeTab === "扫描设置" && <ScanSettings />}
         {activeTab === "下载设置" && (
           <DownloadSettings
+            checkResult={openListCheckResult}
+            isCheckingOpenList={isCheckingOpenList}
             isSaving={isSaving}
+            onCheckOpenList={checkOpenListConnection}
             onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
             saveError={saveError}
@@ -434,14 +478,20 @@ function ReaderSettings({
 }
 
 function DownloadSettings({
+  checkResult,
+  isCheckingOpenList,
   isSaving,
+  onCheckOpenList,
   onSave,
   onSettingsChange,
   saveError,
   savedMessage,
   settings,
 }: {
+  checkResult: OpenListConnectionCheckResult | null;
+  isCheckingOpenList: boolean;
   isSaving: boolean;
+  onCheckOpenList: () => void;
   onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
   saveError: string;
@@ -486,7 +536,14 @@ function DownloadSettings({
             style={{ width: 320 }}
           />
         </SettingsRow>
+        <SettingsRow label="连接校验" note="只读请求 OpenList public API 和账号 API，不创建下载任务。">
+          <AppButton loading={isCheckingOpenList} onClick={onCheckOpenList}>
+            校验连接
+          </AppButton>
+        </SettingsRow>
       </SettingsGroup>
+
+      {checkResult && <OpenListConnectionResult result={checkResult} />}
 
       <SettingsGroup title="Provider">
         <SettingsRow label="aria2" note="后续用于磁链和 torrent 任务。">
@@ -514,6 +571,59 @@ function DownloadSettings({
       </Group>
     </>
   );
+}
+
+function OpenListConnectionResult({ result }: { result: OpenListConnectionCheckResult }) {
+  const status = OPENLIST_STATUS_CONFIG[result.status];
+
+  return (
+    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
+      <Group justify="space-between" align="flex-start" gap="md">
+        <Box style={{ minWidth: 0 }}>
+          <Text fw={900} c={status.color}>
+            {status.label}
+          </Text>
+          <Text size="sm" c="ink.6" mt={4}>
+            {result.message}
+          </Text>
+        </Box>
+        <Text size="xs" c="ink.5">
+          {formatDate(result.checkedAt)}
+        </Text>
+      </Group>
+      <Group gap="lg" mt="sm" wrap="wrap">
+        <OpenListCheckMetric label="服务地址" value={result.baseUrl ?? "未配置"} />
+        <OpenListCheckMetric label="Token" value={result.tokenConfigured ? "已配置" : "未配置"} />
+        <OpenListCheckMetric label="Public API" value={formatEndpointCheck(result.publicApi)} />
+        <OpenListCheckMetric label="账号 API" value={formatEndpointCheck(result.accountApi)} />
+      </Group>
+    </Box>
+  );
+}
+
+function OpenListCheckMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <Box style={{ minWidth: 130, maxWidth: 300 }}>
+      <Text size="xs" c="ink.4" fw={700}>
+        {label}
+      </Text>
+      <Text size="sm" fw={800} c="ink.8" style={{ overflowWrap: "anywhere" }}>
+        {value}
+      </Text>
+    </Box>
+  );
+}
+
+function formatEndpointCheck(value: OpenListConnectionCheckResult["publicApi"]) {
+  if (!value) {
+    return "未请求";
+  }
+
+  if (value.status == null) {
+    return "请求失败";
+  }
+
+  return value.code == null ? `HTTP ${value.status}` : `HTTP ${value.status} / code ${value.code}`;
 }
 
 function ScanSettings() {
@@ -671,4 +781,13 @@ function SecuritySettings({
 function parseAttachmentFilename(disposition: string) {
   const match = /filename="([^"]+)"/.exec(disposition);
   return match?.[1] ?? null;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }

@@ -704,6 +704,7 @@ Downloads 和 OpenList provider：
 
 - provider adapter 注册表和 worker 调度预检骨架
 - OpenList 连接设置
+- OpenList 只读连接校验
 - OpenList 登录或 token 管理
 - 115 离线任务
 - 云端目录扫描
