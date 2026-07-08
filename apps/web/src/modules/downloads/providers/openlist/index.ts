@@ -1,7 +1,14 @@
 import type { DownloadProviderAdapter } from "../types";
 
-export { checkOpenListConnection } from "./connection";
-export type { OpenListConnectionCheckResult, OpenListConnectionStatus, OpenListEndpointCheck } from "./connection";
+export { checkOpenListConnection, hashOpenListPassword, loginOpenList } from "./connection";
+export type {
+  OpenListConnectionCheckResult,
+  OpenListConnectionStatus,
+  OpenListEndpointCheck,
+  OpenListLoginInput,
+  OpenListLoginResult,
+  OpenListLoginStatus,
+} from "./connection";
 
 export const openlistProviderAdapter: DownloadProviderAdapter = {
   provider: "openlist",

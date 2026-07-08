@@ -7,9 +7,15 @@ import { useEffect, useState } from "react";
 import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
-import type { OpenListConnectionCheckResult, OpenListConnectionStatus } from "@/modules/downloads/providers/openlist";
+import type {
+  OpenListConnectionCheckResult,
+  OpenListConnectionStatus,
+  OpenListLoginResult,
+  OpenListLoginStatus,
+} from "@/modules/downloads/providers/openlist";
 
 type SettingsTab = (typeof TABS)[number];
+type PublicOpenListLoginResult = Omit<OpenListLoginResult, "token">;
 
 const TABS = ["常规设置", "阅读设置", "扫描设置", "下载设置", "安全设置"] as const;
 
@@ -22,13 +28,26 @@ const OPENLIST_STATUS_CONFIG: Record<OpenListConnectionStatus, { label: string; 
   unreachable: { label: "不可达", color: "#d93a4e" },
 };
 
+const OPENLIST_LOGIN_STATUS_CONFIG: Record<OpenListLoginStatus, { label: string; color: string }> = {
+  invalid_response: { label: "响应异常", color: "#b86b00" },
+  missing_settings: { label: "缺少信息", color: "#b86b00" },
+  success: { label: "登录成功", color: "#00894a" },
+  unauthorized: { label: "认证失败", color: "#d93a4e" },
+  unreachable: { label: "不可达", color: "#d93a4e" },
+};
+
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [isCheckingOpenList, setIsCheckingOpenList] = useState(false);
+  const [isLoggingInOpenList, setIsLoggingInOpenList] = useState(false);
   const [openListCheckResult, setOpenListCheckResult] = useState<OpenListConnectionCheckResult | null>(null);
+  const [openListLoginResult, setOpenListLoginResult] = useState<PublicOpenListLoginResult | null>(null);
+  const [openListLoginUsername, setOpenListLoginUsername] = useState("");
+  const [openListLoginPassword, setOpenListLoginPassword] = useState("");
+  const [openListLoginOtp, setOpenListLoginOtp] = useState("");
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -137,6 +156,56 @@ export default function SettingsPage() {
     }
   }
 
+  async function loginOpenList() {
+    setIsLoggingInOpenList(true);
+    setOpenListLoginResult(null);
+
+    try {
+      const response = await fetch("/api/settings/openlist/login", {
+        body: JSON.stringify({
+          baseUrl: runtimeSettings.openlistBaseUrl,
+          otpCode: openListLoginOtp,
+          password: openListLoginPassword,
+          username: openListLoginUsername,
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        result?: PublicOpenListLoginResult;
+        settings?: RuntimeSettings;
+      };
+
+      if (!payload.result) {
+        throw new Error(payload.error ?? "OpenList 登录失败。");
+      }
+
+      setOpenListLoginResult(payload.result);
+
+      if (!response.ok || !payload.settings) {
+        return;
+      }
+
+      setRuntimeSettings(payload.settings);
+      setOpenListLoginPassword("");
+      setOpenListLoginOtp("");
+      setOpenListCheckResult(null);
+    } catch (error) {
+      setOpenListLoginResult({
+        authApi: null,
+        baseUrl: runtimeSettings.openlistBaseUrl.trim() || null,
+        checkedAt: new Date().toISOString(),
+        message: error instanceof Error ? error.message : "OpenList 登录失败。",
+        ok: false,
+        status: "unreachable",
+        tokenConfigured: false,
+      });
+    } finally {
+      setIsLoggingInOpenList(false);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -207,9 +276,18 @@ export default function SettingsPage() {
           <DownloadSettings
             checkResult={openListCheckResult}
             isCheckingOpenList={isCheckingOpenList}
+            isLoggingInOpenList={isLoggingInOpenList}
             isSaving={isSaving}
+            loginOtp={openListLoginOtp}
+            loginPassword={openListLoginPassword}
+            loginResult={openListLoginResult}
+            loginUsername={openListLoginUsername}
             onCheckOpenList={checkOpenListConnection}
+            onLoginOpenList={loginOpenList}
             onSave={saveSettings}
+            onSetLoginOtp={setOpenListLoginOtp}
+            onSetLoginPassword={setOpenListLoginPassword}
+            onSetLoginUsername={setOpenListLoginUsername}
             onSettingsChange={setRuntimeSettings}
             saveError={saveError}
             savedMessage={savedMessage}
@@ -480,9 +558,18 @@ function ReaderSettings({
 function DownloadSettings({
   checkResult,
   isCheckingOpenList,
+  isLoggingInOpenList,
   isSaving,
+  loginOtp,
+  loginPassword,
+  loginResult,
+  loginUsername,
   onCheckOpenList,
+  onLoginOpenList,
   onSave,
+  onSetLoginOtp,
+  onSetLoginPassword,
+  onSetLoginUsername,
   onSettingsChange,
   saveError,
   savedMessage,
@@ -490,9 +577,18 @@ function DownloadSettings({
 }: {
   checkResult: OpenListConnectionCheckResult | null;
   isCheckingOpenList: boolean;
+  isLoggingInOpenList: boolean;
   isSaving: boolean;
+  loginOtp: string;
+  loginPassword: string;
+  loginResult: PublicOpenListLoginResult | null;
+  loginUsername: string;
   onCheckOpenList: () => void;
+  onLoginOpenList: () => void;
   onSave: () => void;
+  onSetLoginOtp: (value: string) => void;
+  onSetLoginPassword: (value: string) => void;
+  onSetLoginUsername: (value: string) => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
   saveError: string;
   savedMessage: string;
@@ -541,8 +637,24 @@ function DownloadSettings({
             校验连接
           </AppButton>
         </SettingsRow>
+        <SettingsRow label="账号登录" note="用户名、密码和 OTP 只用于本次换取 token，不会写入设置。">
+          <Stack gap={8} style={{ width: 320 }}>
+            <AppInput value={loginUsername} onChange={(event) => onSetLoginUsername(event.currentTarget.value)} placeholder="用户名" />
+            <AppInput
+              type="password"
+              value={loginPassword}
+              onChange={(event) => onSetLoginPassword(event.currentTarget.value)}
+              placeholder="密码"
+            />
+            <AppInput value={loginOtp} onChange={(event) => onSetLoginOtp(event.currentTarget.value)} placeholder="OTP，可选" />
+            <AppButton loading={isLoggingInOpenList} onClick={onLoginOpenList}>
+              登录并保存 token
+            </AppButton>
+          </Stack>
+        </SettingsRow>
       </SettingsGroup>
 
+      {loginResult && <OpenListLoginResultPanel result={loginResult} />}
       {checkResult && <OpenListConnectionResult result={checkResult} />}
 
       <SettingsGroup title="Provider">
@@ -570,6 +682,33 @@ function DownloadSettings({
         </AppButton>
       </Group>
     </>
+  );
+}
+
+function OpenListLoginResultPanel({ result }: { result: PublicOpenListLoginResult }) {
+  const status = OPENLIST_LOGIN_STATUS_CONFIG[result.status];
+
+  return (
+    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
+      <Group justify="space-between" align="flex-start" gap="md">
+        <Box style={{ minWidth: 0 }}>
+          <Text fw={900} c={status.color}>
+            {status.label}
+          </Text>
+          <Text size="sm" c="ink.6" mt={4}>
+            {result.message}
+          </Text>
+        </Box>
+        <Text size="xs" c="ink.5">
+          {formatDate(result.checkedAt)}
+        </Text>
+      </Group>
+      <Group gap="lg" mt="sm" wrap="wrap">
+        <OpenListCheckMetric label="服务地址" value={result.baseUrl ?? "未配置"} />
+        <OpenListCheckMetric label="Token" value={result.tokenConfigured ? "已保存" : "未保存"} />
+        <OpenListCheckMetric label="登录 API" value={formatEndpointCheck(result.authApi)} />
+      </Group>
+    </Box>
   );
 }
 
