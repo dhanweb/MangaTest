@@ -23,6 +23,8 @@ export const mangaRootScanModes = ["children_as_comics"] as const;
 export const pageSourceKinds = ["filesystem", "archive"] as const;
 export const mediaAssetUses = ["cover", "list_thumbnail", "reader_thumbnail"] as const;
 export const cacheEntryKinds = ["archive_file_list", "page_image"] as const;
+export const cloudScanEntryKinds = ["file", "directory"] as const;
+export const cloudScanStatuses = ["running", "completed", "failed"] as const;
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -302,6 +304,55 @@ export const downloadTasks = sqliteTable(
   (table) => ({
     statusIdx: index("download_tasks_status_idx").on(table.status),
     resourceIdx: index("download_tasks_resource_idx").on(table.comicResourceId),
+  }),
+);
+
+export const cloudScanSessions = sqliteTable(
+  "cloud_scan_sessions",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull(),
+    comicResourceId: text("comic_resource_id").references(() => comicResources.id),
+    rootPath: text("root_path").notNull(),
+    status: text("status", { enum: cloudScanStatuses }).notNull().default("running"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    totalCount: integer("total_count").notNull().default(0),
+    fileCount: integer("file_count").notNull().default(0),
+    directoryCount: integer("directory_count").notNull().default(0),
+    importableFileCount: integer("importable_file_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+    ...timestamps,
+  },
+  (table) => ({
+    providerRootIdx: index("cloud_scan_sessions_provider_root_idx").on(table.provider, table.rootPath),
+    resourceIdx: index("cloud_scan_sessions_resource_idx").on(table.comicResourceId),
+    statusIdx: index("cloud_scan_sessions_status_idx").on(table.status),
+  }),
+);
+
+export const cloudScanEntries = sqliteTable(
+  "cloud_scan_entries",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => cloudScanSessions.id),
+    provider: text("provider").notNull(),
+    remotePath: text("remote_path").notNull(),
+    parentPath: text("parent_path").notNull(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: cloudScanEntryKinds }).notNull(),
+    depth: integer("depth").notNull().default(1),
+    sizeBytes: integer("size_bytes"),
+    modifiedAt: text("modified_at"),
+    remoteProvider: text("remote_provider"),
+    rawUrlAvailable: integer("raw_url_available", { mode: "boolean" }).notNull().default(false),
+    ...timestamps,
+  },
+  (table) => ({
+    sessionIdx: index("cloud_scan_entries_session_idx").on(table.sessionId),
+    remotePathIdx: index("cloud_scan_entries_remote_path_idx").on(table.provider, table.remotePath),
   }),
 );
 

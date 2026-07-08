@@ -255,6 +255,55 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS download_tasks_resource_idx
       ON download_tasks (comic_resource_id);
 
+    CREATE TABLE IF NOT EXISTS cloud_scan_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      provider TEXT NOT NULL,
+      comic_resource_id TEXT REFERENCES comic_resources(id),
+      root_path TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      total_count INTEGER NOT NULL DEFAULT 0,
+      file_count INTEGER NOT NULL DEFAULT 0,
+      directory_count INTEGER NOT NULL DEFAULT 0,
+      importable_file_count INTEGER NOT NULL DEFAULT 0,
+      error_summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS cloud_scan_sessions_provider_root_idx
+      ON cloud_scan_sessions (provider, root_path);
+
+    CREATE INDEX IF NOT EXISTS cloud_scan_sessions_resource_idx
+      ON cloud_scan_sessions (comic_resource_id);
+
+    CREATE INDEX IF NOT EXISTS cloud_scan_sessions_status_idx
+      ON cloud_scan_sessions (status);
+
+    CREATE TABLE IF NOT EXISTS cloud_scan_entries (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES cloud_scan_sessions(id),
+      provider TEXT NOT NULL,
+      remote_path TEXT NOT NULL,
+      parent_path TEXT NOT NULL,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      depth INTEGER NOT NULL DEFAULT 1,
+      size_bytes INTEGER,
+      modified_at TEXT,
+      remote_provider TEXT,
+      raw_url_available INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS cloud_scan_entries_session_idx
+      ON cloud_scan_entries (session_id);
+
+    CREATE INDEX IF NOT EXISTS cloud_scan_entries_remote_path_idx
+      ON cloud_scan_entries (provider, remote_path);
+
     CREATE TABLE IF NOT EXISTS media_assets (
       id TEXT PRIMARY KEY NOT NULL,
       comic_id TEXT REFERENCES comics(id),

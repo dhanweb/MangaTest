@@ -6,6 +6,8 @@ import { useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import type {
+  CloudScanSessionRecord,
+  CloudScanStatus,
   ComicResourceType,
   DownloadableResourceRecord,
   DownloadDispatchPlan,
@@ -50,10 +52,18 @@ const DISPATCH_STATUS_CONFIG: Record<DownloadDispatchPlan["status"], { label: st
   ready: { label: "就绪", bg: "#e4f9ed", color: "#00894a" },
 };
 
+const CLOUD_SCAN_STATUS_CONFIG: Record<CloudScanStatus, { label: string; bg: string; color: string }> = {
+  completed: { label: "已完成", bg: "#e4f9ed", color: "#00894a" },
+  failed: { label: "失败", bg: "#ffe1e1", color: "#d93a4e" },
+  running: { label: "扫描中", bg: "#e7f0ff", color: "#2563eb" },
+};
+
 type DownloadsApiResponse = {
+  cloudScans?: CloudScanSessionRecord[];
   resources?: DownloadableResourceRecord[];
   dispatchPlan?: DownloadDispatchPlan;
   events?: DownloadTaskEventRecord[];
+  scan?: CloudScanSessionRecord;
   tasks?: DownloadTaskRecord[];
   task?: DownloadTaskRecord;
   created?: boolean;
@@ -61,16 +71,19 @@ type DownloadsApiResponse = {
 };
 
 export function DownloadsPanel({
+  cloudScans,
   dispatchPlan,
   events,
   resources,
   tasks,
 }: {
+  cloudScans: CloudScanSessionRecord[];
   dispatchPlan: DownloadDispatchPlan;
   events: DownloadTaskEventRecord[];
   resources: DownloadableResourceRecord[];
   tasks: DownloadTaskRecord[];
 }) {
+  const [cloudScanItems, setCloudScanItems] = useState(cloudScans);
   const [eventItems, setEventItems] = useState(events);
   const [dispatchPlanItem, setDispatchPlanItem] = useState(dispatchPlan);
   const [resourceItems, setResourceItems] = useState(resources);
@@ -79,6 +92,7 @@ export function DownloadsPanel({
   const [selectedResourceId, setSelectedResourceId] = useState<string | null>(() => resources[0]?.id ?? null);
   const [provider, setProvider] = useState<DownloadProvider>(() => resources[0]?.defaultProvider ?? "aria2");
   const [targetDirectory, setTargetDirectory] = useState("");
+  const [pendingCloudScanResourceId, setPendingCloudScanResourceId] = useState<string | null>(null);
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null);
   const [pendingTaskAction, setPendingTaskAction] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -154,6 +168,27 @@ export function DownloadsPanel({
         .includes(query),
     );
   }, [eventItems, search]);
+  const filteredCloudScans = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return cloudScanItems;
+    }
+
+    return cloudScanItems.filter((scan) =>
+      [
+        scan.comicTitle ?? "",
+        scan.resourceLabel ?? "",
+        scan.redactedResource ?? "",
+        scan.rootPath,
+        CLOUD_SCAN_STATUS_CONFIG[scan.status].label,
+        scan.errorSummary ?? "",
+        ...scan.previewEntries.map((entry) => entry.name),
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(query),
+    );
+  }, [cloudScanItems, search]);
 
   const activeTaskCount = taskItems.filter((task) => task.status === "queued" || task.status === "running" || task.status === "cancel_requested").length;
   const failedTaskCount = taskItems.filter((task) => task.status === "failed").length;
@@ -235,6 +270,38 @@ export function DownloadsPanel({
     }
   }
 
+  async function scanOpenListResource(resource: DownloadableResourceRecord) {
+    if (resource.resourceType !== "openlist") {
+      setError("只有 OpenList 资源可以进行云端目录扫描。");
+      return;
+    }
+
+    setPendingCloudScanResourceId(resource.id);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/downloads/openlist/cloud-scans", {
+        body: JSON.stringify({ comicResourceId: resource.id }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      const payload = (await response.json()) as DownloadsApiResponse;
+
+      if (!response.ok || !payload.scan) {
+        throw new Error(payload.error ?? "OpenList 云端目录扫描失败。");
+      }
+
+      setCloudScanItems(payload.cloudScans ?? [payload.scan, ...cloudScanItems]);
+      setMessage(payload.scan.status === "completed" ? "已完成 OpenList 云端目录扫描。" : "已记录 OpenList 云端扫描失败结果。");
+      await refreshDownloads(resource.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "OpenList 云端目录扫描失败。");
+    } finally {
+      setPendingCloudScanResourceId(null);
+    }
+  }
+
   async function refreshDownloads(preferredResourceId: string | null) {
     const response = await fetch("/api/downloads");
     const payload = (await response.json()) as DownloadsApiResponse;
@@ -244,6 +311,7 @@ export function DownloadsPanel({
     }
 
     setEventItems(payload.events ?? []);
+    setCloudScanItems(payload.cloudScans ?? []);
     if (payload.dispatchPlan) {
       setDispatchPlanItem(payload.dispatchPlan);
     }
@@ -273,6 +341,7 @@ export function DownloadsPanel({
         <Stat label="可下载资源" value={resourceItems.length} color="var(--mantine-color-pink-6)" />
         <Stat label="活动任务" value={activeTaskCount} color="#2563eb" />
         <Stat label="失败任务" value={failedTaskCount} color="#d93a4e" />
+        <Stat label="云端扫描" value={cloudScanItems.length} color="#00894a" />
         <Stat label="任务总数" value={taskItems.length} color="#4f46e5" />
       </Group>
 
@@ -495,6 +564,7 @@ export function DownloadsPanel({
                       )}
                     </Table.Td>
                     <Table.Td>
+                      <Group gap={4} wrap="nowrap">
                       <Tooltip label={resource.activeTaskCount > 0 ? "已有活动任务" : "创建下载任务"} withArrow>
                         <ActionIcon
                           variant="subtle"
@@ -508,6 +578,20 @@ export function DownloadsPanel({
                           {resource.activeTaskCount > 0 ? <CheckCircle2 size={15} /> : <Plus size={15} />}
                         </ActionIcon>
                       </Tooltip>
+                      <Tooltip label={resource.resourceType === "openlist" ? "扫描云端目录" : "仅 OpenList 资源可扫描"} withArrow>
+                        <ActionIcon
+                          variant="subtle"
+                          color="blue"
+                          size="md"
+                          disabled={resource.resourceType !== "openlist"}
+                          loading={pendingCloudScanResourceId === resource.id}
+                          onClick={() => scanOpenListResource(resource)}
+                          aria-label={`扫描 ${resource.comicTitle} 的 OpenList 云端目录`}
+                        >
+                          <Search size={15} />
+                        </ActionIcon>
+                      </Tooltip>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
@@ -524,6 +608,8 @@ export function DownloadsPanel({
             </Table>
           </Box>
         </Box>
+
+        <CloudScanPanel scans={filteredCloudScans} />
 
         <Box>
           <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
@@ -662,6 +748,96 @@ function TaskActions({
         </ActionIcon>
       </Tooltip>
     </Group>
+  );
+}
+
+function CloudScanPanel({ scans }: { scans: CloudScanSessionRecord[] }) {
+  return (
+    <Box>
+      <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
+        云端目录扫描
+      </Text>
+      <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
+        <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
+          <Table.Thead>
+            <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
+              <Table.Th fw={900} c="#8d5a6e" w={96}>
+                状态
+              </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e">
+                漫画
+              </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e">
+                目录
+              </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e" w={156}>
+                统计
+              </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e">
+                预览
+              </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e" w={136}>
+                时间
+              </Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {scans.map((scan) => (
+              <Table.Tr key={scan.id}>
+                <Table.Td>
+                  <CloudScanStatusBadge status={scan.status} />
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm" fw={700}>
+                    {scan.comicTitle ?? "未知漫画"}
+                  </Text>
+                  <Text size="xs" c="ink.5">
+                    {scan.resourceLabel ?? "OpenList"}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                    {scan.rootPath}
+                  </Text>
+                  {scan.errorSummary && (
+                    <Text size="xs" c="red.7" mt={3}>
+                      {scan.errorSummary}
+                    </Text>
+                  )}
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="ink.5">
+                    {scan.totalCount} 项 · {scan.fileCount} 文件 · {scan.directoryCount} 目录
+                  </Text>
+                  <Text size="xs" c="ink.5">
+                    {scan.importableFileCount} 个可取直链
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                    {formatCloudScanPreview(scan.previewEntries)}
+                  </Text>
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm" c="ink.5">
+                    {formatDate(scan.finishedAt ?? scan.startedAt)}
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            ))}
+            {scans.length === 0 && (
+              <Table.Tr>
+                <Table.Td colSpan={6}>
+                  <Text size="sm" c="ink.5" ta="center" py="md">
+                    暂无云端扫描记录
+                  </Text>
+                </Table.Td>
+              </Table.Tr>
+            )}
+          </Table.Tbody>
+        </Table>
+      </Box>
+    </Box>
   );
 }
 
@@ -823,6 +999,30 @@ function DispatchStatusBadge({ status }: { status: DownloadDispatchPlan["status"
   );
 }
 
+function CloudScanStatusBadge({ status }: { status: CloudScanStatus }) {
+  const config = CLOUD_SCAN_STATUS_CONFIG[status];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
 function Stat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <Box>
@@ -885,6 +1085,14 @@ function formatReadinessDetails(details: Record<string, boolean | number | strin
   append("remotePreviewNames", "预览", (value) => (typeof value === "string" && value.trim() ? value : null));
 
   return entries;
+}
+
+function formatCloudScanPreview(entries: CloudScanSessionRecord["previewEntries"]) {
+  if (entries.length === 0) {
+    return "暂无预览";
+  }
+
+  return entries.map((entry) => `${entry.kind === "directory" ? "目录" : "文件"}:${entry.name}`).join(" · ");
 }
 
 function formatBytes(value: number) {

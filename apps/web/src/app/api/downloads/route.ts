@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import {
   createDownloadTask,
   listDownloadableResources,
+  listOpenListCloudScans,
   listDownloadTaskEvents,
   listDownloadTasks,
   planNextDownloadDispatch,
@@ -13,14 +14,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const [resources, tasks, events, dispatchPlan] = await Promise.all([
+  const [resources, tasks, events, dispatchPlan, cloudScans] = await Promise.all([
     listDownloadableResources(),
     listDownloadTasks(),
     listDownloadTaskEvents(),
     planNextDownloadDispatch(),
+    listOpenListCloudScans(),
   ]);
 
-  return Response.json({ resources, tasks, events, dispatchPlan });
+  return Response.json({ resources, tasks, events, dispatchPlan, cloudScans });
 }
 
 export async function POST(request: Request) {

@@ -3,9 +3,10 @@ import path from "node:path";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
+import { bootstrapDatabase, cloudScanEntries, cloudScanSessions, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
 import { getRuntimeSettings } from "@/modules/core/settings";
 
+import { listOpenListDirectory, normalizeOpenListResourcePath } from "./providers/openlist/connection";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
 
@@ -17,6 +18,9 @@ export type DownloadProvider = (typeof DOWNLOAD_PROVIDERS)[number];
 
 export const DOWNLOAD_TASK_STATUSES = ["queued", "running", "failed", "completed", "cancel_requested", "canceled"] as const;
 export type DownloadTaskStatus = (typeof DOWNLOAD_TASK_STATUSES)[number];
+
+export const CLOUD_SCAN_STATUSES = ["running", "completed", "failed"] as const;
+export type CloudScanStatus = (typeof CLOUD_SCAN_STATUSES)[number];
 
 export const COMIC_RESOURCE_TYPES = ["magnet", "torrent", "http", "openlist"] as const;
 export type ComicResourceType = (typeof COMIC_RESOURCE_TYPES)[number];
@@ -88,6 +92,51 @@ export interface DownloadTaskEventRecord {
   status: DownloadTaskStatus | null;
   retryCount: number | null;
   createdAt: string;
+}
+
+export interface CloudScanEntryRecord {
+  id: string;
+  sessionId: string;
+  provider: DownloadProvider;
+  remotePath: string;
+  parentPath: string;
+  name: string;
+  kind: "file" | "directory";
+  depth: number;
+  sizeBytes: number | null;
+  modifiedAt: string | null;
+  remoteProvider: string | null;
+  rawUrlAvailable: boolean;
+  createdAt: string;
+}
+
+export interface CloudScanSessionRecord {
+  id: string;
+  provider: DownloadProvider;
+  comicResourceId: string | null;
+  comicTitle: string | null;
+  resourceLabel: string | null;
+  redactedResource: string | null;
+  rootPath: string;
+  status: CloudScanStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  totalCount: number;
+  fileCount: number;
+  directoryCount: number;
+  importableFileCount: number;
+  errorSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+  previewEntries: CloudScanEntryRecord[];
+}
+
+export interface CreateOpenListCloudDirectoryScanInput {
+  comicResourceId: string;
+}
+
+export interface CreateOpenListCloudDirectoryScanResult {
+  scan: CloudScanSessionRecord;
 }
 
 export type DownloadDispatchPlanStatus = "idle" | "blocked" | "ready";
@@ -301,6 +350,143 @@ export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEv
       },
     ];
   });
+}
+
+export async function createOpenListCloudDirectoryScan(
+  input: CreateOpenListCloudDirectoryScanInput,
+): Promise<CreateOpenListCloudDirectoryScanResult> {
+  bootstrapDatabase();
+
+  const comicResourceId = normalizeRequiredText(input.comicResourceId, "资源 ID");
+  const resource = getOpenListCloudScanResourceById(comicResourceId);
+
+  if (!resource) {
+    throw new Error("找不到要扫描的 OpenList 资源。");
+  }
+
+  if (resource.resourceType !== "openlist") {
+    throw new Error("只有 OpenList 资源可以进行云端目录扫描。");
+  }
+
+  const rootPath = normalizeOpenListResourcePath(resource.resourceUrl);
+  if (!rootPath) {
+    throw new Error("OpenList 资源缺少可扫描的远端路径。");
+  }
+
+  const now = new Date().toISOString();
+  const sessionId = randomUUID();
+  getDb()
+    .insert(cloudScanSessions)
+    .values({
+      id: sessionId,
+      provider: "openlist",
+      comicResourceId,
+      rootPath,
+      startedAt: now,
+      updatedAt: now,
+    })
+    .run();
+
+  const directory = await listOpenListDirectory(rootPath, {
+    perPage: 50,
+    settings: await getRuntimeSettings(),
+  });
+  const finishedAt = new Date().toISOString();
+
+  if (!directory.ok || !directory.directory) {
+    getDb()
+      .update(cloudScanSessions)
+      .set({
+        errorSummary: directory.message,
+        finishedAt,
+        status: "failed",
+        updatedAt: finishedAt,
+      })
+      .where(eq(cloudScanSessions.id, sessionId))
+      .run();
+
+    return {
+      scan: getCloudScanSessionById(sessionId) ?? createFallbackCloudScanSession(sessionId, resource, rootPath, "failed", now, finishedAt, directory.message),
+    };
+  }
+
+  const entries = directory.directory.entries.map((entry) => ({
+    id: randomUUID(),
+    sessionId,
+    provider: "openlist" as const,
+    remotePath: joinOpenListRemotePath(rootPath, entry.name),
+    parentPath: rootPath,
+    name: entry.name,
+    kind: entry.isDirectory ? ("directory" as const) : ("file" as const),
+    depth: 1,
+    sizeBytes: entry.sizeBytes,
+    modifiedAt: entry.modifiedAt,
+    remoteProvider: entry.provider,
+    rawUrlAvailable: entry.rawUrlAvailable,
+    updatedAt: finishedAt,
+  }));
+  const fileCount = entries.filter((entry) => entry.kind === "file").length;
+  const directoryCount = entries.filter((entry) => entry.kind === "directory").length;
+  const importableFileCount = entries.filter((entry) => entry.kind === "file" && entry.rawUrlAvailable).length;
+
+  getDb().transaction((tx) => {
+    if (entries.length > 0) {
+      tx.insert(cloudScanEntries).values(entries).run();
+    }
+
+    tx.update(cloudScanSessions)
+      .set({
+        directoryCount,
+        fileCount,
+        finishedAt,
+        importableFileCount,
+        status: "completed",
+        totalCount: directory.directory?.total ?? entries.length,
+        updatedAt: finishedAt,
+      })
+      .where(eq(cloudScanSessions.id, sessionId))
+      .run();
+  });
+
+  const scan = getCloudScanSessionById(sessionId);
+  if (!scan) {
+    throw new Error("读取 OpenList 云端扫描结果失败。");
+  }
+
+  return { scan };
+}
+
+export async function listOpenListCloudScans(limit = 20): Promise<CloudScanSessionRecord[]> {
+  bootstrapDatabase();
+
+  const rows = getDb()
+    .select({
+      id: cloudScanSessions.id,
+      provider: cloudScanSessions.provider,
+      comicResourceId: cloudScanSessions.comicResourceId,
+      comicTitle: comics.displayTitle,
+      resourceLabel: comicResources.displayLabel,
+      redactedResource: comicResources.redactedResource,
+      rootPath: cloudScanSessions.rootPath,
+      status: cloudScanSessions.status,
+      startedAt: cloudScanSessions.startedAt,
+      finishedAt: cloudScanSessions.finishedAt,
+      totalCount: cloudScanSessions.totalCount,
+      fileCount: cloudScanSessions.fileCount,
+      directoryCount: cloudScanSessions.directoryCount,
+      importableFileCount: cloudScanSessions.importableFileCount,
+      errorSummary: cloudScanSessions.errorSummary,
+      createdAt: cloudScanSessions.createdAt,
+      updatedAt: cloudScanSessions.updatedAt,
+    })
+    .from(cloudScanSessions)
+    .leftJoin(comicResources, eq(comicResources.id, cloudScanSessions.comicResourceId))
+    .leftJoin(comics, eq(comics.id, comicResources.comicId))
+    .orderBy(desc(cloudScanSessions.createdAt))
+    .limit(normalizeLimit(limit))
+    .all();
+
+  return rows.map((row) => mapCloudScanSessionRow(row, listCloudScanPreviewEntries(row.id)));
 }
 
 export async function planNextDownloadDispatch(): Promise<DownloadDispatchPlan> {
@@ -620,6 +806,120 @@ function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
     retryCount: Number(row.retryCount ?? 0),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    };
+}
+
+function getCloudScanSessionById(sessionId: string): CloudScanSessionRecord | null {
+  const row = getDb()
+    .select({
+      id: cloudScanSessions.id,
+      provider: cloudScanSessions.provider,
+      comicResourceId: cloudScanSessions.comicResourceId,
+      comicTitle: comics.displayTitle,
+      resourceLabel: comicResources.displayLabel,
+      redactedResource: comicResources.redactedResource,
+      rootPath: cloudScanSessions.rootPath,
+      status: cloudScanSessions.status,
+      startedAt: cloudScanSessions.startedAt,
+      finishedAt: cloudScanSessions.finishedAt,
+      totalCount: cloudScanSessions.totalCount,
+      fileCount: cloudScanSessions.fileCount,
+      directoryCount: cloudScanSessions.directoryCount,
+      importableFileCount: cloudScanSessions.importableFileCount,
+      errorSummary: cloudScanSessions.errorSummary,
+      createdAt: cloudScanSessions.createdAt,
+      updatedAt: cloudScanSessions.updatedAt,
+    })
+    .from(cloudScanSessions)
+    .leftJoin(comicResources, eq(comicResources.id, cloudScanSessions.comicResourceId))
+    .leftJoin(comics, eq(comics.id, comicResources.comicId))
+    .where(eq(cloudScanSessions.id, sessionId))
+    .get();
+
+  return row ? mapCloudScanSessionRow(row, listCloudScanPreviewEntries(row.id)) : null;
+}
+
+function listCloudScanPreviewEntries(sessionId: string): CloudScanEntryRecord[] {
+  const rows = getDb()
+    .select({
+      id: cloudScanEntries.id,
+      sessionId: cloudScanEntries.sessionId,
+      provider: cloudScanEntries.provider,
+      remotePath: cloudScanEntries.remotePath,
+      parentPath: cloudScanEntries.parentPath,
+      name: cloudScanEntries.name,
+      kind: cloudScanEntries.kind,
+      depth: cloudScanEntries.depth,
+      sizeBytes: cloudScanEntries.sizeBytes,
+      modifiedAt: cloudScanEntries.modifiedAt,
+      remoteProvider: cloudScanEntries.remoteProvider,
+      rawUrlAvailable: cloudScanEntries.rawUrlAvailable,
+      createdAt: cloudScanEntries.createdAt,
+    })
+    .from(cloudScanEntries)
+    .where(eq(cloudScanEntries.sessionId, sessionId))
+    .orderBy(cloudScanEntries.kind, cloudScanEntries.name)
+    .limit(5)
+    .all();
+
+  return rows.map((row) => ({
+    id: row.id,
+    sessionId: row.sessionId,
+    provider: normalizeProvider(row.provider),
+    remotePath: row.remotePath,
+    parentPath: row.parentPath,
+    name: row.name,
+    kind: normalizeCloudScanEntryKind(row.kind),
+    depth: Number(row.depth ?? 1),
+    sizeBytes: row.sizeBytes,
+    modifiedAt: row.modifiedAt,
+    remoteProvider: row.remoteProvider,
+    rawUrlAvailable: Boolean(row.rawUrlAvailable),
+    createdAt: row.createdAt,
+  }));
+}
+
+function mapCloudScanSessionRow(
+  row: {
+    id: string;
+    provider: string;
+    comicResourceId: string | null;
+    comicTitle: string | null;
+    resourceLabel: string | null;
+    redactedResource: string | null;
+    rootPath: string;
+    status: string;
+    startedAt: string;
+    finishedAt: string | null;
+    totalCount: number;
+    fileCount: number;
+    directoryCount: number;
+    importableFileCount: number;
+    errorSummary: string | null;
+    createdAt: string;
+    updatedAt: string;
+  },
+  previewEntries: CloudScanEntryRecord[],
+): CloudScanSessionRecord {
+  return {
+    id: row.id,
+    provider: normalizeProvider(row.provider),
+    comicResourceId: row.comicResourceId,
+    comicTitle: row.comicTitle,
+    resourceLabel: row.resourceLabel,
+    redactedResource: row.redactedResource,
+    rootPath: row.rootPath,
+    status: normalizeCloudScanStatus(row.status),
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+    totalCount: Number(row.totalCount ?? 0),
+    fileCount: Number(row.fileCount ?? 0),
+    directoryCount: Number(row.directoryCount ?? 0),
+    importableFileCount: Number(row.importableFileCount ?? 0),
+    errorSummary: row.errorSummary,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    previewEntries,
   };
 }
 
@@ -636,6 +936,32 @@ function getResourceById(comicResourceId: string) {
   return row
     ? {
         ...row,
+        resourceType: normalizeResourceType(row.resourceType),
+      }
+    : null;
+}
+
+function getOpenListCloudScanResourceById(comicResourceId: string) {
+  const row = getDb()
+    .select({
+      id: comicResources.id,
+      comicTitle: comics.displayTitle,
+      displayLabel: comicResources.displayLabel,
+      redactedResource: comicResources.redactedResource,
+      resourceType: comicResources.resourceType,
+      resourceUrl: comicResources.resourceUrl,
+    })
+    .from(comicResources)
+    .leftJoin(comics, eq(comics.id, comicResources.comicId))
+    .where(eq(comicResources.id, comicResourceId))
+    .get();
+
+  return row
+    ? {
+        ...row,
+        comicTitle: row.comicTitle ?? "未知漫画",
+        displayLabel: row.displayLabel?.trim() || row.resourceType || "资源",
+        redactedResource: row.redactedResource?.trim() || "资源已脱敏",
         resourceType: normalizeResourceType(row.resourceType),
       }
     : null;
@@ -674,6 +1000,37 @@ function getDownloadProviderResourceSnapshot(comicResourceId: string): DownloadP
     redactedResource: row.redactedResource?.trim() || "资源已脱敏",
     resourceUrl: row.resourceUrl,
     sourceSite: row.sourceSite,
+  };
+}
+
+function createFallbackCloudScanSession(
+  sessionId: string,
+  resource: NonNullable<ReturnType<typeof getOpenListCloudScanResourceById>>,
+  rootPath: string,
+  status: CloudScanStatus,
+  startedAt: string,
+  finishedAt: string,
+  errorSummary: string | null,
+): CloudScanSessionRecord {
+  return {
+    id: sessionId,
+    provider: "openlist",
+    comicResourceId: resource.id,
+    comicTitle: resource.comicTitle,
+    resourceLabel: resource.displayLabel,
+    redactedResource: resource.redactedResource,
+    rootPath,
+    status,
+    startedAt,
+    finishedAt,
+    totalCount: 0,
+    fileCount: 0,
+    directoryCount: 0,
+    importableFileCount: 0,
+    errorSummary,
+    createdAt: startedAt,
+    updatedAt: finishedAt,
+    previewEntries: [],
   };
 }
 
@@ -863,6 +1220,22 @@ function normalizeDownloadTaskStatus(value: unknown): DownloadTaskStatus {
   throw new Error("下载任务状态无效。");
 }
 
+function normalizeCloudScanStatus(value: unknown): CloudScanStatus {
+  if (isCloudScanStatus(value)) {
+    return value;
+  }
+
+  throw new Error("云端扫描状态无效。");
+}
+
+function normalizeCloudScanEntryKind(value: unknown): CloudScanEntryRecord["kind"] {
+  if (value === "file" || value === "directory") {
+    return value;
+  }
+
+  throw new Error("云端扫描条目类型无效。");
+}
+
 function normalizeResourceType(value: unknown): ComicResourceType {
   if (isComicResourceType(value)) {
     return value;
@@ -879,10 +1252,18 @@ function isDownloadTaskStatus(value: unknown): value is DownloadTaskStatus {
   return DOWNLOAD_TASK_STATUSES.includes(value as DownloadTaskStatus);
 }
 
+function isCloudScanStatus(value: unknown): value is CloudScanStatus {
+  return CLOUD_SCAN_STATUSES.includes(value as CloudScanStatus);
+}
+
 function isComicResourceType(value: unknown): value is ComicResourceType {
   return COMIC_RESOURCE_TYPES.includes(value as ComicResourceType);
 }
 
 function isDownloadTaskEventOperation(value: unknown): value is DownloadTaskEventOperation {
   return DOWNLOAD_TASK_EVENT_OPERATIONS.includes(value as DownloadTaskEventOperation);
+}
+
+function joinOpenListRemotePath(parentPath: string, name: string) {
+  return `${parentPath.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
 }
