@@ -443,11 +443,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 28px 14px 48px;
+  padding: 0 0 48px;
 }
 
-.reader-pages > .reader-page,
-.reader-pages > .reader-divider {
+.reader-pages > .reader-divider,
+.reader-pages > div {
   width: min(760px, 100%);
 }
 
@@ -468,28 +468,17 @@
 }
 
 .reader-page {
-  display: grid;
-  place-items: center;
-  min-height: 820px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  color: #241629;
+  display: block;
+  width: 100%;
   background: #f8f3f7;
   content-visibility: auto;
-  contain-intrinsic-size: 820px;
-}
-
-.reader-page span {
-  @apply font-black;
-  color: var(--pink);
+  contain-intrinsic-size: auto 1100px;
 }
 
 .reader-page-image {
   display: block;
-  max-width: 100%;
-  width: auto;
+  width: 100%;
   height: auto;
-  object-fit: contain;
 }
 
 .reader-divider {
@@ -818,10 +807,6 @@
   .reader-toolbar div {
     @apply order-first;
     grid-column: 1 / -1;
-  }
-
-  .reader-page {
-    @apply min-h-[620px];
   }
 }
 

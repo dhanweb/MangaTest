@@ -43,6 +43,7 @@ export function ReaderView({
   const [thumbnailSidebarVisible, setThumbnailSidebarVisible] = useState(preferences.readerThumbnailSidebarDefault);
   const [activePage, setActivePage] = useState(initialActivePage);
   const [thumbVisibleRange, setThumbVisibleRange] = useState({ start: 0, end: 24 });
+  const [pageAspectRatios, setPageAspectRatios] = useState<Record<string, number>>({});
 
   const pageRefs = useRef<Map<number, HTMLElement>>(new Map());
   const pagesContainerRef = useRef<HTMLDivElement>(null);
@@ -589,6 +590,9 @@ export function ReaderView({
                     component="article"
                     className="reader-page"
                     data-page={page.displayNumber}
+                    style={{
+                      aspectRatio: String(pageAspectRatios[page.id] ?? "2 / 3"),
+                    }}
                     ref={(node) => {
                       if (node) {
                         pageRefs.current.set(page.displayNumber, node);
@@ -597,13 +601,24 @@ export function ReaderView({
                       }
                     }}
                   >
-                    <span>PAGE {String(page.displayNumber).padStart(2, "0")}</span>
                     <img
                       alt={`${comic.displayTitle} 第 ${page.displayNumber} 页`}
                       className="reader-page-image"
                       decoding="async"
                       loading={page.displayNumber <= 2 ? "eager" : "lazy"}
                       src={getPageImageUrl(page.id)}
+                      onLoad={(event) => {
+                        const img = event.currentTarget;
+                        if (img.naturalWidth && img.naturalHeight) {
+                          setPageAspectRatios((prev) => {
+                            const ratio = img.naturalWidth / img.naturalHeight;
+                            if (prev[page.id] === ratio) {
+                              return prev;
+                            }
+                            return { ...prev, [page.id]: ratio };
+                          });
+                        }
+                      }}
                     />
                   </Box>
                 </div>
