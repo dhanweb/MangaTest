@@ -2,10 +2,19 @@ import type { DownloadProviderAdapter } from "../types";
 
 import { inspectOpenListResource, listOpenListDirectory } from "./connection";
 
-export { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, listOpenListDirectory, loginOpenList, normalizeOpenListResourcePath } from "./connection";
+export {
+  checkOpenListConnection,
+  hashOpenListPassword,
+  inspectOpenListResource,
+  listOpenListDirectory,
+  loginOpenList,
+  normalizeOpenListResourcePath,
+  resolveOpenListDownloadLink,
+} from "./connection";
 export type {
   OpenListConnectionCheckResult,
   OpenListConnectionStatus,
+  OpenListDownloadLinkResult,
   OpenListDirectoryListResult,
   OpenListDirectoryListStatus,
   OpenListDirectorySnapshot,
@@ -110,10 +119,10 @@ export const openlistProviderAdapter: DownloadProviderAdapter = {
     }
 
     return {
-      canDispatch: false,
-      code: "provider_not_implemented",
+      canDispatch: true,
+      code: "ready",
       details,
-      reason: `OpenList 文件可访问：${formatRemoteResource(remoteResource.resource)}。真实下载执行尚未接入。`,
+      reason: `OpenList 文件可访问：${formatRemoteResource(remoteResource.resource)}，可以下载到本地临时文件。`,
     };
   },
 };

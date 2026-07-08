@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -17,9 +17,25 @@ describe("OpenList download preparations", () => {
     delete process.env.MANGATEST_DB_PATH;
   });
 
-  it("persists a ready file preparation without storing private download links", async () => {
+  it("persists a ready preparation and downloads the file to a safe temporary path", async () => {
     const requests: Array<{ authorization: string | null; body: Record<string, unknown>; method: string; url: string }> = [];
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (String(input).startsWith("https://private.example/")) {
+        requests.push({
+          authorization: new Headers(init?.headers).get("Authorization"),
+          body: {},
+          method: init?.method ?? "GET",
+          url: String(input),
+        });
+
+        return new Response(Buffer.from("comic-data"), {
+          headers: {
+            "content-length": "10",
+            "content-type": "application/x-cbz",
+          },
+        });
+      }
+
       requests.push({
         authorization: new Headers(init?.headers).get("Authorization"),
         body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
@@ -48,9 +64,12 @@ describe("OpenList download preparations", () => {
     const tick = await runDownloadWorkerTick();
     const tasks = await listDownloadTasks();
     const row = selectPreparation(sqlite, task.id);
+    const transferRow = selectTransfer(sqlite, task.id);
+    const tempFilePath = String(transferRow?.temp_file_path ?? "");
+    const tempFileContent = await readFile(tempFilePath, "utf8");
 
-    expect(tick.executed).toBe(false);
-    expect(tick.reason).toBe("OpenList 下载链接准备已记录，真实下载执行尚未接入。");
+    expect(tick.executed).toBe(true);
+    expect(tick.reason).toBe("OpenList 文件已下载到本地临时文件，等待后续入库流程接入。");
     expect(tick.plan.task?.preparation).toMatchObject({
       downloadTaskId: task.id,
       provider: "openlist",
@@ -61,7 +80,18 @@ describe("OpenList download preparations", () => {
       sizeBytes: 1048576,
       status: "ready",
     });
+    expect(tick.transfer).toMatchObject({
+      bytesWritten: 10,
+      contentType: "application/x-cbz",
+      downloadTaskId: task.id,
+      fileName: "Comic.cbz",
+      provider: "openlist",
+      sizeBytes: 1048576,
+      status: "completed",
+    });
     expect(tasks[0]?.preparation?.status).toBe("ready");
+    expect(tasks[0]?.status).toBe("completed");
+    expect(tasks[0]?.transfer?.status).toBe("completed");
     expect(row).toMatchObject({
       download_task_id: task.id,
       provider: "openlist",
@@ -70,7 +100,17 @@ describe("OpenList download preparations", () => {
       remote_path: "/Library/Comic.cbz",
       status: "ready",
     });
-    expect(requests).toHaveLength(1);
+    expect(transferRow).toMatchObject({
+      bytes_written: 10,
+      content_type: "application/x-cbz",
+      download_task_id: task.id,
+      file_name: "Comic.cbz",
+      provider: "openlist",
+      status: "completed",
+    });
+    expect(tempFilePath).toContain(path.join("downloads", "tmp", task.id));
+    expect(tempFileContent).toBe("comic-data");
+    expect(requests).toHaveLength(3);
     expect(requests[0]).toMatchObject({
       authorization: "secret-openlist-token",
       body: {
@@ -83,11 +123,15 @@ describe("OpenList download preparations", () => {
       method: "POST",
       url: "http://127.0.0.1:5244/root/api/fs/get",
     });
+    expect(requests[1]?.url).toBe("http://127.0.0.1:5244/root/api/fs/get");
+    expect(requests[2]?.url).toBe("https://private.example/download/Comic.cbz?sign=secret");
     expect(JSON.stringify(tick)).not.toContain("secret-openlist-token");
     expect(JSON.stringify(tick)).not.toContain("private.example");
     expect(JSON.stringify(tick)).not.toContain("sign=secret");
     expect(JSON.stringify(row)).not.toContain("private.example");
     expect(JSON.stringify(row)).not.toContain("sign=secret");
+    expect(JSON.stringify(transferRow)).not.toContain("private.example");
+    expect(JSON.stringify(transferRow)).not.toContain("sign=secret");
   });
 
   it("records a blocked preparation for directories without executing downloads", async () => {
@@ -149,6 +193,57 @@ describe("OpenList download preparations", () => {
     expect(JSON.stringify(row)).not.toContain("private.example");
     expect(selectDownloadTaskStatus(sqlite, task.id)).toBe("queued");
   });
+
+  it("marks the task failed when the temporary download request is rejected", async () => {
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
+      if (String(input).startsWith("https://private.example/")) {
+        return new Response("forbidden", { status: 403 });
+      }
+
+      return Response.json({
+        code: 200,
+        data: {
+          is_dir: false,
+          modified: "2026-01-01T00:00:00Z",
+          name: "Comic.cbz",
+          provider: "Local",
+          raw_url: "https://private.example/download/Comic.cbz?sign=secret",
+          size: 1048576,
+          type: 4,
+        },
+        message: "success",
+      });
+    });
+
+    const { sqlite, task } = await seedOpenListTask("/Library/Comic.cbz");
+    const { listDownloadTasks, runDownloadWorkerTick } = await import("./index");
+
+    const tick = await runDownloadWorkerTick();
+    const tasks = await listDownloadTasks();
+    const transferRow = selectTransfer(sqlite, task.id);
+
+    expect(tick.executed).toBe(false);
+    expect(tick.reason).toBe("临时文件下载请求失败：HTTP 403");
+    expect(tick.transfer).toMatchObject({
+      downloadTaskId: task.id,
+      errorMessage: "临时文件下载请求失败：HTTP 403",
+      provider: "openlist",
+      status: "failed",
+      tempFilePath: null,
+    });
+    expect(tasks[0]?.status).toBe("failed");
+    expect(tasks[0]?.errorMessage).toBe("临时文件下载请求失败：HTTP 403");
+    expect(transferRow).toMatchObject({
+      download_task_id: task.id,
+      error_message: "临时文件下载请求失败：HTTP 403",
+      status: "failed",
+      temp_file_path: null,
+    });
+    expect(JSON.stringify(tick)).not.toContain("private.example");
+    expect(JSON.stringify(tick)).not.toContain("sign=secret");
+    expect(JSON.stringify(transferRow)).not.toContain("private.example");
+    expect(JSON.stringify(transferRow)).not.toContain("sign=secret");
+  });
 });
 
 async function seedOpenListTask(resourcePath: string) {
@@ -178,6 +273,7 @@ async function seedOpenListTask(resourcePath: string) {
     .run(resourceId, comicId, sourceId, "openlist", "OpenList 文件", resourcePath, "openlist:/.../Comic.cbz");
 
   await saveRuntimeSettings({
+    cacheDirectory: path.join(workspace, "cache"),
     openlistBaseUrl: "http://127.0.0.1:5244/root",
     openlistEnabled: true,
     openlistToken: "secret-openlist-token",
@@ -190,6 +286,10 @@ async function seedOpenListTask(resourcePath: string) {
 
 function selectPreparation(sqlite: Database.Database, taskId: string) {
   return sqlite.prepare("select * from download_task_preparations where download_task_id = ?").get(taskId) as Record<string, unknown> | undefined;
+}
+
+function selectTransfer(sqlite: Database.Database, taskId: string) {
+  return sqlite.prepare("select * from download_task_transfers where download_task_id = ?").get(taskId) as Record<string, unknown> | undefined;
 }
 
 function selectDownloadTaskStatus(sqlite: Database.Database, taskId: string) {

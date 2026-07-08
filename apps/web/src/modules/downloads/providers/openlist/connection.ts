@@ -82,6 +82,10 @@ export interface OpenListResourceProbeResult {
   fileApi: OpenListEndpointCheck | null;
 }
 
+export interface OpenListDownloadLinkResult extends OpenListResourceProbeResult {
+  rawUrl: string | null;
+}
+
 export interface OpenListDirectoryListResult {
   ok: boolean;
   status: OpenListDirectoryListStatus;
@@ -431,6 +435,152 @@ export async function inspectOpenListResource(resourceUrl: string | null | undef
   };
 }
 
+export async function resolveOpenListDownloadLink(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListDownloadLinkResult> {
+  const settings = options.settings ?? (await getRuntimeSettings());
+  const checkedAt = new Date().toISOString();
+  const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
+  const token = settings.openlistToken.trim();
+  const tokenConfigured = token.length > 0;
+  const resourcePath = normalizeOpenListResourcePath(resourceUrl);
+
+  if (!settings.openlistEnabled) {
+    return {
+      ok: false,
+      status: "disabled",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList provider 尚未启用。",
+      resource: null,
+      rawUrl: null,
+      fileApi: null,
+    };
+  }
+
+  if (!baseUrl || !tokenConfigured) {
+    return {
+      ok: false,
+      status: "missing_settings",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 下载取链需要服务地址和访问 token。",
+      resource: null,
+      rawUrl: null,
+      fileApi: null,
+    };
+  }
+
+  if (!resourcePath) {
+    return {
+      ok: false,
+      status: "missing_resource",
+      checkedAt,
+      baseUrl,
+      path: null,
+      tokenConfigured,
+      message: "资源缺少 OpenList 路径。",
+      resource: null,
+      rawUrl: null,
+      fileApi: null,
+    };
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const fileApi = await postOpenListFileGet(fetchImpl, buildOpenListUrl(baseUrl, "api/fs/get"), token, resourcePath);
+  const publicFileApi = toPublicEndpointCheck(fileApi);
+
+  if (fileApi.status === 401 || fileApi.status === 403) {
+    return {
+      ok: false,
+      status: "unauthorized",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList token 未通过认证。",
+      resource: null,
+      rawUrl: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (fileApi.status === 404 || fileApi.code === 404 || isOpenListNotFoundMessage(fileApi.message)) {
+    return {
+      ok: false,
+      status: "not_found",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 路径不存在或当前账号不可见。",
+      resource: null,
+      rawUrl: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (!fileApi.ok || !fileApi.resource) {
+    return {
+      ok: false,
+      status: fileApi.status == null ? "unreachable" : "invalid_response",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: fileApi.message ?? "OpenList 文件信息接口返回异常。",
+      resource: null,
+      rawUrl: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (fileApi.resource.isDirectory) {
+    return {
+      ok: true,
+      status: "directory",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 路径是目录，不能直接下载为临时文件。",
+      resource: fileApi.resource,
+      rawUrl: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (!fileApi.rawUrl) {
+    return {
+      ok: true,
+      status: "file_without_raw_url",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 文件可访问，但响应中没有可用 raw_url。",
+      resource: fileApi.resource,
+      rawUrl: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  return {
+    ok: true,
+    status: "file_ready",
+    checkedAt,
+    baseUrl,
+    path: resourcePath,
+    tokenConfigured,
+    message: "OpenList 文件下载链接已获取。",
+    resource: fileApi.resource,
+    rawUrl: fileApi.rawUrl,
+    fileApi: publicFileApi,
+  };
+}
+
 export async function listOpenListDirectory(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListDirectoryListResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
@@ -636,7 +786,7 @@ async function postOpenListFileGet(
   url: string,
   token: string,
   resourcePath: string,
-): Promise<OpenListEndpointCheck & { resource: OpenListRemoteResource | null }> {
+): Promise<OpenListEndpointCheck & { resource: OpenListRemoteResource | null; rawUrl: string | null }> {
   const endpoint = redactOpenListEndpoint(url);
 
   try {
@@ -660,6 +810,7 @@ async function postOpenListFileGet(
     const payloadCode = typeof payload?.code === "number" ? payload.code : null;
     const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
     const resource = normalizeOpenListRemoteResource(payload?.data);
+    const rawUrl = extractOpenListRawUrl(payload?.data);
 
     return {
       endpoint,
@@ -668,6 +819,7 @@ async function postOpenListFileGet(
       code: payloadCode,
       message: payloadMessage,
       resource,
+      rawUrl,
     };
   } catch (error) {
     return {
@@ -677,6 +829,7 @@ async function postOpenListFileGet(
       code: null,
       message: error instanceof Error ? error.message : "OpenList 文件信息请求失败。",
       resource: null,
+      rawUrl: null,
     };
   }
 }
@@ -802,6 +955,15 @@ function normalizeOpenListRemoteResource(value: unknown): OpenListRemoteResource
     type: typeof record.type === "number" && Number.isFinite(record.type) ? Math.trunc(record.type) : null,
     rawUrlAvailable: typeof record.raw_url === "string" && record.raw_url.trim().length > 0,
   };
+}
+
+function extractOpenListRawUrl(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  return typeof record.raw_url === "string" && record.raw_url.trim() ? record.raw_url.trim() : null;
 }
 
 function normalizeOpenListDirectorySnapshot(value: unknown): OpenListDirectorySnapshot | null {

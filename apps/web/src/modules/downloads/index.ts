@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
@@ -11,13 +16,14 @@ import {
   comics,
   comicSources,
   downloadTaskPreparations,
+  downloadTaskTransfers,
   downloadTasks,
   getDb,
   operationLogs,
 } from "@/modules/core/db";
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 
-import { listOpenListDirectory, normalizeOpenListResourcePath } from "./providers/openlist/connection";
+import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink } from "./providers/openlist/connection";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
 
@@ -32,6 +38,9 @@ export type DownloadTaskStatus = (typeof DOWNLOAD_TASK_STATUSES)[number];
 
 export const DOWNLOAD_PREPARATION_STATUSES = ["ready", "blocked"] as const;
 export type DownloadPreparationStatus = (typeof DOWNLOAD_PREPARATION_STATUSES)[number];
+
+export const DOWNLOAD_TRANSFER_STATUSES = ["running", "completed", "failed"] as const;
+export type DownloadTransferStatus = (typeof DOWNLOAD_TRANSFER_STATUSES)[number];
 
 export const CLOUD_SCAN_STATUSES = ["running", "completed", "failed"] as const;
 export type CloudScanStatus = (typeof CLOUD_SCAN_STATUSES)[number];
@@ -92,6 +101,7 @@ export interface DownloadTaskRecord {
   createdAt: string;
   updatedAt: string;
   preparation?: DownloadTaskPreparationRecord | null;
+  transfer?: DownloadTaskTransferRecord | null;
 }
 
 export interface DownloadTaskPreparationRecord {
@@ -106,6 +116,24 @@ export interface DownloadTaskPreparationRecord {
   remoteProvider: string | null;
   rawUrlAvailable: boolean;
   preparedAt: string;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DownloadTaskTransferRecord {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: DownloadProvider;
+  status: DownloadTransferStatus;
+  tempFilePath: string | null;
+  fileName: string | null;
+  sizeBytes: number | null;
+  bytesWritten: number;
+  contentType: string | null;
+  startedAt: string;
+  finishedAt: string | null;
   errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
@@ -204,6 +232,7 @@ export interface DownloadWorkerTickResult {
   executed: boolean;
   reason: string;
   plan: DownloadDispatchPlan;
+  transfer: DownloadTaskTransferRecord | null;
 }
 
 interface DownloadTaskEventDetail {
@@ -347,7 +376,7 @@ export async function listDownloadTasks(limit = 100): Promise<DownloadTaskRecord
     updatedAt: row.updatedAt,
   }));
 
-  return attachDownloadTaskPreparations(tasks);
+  return attachDownloadTaskTransfers(attachDownloadTaskPreparations(tasks));
 }
 
 export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEventRecord[]> {
@@ -733,6 +762,27 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
         }
       : plan;
 
+  if (preparation?.status === "ready" && preparedPlan.task?.provider === "openlist") {
+    const transfer = await downloadPreparedOpenListTask(preparedPlan.task, preparation);
+    const updatedTask = getDownloadTaskById(preparedPlan.task.id);
+    const transferPlan = updatedTask
+      ? {
+          ...preparedPlan,
+          task: updatedTask,
+        }
+      : preparedPlan;
+
+    return {
+      executed: transfer.status === "completed",
+      reason:
+        transfer.status === "completed"
+          ? "OpenList 文件已下载到本地临时文件，等待后续入库流程接入。"
+          : transfer.errorMessage ?? "OpenList 临时文件下载失败。",
+      plan: transferPlan,
+      transfer,
+    };
+  }
+
   return {
     executed: false,
     reason:
@@ -742,6 +792,7 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
           ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
           : plan.reason,
     plan: preparedPlan,
+    transfer: preparedPlan.task?.transfer ?? null,
   };
 }
 
@@ -973,6 +1024,7 @@ function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
   return {
     ...task,
     preparation: getDownloadTaskPreparationByTaskId(task.id),
+    transfer: getDownloadTaskTransferByTaskId(task.id),
   };
 }
 
@@ -1122,6 +1174,288 @@ function mapDownloadTaskPreparationRow(row: {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparation: DownloadTaskPreparationRecord): Promise<DownloadTaskTransferRecord> {
+  const settings = await getRuntimeSettings();
+  const startedAt = new Date().toISOString();
+  const safeInitialFileName = sanitizeDownloadFileName(preparation.remoteName ?? task.resourceLabel);
+  const tempDirectory = resolveDownloadTaskTempDirectory(settings, task.id);
+  const tempFilePath = path.join(tempDirectory, safeInitialFileName);
+  let activePartialFilePath = `${tempFilePath}.part`;
+
+  assertPathInside(tempDirectory, tempFilePath);
+  markDownloadTaskRunning(task.id, startedAt);
+
+  let transfer = upsertDownloadTaskTransfer({
+    bytesWritten: 0,
+    comicResourceId: task.comicResourceId || null,
+    contentType: null,
+    downloadTaskId: task.id,
+    errorMessage: null,
+    fileName: safeInitialFileName,
+    finishedAt: null,
+    provider: task.provider,
+    sizeBytes: preparation.sizeBytes,
+    startedAt,
+    status: "running",
+    tempFilePath,
+  });
+
+  try {
+    if (!preparation.remotePath) {
+      throw new Error("OpenList 准备记录缺少远端路径。");
+    }
+
+    const link = await resolveOpenListDownloadLink(preparation.remotePath, { settings });
+    if (!link.ok || link.status !== "file_ready" || !link.rawUrl || !link.resource) {
+      throw new Error(link.message);
+    }
+
+    const downloadUrl = normalizeHttpDownloadUrl(link.rawUrl);
+    const fileName = sanitizeDownloadFileName(link.resource.name || preparation.remoteName || task.resourceLabel);
+    const finalTempFilePath = path.join(tempDirectory, fileName);
+    const finalPartialFilePath = `${finalTempFilePath}.part`;
+    activePartialFilePath = finalPartialFilePath;
+
+    assertPathInside(tempDirectory, finalTempFilePath);
+    await mkdir(tempDirectory, { recursive: true });
+    await rm(finalPartialFilePath, { force: true });
+
+    const response = await fetch(downloadUrl, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`临时文件下载请求失败：HTTP ${response.status}`);
+    }
+
+    await pipeline(Readable.fromWeb(response.body as unknown as NodeReadableStream<Uint8Array>), createWriteStream(finalPartialFilePath));
+    await rename(finalPartialFilePath, finalTempFilePath);
+
+    const fileStat = await stat(finalTempFilePath);
+    const finishedAt = new Date().toISOString();
+    transfer = upsertDownloadTaskTransfer({
+      bytesWritten: fileStat.size,
+      comicResourceId: task.comicResourceId || null,
+      contentType: normalizeContentType(response.headers.get("content-type")),
+      downloadTaskId: task.id,
+      errorMessage: null,
+      fileName,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: link.resource.sizeBytes ?? parseContentLength(response.headers.get("content-length")) ?? fileStat.size,
+      startedAt,
+      status: "completed",
+      tempFilePath: finalTempFilePath,
+    });
+    markDownloadTaskFinished(task.id, "completed", null, finishedAt);
+
+    return transfer;
+  } catch (error) {
+    await rm(activePartialFilePath, { force: true }).catch(() => undefined);
+    const finishedAt = new Date().toISOString();
+    const message = toSafeDownloadErrorMessage(error);
+    transfer = upsertDownloadTaskTransfer({
+      bytesWritten: 0,
+      comicResourceId: task.comicResourceId || null,
+      contentType: null,
+      downloadTaskId: task.id,
+      errorMessage: message,
+      fileName: safeInitialFileName,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: preparation.sizeBytes,
+      startedAt,
+      status: "failed",
+      tempFilePath: null,
+    });
+    markDownloadTaskFinished(task.id, "failed", message, finishedAt);
+
+    return transfer;
+  }
+}
+
+function attachDownloadTaskTransfers(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
+  if (tasks.length === 0) {
+    return tasks;
+  }
+
+  const transfersByTaskId = listDownloadTaskTransferMap(tasks.map((task) => task.id));
+
+  return tasks.map((task) => ({
+    ...task,
+    transfer: transfersByTaskId.get(task.id) ?? null,
+  }));
+}
+
+function listDownloadTaskTransferMap(taskIds: string[]) {
+  const rows = getDb()
+    .select({
+      id: downloadTaskTransfers.id,
+      downloadTaskId: downloadTaskTransfers.downloadTaskId,
+      comicResourceId: downloadTaskTransfers.comicResourceId,
+      provider: downloadTaskTransfers.provider,
+      status: downloadTaskTransfers.status,
+      tempFilePath: downloadTaskTransfers.tempFilePath,
+      fileName: downloadTaskTransfers.fileName,
+      sizeBytes: downloadTaskTransfers.sizeBytes,
+      bytesWritten: downloadTaskTransfers.bytesWritten,
+      contentType: downloadTaskTransfers.contentType,
+      startedAt: downloadTaskTransfers.startedAt,
+      finishedAt: downloadTaskTransfers.finishedAt,
+      errorMessage: downloadTaskTransfers.errorMessage,
+      createdAt: downloadTaskTransfers.createdAt,
+      updatedAt: downloadTaskTransfers.updatedAt,
+    })
+    .from(downloadTaskTransfers)
+    .where(inArray(downloadTaskTransfers.downloadTaskId, taskIds))
+    .all();
+
+  return new Map(rows.map((row) => [row.downloadTaskId, mapDownloadTaskTransferRow(row)]));
+}
+
+function getDownloadTaskTransferByTaskId(downloadTaskId: string): DownloadTaskTransferRecord | null {
+  const row = getDb()
+    .select({
+      id: downloadTaskTransfers.id,
+      downloadTaskId: downloadTaskTransfers.downloadTaskId,
+      comicResourceId: downloadTaskTransfers.comicResourceId,
+      provider: downloadTaskTransfers.provider,
+      status: downloadTaskTransfers.status,
+      tempFilePath: downloadTaskTransfers.tempFilePath,
+      fileName: downloadTaskTransfers.fileName,
+      sizeBytes: downloadTaskTransfers.sizeBytes,
+      bytesWritten: downloadTaskTransfers.bytesWritten,
+      contentType: downloadTaskTransfers.contentType,
+      startedAt: downloadTaskTransfers.startedAt,
+      finishedAt: downloadTaskTransfers.finishedAt,
+      errorMessage: downloadTaskTransfers.errorMessage,
+      createdAt: downloadTaskTransfers.createdAt,
+      updatedAt: downloadTaskTransfers.updatedAt,
+    })
+    .from(downloadTaskTransfers)
+    .where(eq(downloadTaskTransfers.downloadTaskId, downloadTaskId))
+    .get();
+
+  return row ? mapDownloadTaskTransferRow(row) : null;
+}
+
+function mapDownloadTaskTransferRow(row: {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: string;
+  status: string;
+  tempFilePath: string | null;
+  fileName: string | null;
+  sizeBytes: number | null;
+  bytesWritten: number;
+  contentType: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}): DownloadTaskTransferRecord {
+  return {
+    id: row.id,
+    downloadTaskId: row.downloadTaskId,
+    comicResourceId: row.comicResourceId,
+    provider: normalizeProvider(row.provider),
+    status: normalizeDownloadTransferStatus(row.status),
+    tempFilePath: row.tempFilePath,
+    fileName: row.fileName,
+    sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes),
+    bytesWritten: Number(row.bytesWritten ?? 0),
+    contentType: row.contentType,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+    errorMessage: row.errorMessage,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function upsertDownloadTaskTransfer(input: {
+  bytesWritten: number;
+  comicResourceId: string | null;
+  contentType: string | null;
+  downloadTaskId: string;
+  errorMessage: string | null;
+  fileName: string | null;
+  finishedAt: string | null;
+  provider: DownloadProvider;
+  sizeBytes: number | null;
+  startedAt: string;
+  status: DownloadTransferStatus;
+  tempFilePath: string | null;
+}) {
+  const now = new Date().toISOString();
+  const existing = getDb()
+    .select({ id: downloadTaskTransfers.id })
+    .from(downloadTaskTransfers)
+    .where(eq(downloadTaskTransfers.downloadTaskId, input.downloadTaskId))
+    .get();
+  const values = {
+    bytesWritten: Math.max(0, Math.trunc(input.bytesWritten)),
+    comicResourceId: input.comicResourceId,
+    contentType: input.contentType,
+    downloadTaskId: input.downloadTaskId,
+    errorMessage: input.errorMessage,
+    fileName: input.fileName,
+    finishedAt: input.finishedAt,
+    provider: input.provider,
+    sizeBytes: input.sizeBytes == null ? null : Math.max(0, Math.trunc(input.sizeBytes)),
+    startedAt: input.startedAt,
+    status: input.status,
+    tempFilePath: input.tempFilePath,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    getDb().update(downloadTaskTransfers).set(values).where(eq(downloadTaskTransfers.id, existing.id)).run();
+  } else {
+    getDb()
+      .insert(downloadTaskTransfers)
+      .values({
+        ...values,
+        id: randomUUID(),
+      })
+      .run();
+  }
+
+  const transfer = getDownloadTaskTransferByTaskId(input.downloadTaskId);
+  if (!transfer) {
+    throw new Error("读取下载临时文件记录失败。");
+  }
+
+  return transfer;
+}
+
+function markDownloadTaskRunning(taskId: string, updatedAt: string) {
+  getDb()
+    .update(downloadTasks)
+    .set({
+      errorMessage: null,
+      status: "running",
+      updatedAt,
+    })
+    .where(eq(downloadTasks.id, taskId))
+    .run();
+}
+
+function markDownloadTaskFinished(taskId: string, status: Extract<DownloadTaskStatus, "completed" | "failed">, errorMessage: string | null, updatedAt: string) {
+  getDb()
+    .update(downloadTasks)
+    .set({
+      errorMessage,
+      status,
+      updatedAt,
+    })
+    .where(eq(downloadTasks.id, taskId))
+    .run();
 }
 
 function getCloudScanSessionById(sessionId: string): CloudScanSessionRecord | null {
@@ -1583,6 +1917,14 @@ function normalizeDownloadPreparationStatus(value: unknown): DownloadPreparation
   throw new Error("下载准备状态无效。");
 }
 
+function normalizeDownloadTransferStatus(value: unknown): DownloadTransferStatus {
+  if (isDownloadTransferStatus(value)) {
+    return value;
+  }
+
+  throw new Error("下载临时文件状态无效。");
+}
+
 function normalizeCloudScanStatus(value: unknown): CloudScanStatus {
   if (isCloudScanStatus(value)) {
     return value;
@@ -1619,6 +1961,10 @@ function isDownloadPreparationStatus(value: unknown): value is DownloadPreparati
   return DOWNLOAD_PREPARATION_STATUSES.includes(value as DownloadPreparationStatus);
 }
 
+function isDownloadTransferStatus(value: unknown): value is DownloadTransferStatus {
+  return DOWNLOAD_TRANSFER_STATUSES.includes(value as DownloadTransferStatus);
+}
+
 function isCloudScanStatus(value: unknown): value is CloudScanStatus {
   return CLOUD_SCAN_STATUSES.includes(value as CloudScanStatus);
 }
@@ -1648,4 +1994,72 @@ function readinessStringDetail(details: Record<string, boolean | number | string
 function readinessNumberDetail(details: Record<string, boolean | number | string | null>, key: string) {
   const value = details[key];
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
+}
+
+function resolveDownloadTaskTempDirectory(settings: RuntimeSettings, taskId: string) {
+  return path.resolve(process.cwd(), settings.cacheDirectory, "downloads", "tmp", taskId);
+}
+
+function sanitizeDownloadFileName(value: string) {
+  const sanitized = value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, " ")
+    .replace(/[. ]+$/g, "")
+    .slice(0, 180);
+
+  if (!sanitized || sanitized === "." || sanitized === "..") {
+    return "download.bin";
+  }
+
+  return sanitized;
+}
+
+function assertPathInside(parentPath: string, childPath: string) {
+  const relativePath = path.relative(parentPath, childPath);
+  if (relativePath && (relativePath.startsWith("..") || path.isAbsolute(relativePath))) {
+    throw new Error("临时下载路径越界。");
+  }
+}
+
+function normalizeHttpDownloadUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported");
+    }
+    return url.toString();
+  } catch {
+    throw new Error("OpenList 返回了不支持的下载链接协议。");
+  }
+}
+
+function parseContentLength(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+}
+
+function normalizeContentType(value: string | null) {
+  return value?.trim() || null;
+}
+
+function toSafeDownloadErrorMessage(error: unknown) {
+  if (!(error instanceof Error)) {
+    return "OpenList 临时文件下载失败。";
+  }
+
+  const message = error.message.trim();
+  if (!message) {
+    return "OpenList 临时文件下载失败。";
+  }
+
+  if (/https?:\/\//i.test(message) || /sign=/i.test(message) || /token=/i.test(message)) {
+    return "OpenList 临时文件下载失败。";
+  }
+
+  return message;
 }

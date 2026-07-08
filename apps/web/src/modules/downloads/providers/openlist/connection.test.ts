@@ -4,7 +4,15 @@ import type { RuntimeSettings } from "@/modules/core/settings";
 
 import type { DownloadProviderPrepareInput } from "../types";
 
-import { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, listOpenListDirectory, loginOpenList, normalizeOpenListResourcePath } from "./connection";
+import {
+  checkOpenListConnection,
+  hashOpenListPassword,
+  inspectOpenListResource,
+  listOpenListDirectory,
+  loginOpenList,
+  normalizeOpenListResourcePath,
+  resolveOpenListDownloadLink,
+} from "./connection";
 import { openlistProviderAdapter } from "./index";
 
 describe("checkOpenListConnection", () => {
@@ -234,6 +242,45 @@ describe("inspectOpenListResource", () => {
   });
 });
 
+describe("resolveOpenListDownloadLink", () => {
+  it("returns the raw URL only for internal download execution", async () => {
+    const result = await resolveOpenListDownloadLink("openlist:/Library/Comic.cbz", {
+      settings: runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244/root",
+        openlistEnabled: true,
+        openlistToken: "secret-openlist-token",
+      }),
+      fetchImpl: async () =>
+        Response.json({
+          code: 200,
+          data: {
+            is_dir: false,
+            name: "Comic.cbz",
+            provider: "Local",
+            raw_url: "https://private.example/download/Comic.cbz?sign=secret",
+            size: 2097152,
+            type: 4,
+          },
+          message: "success",
+        }),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("file_ready");
+    expect(result.rawUrl).toBe("https://private.example/download/Comic.cbz?sign=secret");
+    expect(result.fileApi).not.toEqual(expect.objectContaining({ rawUrl: expect.anything() }));
+    expect(result.resource).toEqual({
+      isDirectory: false,
+      modifiedAt: null,
+      name: "Comic.cbz",
+      provider: "Local",
+      rawUrlAvailable: true,
+      sizeBytes: 2097152,
+      type: 4,
+    });
+  });
+});
+
 describe("listOpenListDirectory", () => {
   it("posts to /api/fs/list and returns a safe directory preview", async () => {
     const requests: Array<{ body: Record<string, unknown>; authorization: string | null; method: string; url: string }> = [];
@@ -292,7 +339,7 @@ describe("listOpenListDirectory", () => {
 });
 
 describe("openlistProviderAdapter.prepare", () => {
-  it("probes remote file metadata before reporting execution as not implemented", async () => {
+  it("probes remote file metadata before reporting it ready for temporary download", async () => {
     vi.stubGlobal(
       "fetch",
       async () =>
@@ -314,8 +361,8 @@ describe("openlistProviderAdapter.prepare", () => {
       const input = providerPrepareInput();
       const readiness = await openlistProviderAdapter.prepare(input);
 
-      expect(readiness.canDispatch).toBe(false);
-      expect(readiness.code).toBe("provider_not_implemented");
+      expect(readiness.canDispatch).toBe(true);
+      expect(readiness.code).toBe("ready");
       expect(readiness.reason).toContain("Comic.cbz");
       expect(readiness.details).toEqual({
         rawUrlAvailable: true,

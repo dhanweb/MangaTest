@@ -17,6 +17,7 @@ import type {
   DownloadTaskEventRecord,
   DownloadTaskRecord,
   DownloadTaskStatus,
+  DownloadTransferStatus,
   DownloadWorkerTickResult,
 } from "@/modules/downloads";
 
@@ -59,6 +60,12 @@ const PREPARATION_STATUS_CONFIG: Record<DownloadPreparationStatus, { label: stri
   ready: { label: "已准备", bg: "#e4f9ed", color: "#00894a" },
 };
 
+const TRANSFER_STATUS_CONFIG: Record<DownloadTransferStatus, { label: string; bg: string; color: string }> = {
+  completed: { label: "临时完成", bg: "#e4f9ed", color: "#00894a" },
+  failed: { label: "临时失败", bg: "#ffe1e1", color: "#d93a4e" },
+  running: { label: "下载中", bg: "#e7f0ff", color: "#2563eb" },
+};
+
 const CLOUD_SCAN_STATUS_CONFIG: Record<CloudScanStatus, { label: string; bg: string; color: string }> = {
   completed: { label: "已完成", bg: "#e4f9ed", color: "#00894a" },
   failed: { label: "失败", bg: "#ffe1e1", color: "#d93a4e" },
@@ -78,6 +85,7 @@ type DownloadsApiResponse = {
   skippedCount?: number;
   tasks?: DownloadTaskRecord[];
   task?: DownloadTaskRecord;
+  transfer?: DownloadWorkerTickResult["transfer"];
   created?: boolean;
   error?: string;
 };
@@ -164,6 +172,8 @@ export function DownloadsPanel({
         TASK_STATUS_CONFIG[task.status].label,
         task.preparation ? PREPARATION_STATUS_CONFIG[task.preparation.status].label : "",
         task.preparation?.remoteName ?? "",
+        task.transfer ? TRANSFER_STATUS_CONFIG[task.transfer.status].label : "",
+        task.transfer?.fileName ?? "",
       ]
         .join(" ")
         .toLowerCase()
@@ -216,6 +226,7 @@ export function DownloadsPanel({
   const activeTaskCount = taskItems.filter((task) => task.status === "queued" || task.status === "running" || task.status === "cancel_requested").length;
   const failedTaskCount = taskItems.filter((task) => task.status === "failed").length;
   const preparedTaskCount = taskItems.filter((task) => task.preparation?.status === "ready").length;
+  const completedTransferCount = taskItems.filter((task) => task.transfer?.status === "completed").length;
   const canCreateSelectedTask = Boolean(selectedResource && selectedResource.activeTaskCount === 0 && !pendingResourceId);
 
   function changeSelectedResource(resourceId: string | null) {
@@ -414,6 +425,7 @@ export function DownloadsPanel({
         <Stat label="可下载资源" value={resourceItems.length} color="var(--mantine-color-pink-6)" />
         <Stat label="活动任务" value={activeTaskCount} color="#2563eb" />
         <Stat label="已准备链接" value={preparedTaskCount} color="#00894a" />
+        <Stat label="临时文件" value={completedTransferCount} color="#4f46e5" />
         <Stat label="失败任务" value={failedTaskCount} color="#d93a4e" />
         <Stat label="云端扫描" value={cloudScanItems.length} color="#00894a" />
         <Stat label="任务总数" value={taskItems.length} color="#4f46e5" />
@@ -752,19 +764,30 @@ export function DownloadsPanel({
                       <Text size="sm">{PROVIDER_LABELS[task.provider]}</Text>
                     </Table.Td>
                     <Table.Td>
-                      {task.preparation ? (
-                        <Box>
-                          <PreparationStatusBadge status={task.preparation.status} />
-                          <Text size="xs" c="ink.5" mt={3}>
-                            {task.preparation.remoteName ?? "未知文件"}
-                            {task.preparation.sizeBytes != null ? ` · ${formatBytes(task.preparation.sizeBytes)}` : ""}
+                      <Stack gap={4}>
+                        {task.preparation ? (
+                          <Box>
+                            <PreparationStatusBadge status={task.preparation.status} />
+                            <Text size="xs" c="ink.5" mt={3}>
+                              {task.preparation.remoteName ?? "未知文件"}
+                              {task.preparation.sizeBytes != null ? ` · ${formatBytes(task.preparation.sizeBytes)}` : ""}
+                            </Text>
+                          </Box>
+                        ) : (
+                          <Text size="sm" c="ink.5">
+                            未准备
                           </Text>
-                        </Box>
-                      ) : (
-                        <Text size="sm" c="ink.5">
-                          未准备
-                        </Text>
-                      )}
+                        )}
+                        {task.transfer && (
+                          <Box>
+                            <TransferStatusBadge status={task.transfer.status} />
+                            <Text size="xs" c="ink.5" mt={3} style={{ overflowWrap: "anywhere" }}>
+                              {task.transfer.fileName ?? "临时文件"}
+                              {task.transfer.bytesWritten > 0 ? ` · ${formatBytes(task.transfer.bytesWritten)}` : ""}
+                            </Text>
+                          </Box>
+                        )}
+                      </Stack>
                     </Table.Td>
                     <Table.Td>
                       <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
@@ -975,6 +998,7 @@ function DispatchPlanPanel({
   const task = dispatchPlan.task;
   const resource = dispatchPlan.resource;
   const preparation = task?.preparation ?? null;
+  const transfer = task?.transfer ?? null;
   const readinessDetails = formatReadinessDetails(dispatchPlan.readiness?.details);
 
   return (
@@ -996,7 +1020,7 @@ function DispatchPlanPanel({
             disabled={!task}
             onClick={onRunWorkerPreflight}
           >
-            准备链接
+            运行 worker
           </AppButton>
           <DispatchStatusBadge status={dispatchPlan.status} />
         </Group>
@@ -1014,6 +1038,14 @@ function DispatchPlanPanel({
           <CompactInfo label="远端文件" value={preparation.remoteName ?? "未知文件"} />
           <CompactInfo label="直链" value={preparation.rawUrlAvailable ? "已确认" : "未确认"} />
           <CompactInfo label="准备时间" value={formatDate(preparation.preparedAt)} />
+        </Group>
+      )}
+      {transfer && (
+        <Group gap="lg" mt="md" wrap="wrap">
+          <CompactInfo label="临时下载" value={TRANSFER_STATUS_CONFIG[transfer.status].label} />
+          <CompactInfo label="临时文件" value={transfer.fileName ?? "暂无"} />
+          <CompactInfo label="已写入" value={formatBytes(transfer.bytesWritten)} />
+          <CompactInfo label="完成时间" value={transfer.finishedAt ? formatDate(transfer.finishedAt) : "进行中"} />
         </Group>
       )}
       {resource && (
@@ -1103,6 +1135,30 @@ function StatusBadge({ status }: { status: DownloadTaskStatus }) {
 
 function PreparationStatusBadge({ status }: { status: DownloadPreparationStatus }) {
   const config = PREPARATION_STATUS_CONFIG[status];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
+function TransferStatusBadge({ status }: { status: DownloadTransferStatus }) {
+  const config = TRANSFER_STATUS_CONFIG[status];
 
   return (
     <Box
