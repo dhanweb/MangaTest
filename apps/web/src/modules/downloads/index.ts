@@ -4,7 +4,7 @@ import path from "node:path";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, cloudScanEntries, cloudScanSessions, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
-import { getRuntimeSettings } from "@/modules/core/settings";
+import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 
 import { listOpenListDirectory, normalizeOpenListResourcePath } from "./providers/openlist/connection";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
@@ -192,6 +192,8 @@ const COMPATIBLE_PROVIDERS: Record<ComicResourceType, DownloadProvider[]> = {
 };
 
 const ACTIVE_TASK_STATUSES: DownloadTaskStatus[] = ["queued", "running", "cancel_requested"];
+const OPENLIST_CLOUD_SCAN_MAX_PAGES = 5;
+const OPENLIST_CLOUD_SCAN_PER_PAGE = 50;
 
 export async function createDownloadTask(input: CreateDownloadTaskInput): Promise<CreateDownloadTaskResult> {
   bootstrapDatabase();
@@ -387,17 +389,15 @@ export async function createOpenListCloudDirectoryScan(
     })
     .run();
 
-  const directory = await listOpenListDirectory(rootPath, {
-    perPage: 50,
-    settings: await getRuntimeSettings(),
-  });
+  const settings = await getRuntimeSettings();
+  const scanPages = await collectOpenListDirectoryPages(rootPath, settings);
   const finishedAt = new Date().toISOString();
 
-  if (!directory.ok || !directory.directory) {
+  if (!scanPages.ok) {
     getDb()
       .update(cloudScanSessions)
       .set({
-        errorSummary: directory.message,
+        errorSummary: scanPages.message,
         finishedAt,
         status: "failed",
         updatedAt: finishedAt,
@@ -406,11 +406,11 @@ export async function createOpenListCloudDirectoryScan(
       .run();
 
     return {
-      scan: getCloudScanSessionById(sessionId) ?? createFallbackCloudScanSession(sessionId, resource, rootPath, "failed", now, finishedAt, directory.message),
+      scan: getCloudScanSessionById(sessionId) ?? createFallbackCloudScanSession(sessionId, resource, rootPath, "failed", now, finishedAt, scanPages.message),
     };
   }
 
-  const entries = directory.directory.entries.map((entry) => ({
+  const entries = scanPages.entries.map((entry) => ({
     id: randomUUID(),
     sessionId,
     provider: "openlist" as const,
@@ -441,7 +441,7 @@ export async function createOpenListCloudDirectoryScan(
         finishedAt,
         importableFileCount,
         status: "completed",
-        totalCount: directory.directory?.total ?? entries.length,
+        totalCount: scanPages.totalCount ?? entries.length,
         updatedAt: finishedAt,
       })
       .where(eq(cloudScanSessions.id, sessionId))
@@ -487,6 +487,50 @@ export async function listOpenListCloudScans(limit = 20): Promise<CloudScanSessi
     .all();
 
   return rows.map((row) => mapCloudScanSessionRow(row, listCloudScanPreviewEntries(row.id)));
+}
+
+async function collectOpenListDirectoryPages(rootPath: string, settings: RuntimeSettings) {
+  const entries: Array<{
+    isDirectory: boolean;
+    modifiedAt: string | null;
+    name: string;
+    provider: string | null;
+    rawUrlAvailable: boolean;
+    sizeBytes: number | null;
+  }> = [];
+  let totalCount: number | null = null;
+
+  for (let page = 1; page <= OPENLIST_CLOUD_SCAN_MAX_PAGES; page += 1) {
+    const directory = await listOpenListDirectory(rootPath, {
+      page,
+      perPage: OPENLIST_CLOUD_SCAN_PER_PAGE,
+      settings,
+    });
+
+    if (!directory.ok || !directory.directory) {
+      return {
+        ok: false as const,
+        entries: [],
+        message: `读取 OpenList 目录第 ${page} 页失败：${directory.message}`,
+        totalCount,
+      };
+    }
+
+    entries.push(...directory.directory.entries);
+    totalCount = directory.directory.total ?? totalCount;
+
+    const hasMore = directory.directory.hasMore ?? (totalCount != null && entries.length < totalCount);
+    if (!hasMore) {
+      break;
+    }
+  }
+
+  return {
+    ok: true as const,
+    entries,
+    message: null,
+    totalCount,
+  };
 }
 
 export async function planNextDownloadDispatch(): Promise<DownloadDispatchPlan> {

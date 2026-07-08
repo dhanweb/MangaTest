@@ -18,12 +18,38 @@ describe("OpenList cloud directory scans", () => {
     process.env.MANGATEST_DB_PATH = dbPath;
 
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push({
         authorization: new Headers(init?.headers).get("Authorization"),
-        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+        body,
         method: init?.method ?? "GET",
         url: String(input),
       });
+
+      if (body.page === 2) {
+        return Response.json({
+          code: 200,
+          data: {
+            content: [
+              {
+                is_dir: false,
+                modified: "2026-01-03T00:00:00Z",
+                name: "Extra.cbz",
+                provider: "Local",
+                raw_url: "https://private.example/download/Extra.cbz?sign=secret",
+                size: 2048,
+                type: 4,
+              },
+            ],
+            has_more: false,
+            page: 2,
+            per_page: 50,
+            provider: "Local",
+            total: 3,
+          },
+          message: "success",
+        });
+      }
 
       return Response.json({
         code: 200,
@@ -40,11 +66,11 @@ describe("OpenList cloud directory scans", () => {
               type: 4,
             },
           ],
-          has_more: false,
+          has_more: true,
           page: 1,
           per_page: 50,
           provider: "Local",
-          total: 2,
+          total: 3,
         },
         message: "success",
       });
@@ -81,13 +107,14 @@ describe("OpenList cloud directory scans", () => {
 
       expect(result.scan.status).toBe("completed");
       expect(result.scan.rootPath).toBe("/Library");
-      expect(result.scan.totalCount).toBe(2);
-      expect(result.scan.fileCount).toBe(1);
+      expect(result.scan.totalCount).toBe(3);
+      expect(result.scan.fileCount).toBe(2);
       expect(result.scan.directoryCount).toBe(1);
-      expect(result.scan.importableFileCount).toBe(1);
-      expect(result.scan.previewEntries.map((entry) => entry.name).sort()).toEqual(["Comic.cbz", "Series"]);
+      expect(result.scan.importableFileCount).toBe(2);
+      expect(result.scan.previewEntries.map((entry) => entry.name).sort()).toEqual(["Comic.cbz", "Extra.cbz", "Series"]);
       expect(scans[0]?.id).toBe(result.scan.id);
-      expect(persistedEntryCount).toBe(2);
+      expect(persistedEntryCount).toBe(3);
+      expect(requests).toHaveLength(2);
       expect(requests[0]).toMatchObject({
         authorization: "secret-openlist-token",
         body: {
@@ -99,6 +126,11 @@ describe("OpenList cloud directory scans", () => {
         },
         method: "POST",
         url: "http://127.0.0.1:5244/root/api/fs/list",
+      });
+      expect(requests[1]?.body).toMatchObject({
+        page: 2,
+        path: "/Library",
+        per_page: 50,
       });
       expect(JSON.stringify(result)).not.toContain("secret-openlist-token");
       expect(JSON.stringify(result)).not.toContain("private.example");

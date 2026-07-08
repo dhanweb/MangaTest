@@ -96,6 +96,7 @@ export interface OpenListDirectoryListResult {
 
 interface OpenListResourceProbeOptions {
   fetchImpl?: typeof fetch;
+  page?: number;
   settings?: RuntimeSettings;
   perPage?: number;
 }
@@ -481,7 +482,14 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
-  const listApi = await postOpenListDirectoryList(fetchImpl, buildOpenListUrl(baseUrl, "api/fs/list"), token, resourcePath, normalizePerPage(options.perPage));
+  const listApi = await postOpenListDirectoryList(
+    fetchImpl,
+    buildOpenListUrl(baseUrl, "api/fs/list"),
+    token,
+    resourcePath,
+    normalizePage(options.page),
+    normalizePerPage(options.perPage),
+  );
   const publicListApi = toPublicEndpointCheck(listApi);
 
   if (listApi.status === 401 || listApi.status === 403) {
@@ -576,6 +584,7 @@ async function postOpenListDirectoryList(
   url: string,
   token: string,
   resourcePath: string,
+  page: number,
   perPage: number,
 ): Promise<OpenListEndpointCheck & { directory: OpenListDirectorySnapshot | null }> {
   const endpoint = redactOpenListEndpoint(url);
@@ -583,7 +592,7 @@ async function postOpenListDirectoryList(
   try {
     const response = await fetchImpl(url, {
       body: JSON.stringify({
-        page: 1,
+        page,
         password: "",
         path: resourcePath,
         per_page: perPage,
@@ -816,6 +825,11 @@ function normalizeOpenListDirectorySnapshot(value: unknown): OpenListDirectorySn
     hasMore: typeof record.has_more === "boolean" ? record.has_more : null,
     provider: typeof record.provider === "string" && record.provider.trim() ? record.provider : null,
   };
+}
+
+function normalizePage(value: number | undefined) {
+  const parsed = typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 1;
+  return Math.max(1, parsed);
 }
 
 function normalizePerPage(value: number | undefined) {
