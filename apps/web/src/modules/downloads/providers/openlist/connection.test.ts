@@ -4,7 +4,7 @@ import type { RuntimeSettings } from "@/modules/core/settings";
 
 import type { DownloadProviderPrepareInput } from "../types";
 
-import { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, loginOpenList, normalizeOpenListResourcePath } from "./connection";
+import { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, listOpenListDirectory, loginOpenList, normalizeOpenListResourcePath } from "./connection";
 import { openlistProviderAdapter } from "./index";
 
 describe("checkOpenListConnection", () => {
@@ -234,6 +234,63 @@ describe("inspectOpenListResource", () => {
   });
 });
 
+describe("listOpenListDirectory", () => {
+  it("posts to /api/fs/list and returns a safe directory preview", async () => {
+    const requests: Array<{ body: Record<string, unknown>; authorization: string | null; method: string; url: string }> = [];
+    const result = await listOpenListDirectory("openlist:/Library", {
+      perPage: 3,
+      settings: runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244/root",
+        openlistEnabled: true,
+        openlistToken: "secret-openlist-token",
+      }),
+      fetchImpl: async (input, init) => {
+        requests.push({
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          authorization: new Headers(init?.headers).get("Authorization"),
+          method: init?.method ?? "GET",
+          url: String(input),
+        });
+        return Response.json({
+          code: 200,
+          data: {
+            content: [
+              { is_dir: true, name: "Series", provider: "Local", raw_url: "", size: 0, type: 1 },
+              { is_dir: false, name: "Comic.cbz", provider: "Local", raw_url: "https://private.example/Comic.cbz?sign=secret", size: 42, type: 4 },
+            ],
+            has_more: false,
+            page: 1,
+            per_page: 3,
+            provider: "Local",
+            total: 2,
+          },
+          message: "success",
+        });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("reachable");
+    expect(result.path).toBe("/Library");
+    expect(result.directory?.total).toBe(2);
+    expect(result.directory?.entries.map((entry) => entry.name)).toEqual(["Series", "Comic.cbz"]);
+    expect(result.directory?.entries[1]?.rawUrlAvailable).toBe(true);
+    expect(requests[0]?.url).toBe("http://127.0.0.1:5244/root/api/fs/list");
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.authorization).toBe("secret-openlist-token");
+    expect(requests[0]?.body).toEqual({
+      page: 1,
+      password: "",
+      path: "/Library",
+      per_page: 3,
+      refresh: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-openlist-token");
+    expect(JSON.stringify(result)).not.toContain("private.example");
+    expect(JSON.stringify(result)).not.toContain("sign=secret");
+  });
+});
+
 describe("openlistProviderAdapter.prepare", () => {
   it("probes remote file metadata before reporting execution as not implemented", async () => {
     vi.stubGlobal(
@@ -266,6 +323,70 @@ describe("openlistProviderAdapter.prepare", () => {
         remoteName: "Comic.cbz",
         remoteProvider: "Local",
         remoteSizeBytes: 1048576,
+      });
+      expect(JSON.stringify(readiness)).not.toContain("secret-openlist-token");
+      expect(JSON.stringify(readiness)).not.toContain("download.example");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("lists a directory preview without enabling download execution", async () => {
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
+      if (String(input).endsWith("/api/fs/list")) {
+        return Response.json({
+          code: 200,
+          data: {
+            content: [
+              { is_dir: true, name: "Series", provider: "Local", raw_url: "", size: 0, type: 1 },
+              { is_dir: false, name: "Comic.cbz", provider: "Local", raw_url: "https://download.example/Comic.cbz?sign=secret", size: 1048576, type: 4 },
+            ],
+            has_more: false,
+            page: 1,
+            per_page: 10,
+            provider: "Local",
+            total: 2,
+          },
+          message: "success",
+        });
+      }
+
+      return Response.json({
+        code: 200,
+        data: {
+          is_dir: true,
+          name: "Library",
+          provider: "Local",
+          raw_url: "",
+          size: 0,
+          type: 1,
+        },
+        message: "success",
+      });
+    });
+
+    try {
+      const input = {
+        ...providerPrepareInput(),
+        resource: {
+          ...providerPrepareInput().resource,
+          resourceUrl: "/Library",
+        },
+      };
+      const readiness = await openlistProviderAdapter.prepare(input);
+
+      expect(readiness.canDispatch).toBe(false);
+      expect(readiness.code).toBe("remote_resource_directory");
+      expect(readiness.details).toEqual({
+        rawUrlAvailable: false,
+        remoteChildCount: 2,
+        remoteDirectoryCount: 1,
+        remoteFileCount: 1,
+        remoteIsDirectory: true,
+        remoteName: "Library",
+        remotePreviewNames: "Series、Comic.cbz",
+        remoteProvider: "Local",
+        remoteSizeBytes: 0,
       });
       expect(JSON.stringify(readiness)).not.toContain("secret-openlist-token");
       expect(JSON.stringify(readiness)).not.toContain("download.example");

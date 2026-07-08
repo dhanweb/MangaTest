@@ -879,6 +879,10 @@ function formatReadinessDetails(details: Record<string, boolean | number | strin
   append("remoteProvider", "OpenList 存储", (value) => (typeof value === "string" && value.trim() ? value : null));
   append("remoteIsDirectory", "类型", (value) => (typeof value === "boolean" ? (value ? "目录" : "文件") : null));
   append("rawUrlAvailable", "直链", (value) => (typeof value === "boolean" ? (value ? "已返回" : "未返回") : null));
+  append("remoteChildCount", "目录子项", (value) => (typeof value === "number" ? String(value) : null));
+  append("remoteFileCount", "预览文件", (value) => (typeof value === "number" ? String(value) : null));
+  append("remoteDirectoryCount", "预览目录", (value) => (typeof value === "number" ? String(value) : null));
+  append("remotePreviewNames", "预览", (value) => (typeof value === "string" && value.trim() ? value : null));
 
   return entries;
 }

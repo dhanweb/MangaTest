@@ -1,11 +1,14 @@
 import type { DownloadProviderAdapter } from "../types";
 
-import { inspectOpenListResource } from "./connection";
+import { inspectOpenListResource, listOpenListDirectory } from "./connection";
 
-export { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, loginOpenList, normalizeOpenListResourcePath } from "./connection";
+export { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, listOpenListDirectory, loginOpenList, normalizeOpenListResourcePath } from "./connection";
 export type {
   OpenListConnectionCheckResult,
   OpenListConnectionStatus,
+  OpenListDirectoryListResult,
+  OpenListDirectoryListStatus,
+  OpenListDirectorySnapshot,
   OpenListEndpointCheck,
   OpenListLoginInput,
   OpenListLoginResult,
@@ -77,11 +80,19 @@ export const openlistProviderAdapter: DownloadProviderAdapter = {
     };
 
     if (remoteResource.resource.isDirectory) {
+      const directory = await listOpenListDirectory(remoteResource.path, { perPage: 10, settings });
+      const directoryDetails = directory.directory ? getDirectoryDetails(directory.directory) : {};
+
       return {
         canDispatch: false,
         code: "remote_resource_directory",
-        details,
-        reason: `OpenList 路径是目录：${remoteResource.resource.name}。后续需要进入云端目录扫描流程。`,
+        details: {
+          ...details,
+          ...directoryDetails,
+        },
+        reason: directory.ok
+          ? `OpenList 路径是目录：${remoteResource.resource.name}，已列举 ${directory.directory?.entries.length ?? 0} 个预览项。后续需要进入云端目录扫描流程。`
+          : `OpenList 路径是目录：${remoteResource.resource.name}，但目录列表暂不可读：${directory.message}`,
       };
     }
 
@@ -132,4 +143,20 @@ function formatBytes(value: number) {
   }
 
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
+function getDirectoryDetails(directory: { entries: Array<{ isDirectory: boolean; name: string }>; total: number | null }) {
+  const directoryCount = directory.entries.filter((entry) => entry.isDirectory).length;
+  const fileCount = directory.entries.length - directoryCount;
+  const previewNames = directory.entries
+    .slice(0, 3)
+    .map((entry) => entry.name)
+    .join("、");
+
+  return {
+    remoteChildCount: directory.total ?? directory.entries.length,
+    remoteDirectoryCount: directoryCount,
+    remoteFileCount: fileCount,
+    remotePreviewNames: previewNames || null,
+  };
 }

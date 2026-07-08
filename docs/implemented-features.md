@@ -92,6 +92,7 @@ This document records features that are already implemented in `apps/web`.
 - OpenList settings include a read-only connection check that probes public and account APIs without creating download tasks or returning tokens to the client.
 - OpenList settings can exchange a username/password/OTP login for a token, storing only the token in local runtime settings.
 - OpenList dispatch preflight can read-only probe a configured remote path through `/api/fs/get` and report safe file metadata without executing downloads.
+- OpenList dispatch preflight can read-only list the first page of a configured remote directory through `/api/fs/list` and report safe directory preview metadata.
 - Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
 - Download admin UI can cancel queued/running tasks and retry failed/canceled tasks without invoking provider execution.
 - Download admin UI shows recent task activity for create, cancel, and retry events.
