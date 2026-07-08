@@ -60,10 +60,12 @@ const CLOUD_SCAN_STATUS_CONFIG: Record<CloudScanStatus, { label: string; bg: str
 
 type DownloadsApiResponse = {
   cloudScans?: CloudScanSessionRecord[];
+  createdCount?: number;
   resources?: DownloadableResourceRecord[];
   dispatchPlan?: DownloadDispatchPlan;
   events?: DownloadTaskEventRecord[];
   scan?: CloudScanSessionRecord;
+  skippedCount?: number;
   tasks?: DownloadTaskRecord[];
   task?: DownloadTaskRecord;
   created?: boolean;
@@ -93,6 +95,7 @@ export function DownloadsPanel({
   const [provider, setProvider] = useState<DownloadProvider>(() => resources[0]?.defaultProvider ?? "aria2");
   const [targetDirectory, setTargetDirectory] = useState("");
   const [pendingCloudScanResourceId, setPendingCloudScanResourceId] = useState<string | null>(null);
+  const [pendingCloudScanImportId, setPendingCloudScanImportId] = useState<string | null>(null);
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null);
   const [pendingTaskAction, setPendingTaskAction] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -299,6 +302,32 @@ export function DownloadsPanel({
       setError(caught instanceof Error ? caught.message : "OpenList 云端目录扫描失败。");
     } finally {
       setPendingCloudScanResourceId(null);
+    }
+  }
+
+  async function importCloudScanResources(scan: CloudScanSessionRecord) {
+    setPendingCloudScanImportId(scan.id);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch(`/api/downloads/openlist/cloud-scans/${encodeURIComponent(scan.id)}/resources`, { method: "POST" });
+      const payload = (await response.json()) as DownloadsApiResponse;
+
+      if (!response.ok || payload.createdCount == null || payload.skippedCount == null) {
+        throw new Error(payload.error ?? "导入 OpenList 云端扫描资源失败。");
+      }
+
+      setCloudScanItems(payload.cloudScans ?? cloudScanItems);
+      if (payload.resources) {
+        setResourceItems(payload.resources);
+      }
+      setMessage(`已导入 ${payload.createdCount} 个资源，跳过 ${payload.skippedCount} 个已有资源。`);
+      await refreshDownloads(scan.comicResourceId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "导入 OpenList 云端扫描资源失败。");
+    } finally {
+      setPendingCloudScanImportId(null);
     }
   }
 
@@ -609,7 +638,7 @@ export function DownloadsPanel({
           </Box>
         </Box>
 
-        <CloudScanPanel scans={filteredCloudScans} />
+        <CloudScanPanel scans={filteredCloudScans} pendingImportId={pendingCloudScanImportId} onImportResources={importCloudScanResources} />
 
         <Box>
           <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
@@ -751,7 +780,15 @@ function TaskActions({
   );
 }
 
-function CloudScanPanel({ scans }: { scans: CloudScanSessionRecord[] }) {
+function CloudScanPanel({
+  onImportResources,
+  pendingImportId,
+  scans,
+}: {
+  onImportResources: (scan: CloudScanSessionRecord) => void;
+  pendingImportId: string | null;
+  scans: CloudScanSessionRecord[];
+}) {
   return (
     <Box>
       <Text component="h2" size="lg" fw={900} c="ink.8" mb="sm">
@@ -779,55 +816,77 @@ function CloudScanPanel({ scans }: { scans: CloudScanSessionRecord[] }) {
               <Table.Th fw={900} c="#8d5a6e" w={136}>
                 时间
               </Table.Th>
+              <Table.Th fw={900} c="#8d5a6e" w={88}>
+                操作
+              </Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {scans.map((scan) => (
-              <Table.Tr key={scan.id}>
-                <Table.Td>
-                  <CloudScanStatusBadge status={scan.status} />
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm" fw={700}>
-                    {scan.comicTitle ?? "未知漫画"}
-                  </Text>
-                  <Text size="xs" c="ink.5">
-                    {scan.resourceLabel ?? "OpenList"}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
-                    {scan.rootPath}
-                  </Text>
-                  {scan.errorSummary && (
-                    <Text size="xs" c="red.7" mt={3}>
-                      {scan.errorSummary}
+            {scans.map((scan) => {
+              const canImport = scan.status === "completed" && scan.importableFileCount > 0;
+
+              return (
+                <Table.Tr key={scan.id}>
+                  <Table.Td>
+                    <CloudScanStatusBadge status={scan.status} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" fw={700}>
+                      {scan.comicTitle ?? "未知漫画"}
                     </Text>
-                  )}
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="ink.5">
-                    {scan.totalCount} 项 · {scan.fileCount} 文件 · {scan.directoryCount} 目录
-                  </Text>
-                  <Text size="xs" c="ink.5">
-                    {scan.importableFileCount} 个可取直链
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
-                    {formatCloudScanPreview(scan.previewEntries)}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm" c="ink.5">
-                    {formatDate(scan.finishedAt ?? scan.startedAt)}
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            ))}
+                    <Text size="xs" c="ink.5">
+                      {scan.resourceLabel ?? "OpenList"}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                      {scan.rootPath}
+                    </Text>
+                    {scan.errorSummary && (
+                      <Text size="xs" c="red.7" mt={3}>
+                        {scan.errorSummary}
+                      </Text>
+                    )}
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="ink.5">
+                      {scan.totalCount} 项 · {scan.fileCount} 文件 · {scan.directoryCount} 目录
+                    </Text>
+                    <Text size="xs" c="ink.5">
+                      {scan.importableFileCount} 个可取直链
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
+                      {formatCloudScanPreview(scan.previewEntries)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm" c="ink.5">
+                      {formatDate(scan.finishedAt ?? scan.startedAt)}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Tooltip label={canImport ? "导入为可下载资源" : "没有可导入文件"} withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        color="pink"
+                        size="md"
+                        disabled={!canImport}
+                        loading={pendingImportId === scan.id}
+                        onClick={() => onImportResources(scan)}
+                        aria-label={`导入 ${scan.comicTitle ?? "未知漫画"} 的 OpenList 扫描资源`}
+                      >
+                        <Plus size={15} />
+                      </ActionIcon>
+                    </Tooltip>
+                  </Table.Td>
+                </Table.Tr>
+              );
+            })}
             {scans.length === 0 && (
               <Table.Tr>
-                <Table.Td colSpan={6}>
+                <Table.Td colSpan={7}>
                   <Text size="sm" c="ink.5" ta="center" py="md">
                     暂无云端扫描记录
                   </Text>

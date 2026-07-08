@@ -139,6 +139,12 @@ export interface CreateOpenListCloudDirectoryScanResult {
   scan: CloudScanSessionRecord;
 }
 
+export interface ImportOpenListCloudScanResourcesResult {
+  createdCount: number;
+  skippedCount: number;
+  resources: DownloadableResourceRecord[];
+}
+
 export type DownloadDispatchPlanStatus = "idle" | "blocked" | "ready";
 
 export interface DownloadDispatchResourceRecord {
@@ -487,6 +493,71 @@ export async function listOpenListCloudScans(limit = 20): Promise<CloudScanSessi
     .all();
 
   return rows.map((row) => mapCloudScanSessionRow(row, listCloudScanPreviewEntries(row.id)));
+}
+
+export async function importOpenListCloudScanResources(sessionId: string): Promise<ImportOpenListCloudScanResourcesResult> {
+  bootstrapDatabase();
+
+  const id = normalizeRequiredText(sessionId, "云端扫描 ID");
+  const session = getCloudScanImportSessionById(id);
+
+  if (!session) {
+    throw new Error("找不到 OpenList 云端扫描记录。");
+  }
+
+  if (session.provider !== "openlist") {
+    throw new Error("只有 OpenList 云端扫描可以导入为 OpenList 资源。");
+  }
+
+  if (session.status !== "completed") {
+    throw new Error("只有已完成的云端扫描可以导入资源。");
+  }
+
+  if (!session.comicResourceId || !session.comicId) {
+    throw new Error("云端扫描缺少原始漫画资源，无法确定导入目标。");
+  }
+
+  const entries = listImportableCloudScanEntries(id);
+  let createdCount = 0;
+  let skippedCount = 0;
+  const comicId = session.comicId;
+  const comicSourceId = session.comicSourceId;
+  const now = new Date().toISOString();
+
+  getDb().transaction((tx) => {
+    for (const entry of entries) {
+      const existingResource = tx
+        .select({ id: comicResources.id })
+        .from(comicResources)
+        .where(and(eq(comicResources.comicId, comicId), eq(comicResources.resourceType, "openlist"), eq(comicResources.resourceUrl, entry.remotePath)))
+        .get();
+
+      if (existingResource) {
+        skippedCount += 1;
+        continue;
+      }
+
+      tx.insert(comicResources)
+        .values({
+          id: randomUUID(),
+          comicId,
+          comicSourceId,
+          displayLabel: entry.name,
+          redactedResource: redactOpenListRemotePath(entry.remotePath, entry.name),
+          resourceType: "openlist",
+          resourceUrl: entry.remotePath,
+          updatedAt: now,
+        })
+        .run();
+      createdCount += 1;
+    }
+  });
+
+  return {
+    createdCount,
+    skippedCount,
+    resources: await listDownloadableResources(),
+  };
 }
 
 async function collectOpenListDirectoryPages(rootPath: string, settings: RuntimeSettings) {
@@ -881,6 +952,46 @@ function getCloudScanSessionById(sessionId: string): CloudScanSessionRecord | nu
     .get();
 
   return row ? mapCloudScanSessionRow(row, listCloudScanPreviewEntries(row.id)) : null;
+}
+
+function getCloudScanImportSessionById(sessionId: string) {
+  const row = getDb()
+    .select({
+      id: cloudScanSessions.id,
+      provider: cloudScanSessions.provider,
+      comicResourceId: cloudScanSessions.comicResourceId,
+      comicId: comicResources.comicId,
+      comicSourceId: comicResources.comicSourceId,
+      status: cloudScanSessions.status,
+    })
+    .from(cloudScanSessions)
+    .leftJoin(comicResources, eq(comicResources.id, cloudScanSessions.comicResourceId))
+    .where(eq(cloudScanSessions.id, sessionId))
+    .get();
+
+  return row
+    ? {
+        id: row.id,
+        provider: normalizeProvider(row.provider),
+        comicResourceId: row.comicResourceId,
+        comicId: row.comicId,
+        comicSourceId: row.comicSourceId,
+        status: normalizeCloudScanStatus(row.status),
+      }
+    : null;
+}
+
+function listImportableCloudScanEntries(sessionId: string) {
+  return getDb()
+    .select({
+      id: cloudScanEntries.id,
+      name: cloudScanEntries.name,
+      remotePath: cloudScanEntries.remotePath,
+    })
+    .from(cloudScanEntries)
+    .where(and(eq(cloudScanEntries.sessionId, sessionId), eq(cloudScanEntries.kind, "file"), eq(cloudScanEntries.rawUrlAvailable, true)))
+    .orderBy(cloudScanEntries.name)
+    .all();
 }
 
 function listCloudScanPreviewEntries(sessionId: string): CloudScanEntryRecord[] {
@@ -1310,4 +1421,9 @@ function isDownloadTaskEventOperation(value: unknown): value is DownloadTaskEven
 
 function joinOpenListRemotePath(parentPath: string, name: string) {
   return `${parentPath.replace(/\/+$/, "")}/${name.replace(/^\/+/, "")}`;
+}
+
+function redactOpenListRemotePath(remotePath: string, name: string) {
+  const safeName = name.trim() || remotePath.split("/").filter(Boolean).pop() || "资源";
+  return `openlist:/.../${safeName}`;
 }

@@ -79,7 +79,7 @@ describe("OpenList cloud directory scans", () => {
     try {
       const { bootstrapDatabase, getSqlite } = await import("../core/db");
       const { saveRuntimeSettings } = await import("../core/settings");
-      const { createOpenListCloudDirectoryScan, listOpenListCloudScans } = await import("./index");
+      const { createOpenListCloudDirectoryScan, importOpenListCloudScanResources, listOpenListCloudScans } = await import("./index");
 
       bootstrapDatabase();
       const sqlite = getSqlite();
@@ -104,6 +104,8 @@ describe("OpenList cloud directory scans", () => {
       const result = await createOpenListCloudDirectoryScan({ comicResourceId: resourceId });
       const scans = await listOpenListCloudScans();
       const persistedEntryCount = countRows(sqlite, "cloud_scan_entries");
+      const importResult = await importOpenListCloudScanResources(result.scan.id);
+      const duplicateImportResult = await importOpenListCloudScanResources(result.scan.id);
 
       expect(result.scan.status).toBe("completed");
       expect(result.scan.rootPath).toBe("/Library");
@@ -114,6 +116,12 @@ describe("OpenList cloud directory scans", () => {
       expect(result.scan.previewEntries.map((entry) => entry.name).sort()).toEqual(["Comic.cbz", "Extra.cbz", "Series"]);
       expect(scans[0]?.id).toBe(result.scan.id);
       expect(persistedEntryCount).toBe(3);
+      expect(importResult.createdCount).toBe(2);
+      expect(importResult.skippedCount).toBe(0);
+      expect(importResult.resources.filter((resource) => resource.resourceType === "openlist")).toHaveLength(3);
+      expect(duplicateImportResult.createdCount).toBe(0);
+      expect(duplicateImportResult.skippedCount).toBe(2);
+      expect(countRows(sqlite, "comic_resources")).toBe(3);
       expect(requests).toHaveLength(2);
       expect(requests[0]).toMatchObject({
         authorization: "secret-openlist-token",
@@ -135,6 +143,8 @@ describe("OpenList cloud directory scans", () => {
       expect(JSON.stringify(result)).not.toContain("secret-openlist-token");
       expect(JSON.stringify(result)).not.toContain("private.example");
       expect(JSON.stringify(result)).not.toContain("sign=secret");
+      expect(JSON.stringify(importResult)).not.toContain("private.example");
+      expect(JSON.stringify(importResult)).not.toContain("sign=secret");
     } finally {
       vi.unstubAllGlobals();
     }
