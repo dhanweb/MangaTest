@@ -3,7 +3,18 @@ import path from "node:path";
 
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, cloudScanEntries, cloudScanSessions, comicResources, comics, comicSources, downloadTasks, getDb, operationLogs } from "@/modules/core/db";
+import {
+  bootstrapDatabase,
+  cloudScanEntries,
+  cloudScanSessions,
+  comicResources,
+  comics,
+  comicSources,
+  downloadTaskPreparations,
+  downloadTasks,
+  getDb,
+  operationLogs,
+} from "@/modules/core/db";
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 
 import { listOpenListDirectory, normalizeOpenListResourcePath } from "./providers/openlist/connection";
@@ -18,6 +29,9 @@ export type DownloadProvider = (typeof DOWNLOAD_PROVIDERS)[number];
 
 export const DOWNLOAD_TASK_STATUSES = ["queued", "running", "failed", "completed", "cancel_requested", "canceled"] as const;
 export type DownloadTaskStatus = (typeof DOWNLOAD_TASK_STATUSES)[number];
+
+export const DOWNLOAD_PREPARATION_STATUSES = ["ready", "blocked"] as const;
+export type DownloadPreparationStatus = (typeof DOWNLOAD_PREPARATION_STATUSES)[number];
 
 export const CLOUD_SCAN_STATUSES = ["running", "completed", "failed"] as const;
 export type CloudScanStatus = (typeof CLOUD_SCAN_STATUSES)[number];
@@ -75,6 +89,24 @@ export interface DownloadTaskRecord {
   targetDirectory: string | null;
   errorMessage: string | null;
   retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+  preparation?: DownloadTaskPreparationRecord | null;
+}
+
+export interface DownloadTaskPreparationRecord {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: DownloadProvider;
+  status: DownloadPreparationStatus;
+  remotePath: string | null;
+  remoteName: string | null;
+  sizeBytes: number | null;
+  remoteProvider: string | null;
+  rawUrlAvailable: boolean;
+  preparedAt: string;
+  errorMessage: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -297,7 +329,7 @@ export async function listDownloadTasks(limit = 100): Promise<DownloadTaskRecord
     .limit(normalizeLimit(limit))
     .all();
 
-  return rows.map((row) => ({
+  const tasks = rows.map((row) => ({
     id: row.id,
     comicResourceId: row.comicResourceId ?? "",
     comicId: row.comicId ?? null,
@@ -314,6 +346,8 @@ export async function listDownloadTasks(limit = 100): Promise<DownloadTaskRecord
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
+
+  return attachDownloadTaskPreparations(tasks);
 }
 
 export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEventRecord[]> {
@@ -687,14 +721,27 @@ export async function planNextDownloadDispatch(): Promise<DownloadDispatchPlan> 
 
 export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult> {
   const plan = await planNextDownloadDispatch();
+  const preparation = persistDownloadTaskPreparationFromPlan(plan);
+  const preparedPlan =
+    preparation && plan.task
+      ? {
+          ...plan,
+          task: {
+            ...plan.task,
+            preparation,
+          },
+        }
+      : plan;
 
   return {
     executed: false,
     reason:
-      plan.status === "ready"
-        ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
-        : plan.reason,
-    plan,
+      preparation?.status === "ready"
+        ? "OpenList 下载链接准备已记录，真实下载执行尚未接入。"
+        : plan.status === "ready"
+          ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
+          : plan.reason,
+    plan: preparedPlan,
   };
 }
 
@@ -905,7 +952,7 @@ function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
     return null;
   }
 
-  return {
+  const task: DownloadTaskRecord = {
     id: row.id,
     comicResourceId: row.comicResourceId ?? "",
     comicId: row.comicId ?? null,
@@ -921,7 +968,160 @@ function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
     retryCount: Number(row.retryCount ?? 0),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
-    };
+  };
+
+  return {
+    ...task,
+    preparation: getDownloadTaskPreparationByTaskId(task.id),
+  };
+}
+
+function persistDownloadTaskPreparationFromPlan(plan: DownloadDispatchPlan): DownloadTaskPreparationRecord | null {
+  if (plan.provider !== "openlist" || !plan.task || !plan.readiness) {
+    return null;
+  }
+
+  const details = plan.readiness.details ?? {};
+  const remotePath = normalizeOpenListResourcePath(readinessStringDetail(details, "remotePath"));
+
+  if (!remotePath) {
+    return null;
+  }
+
+  const rawUrlAvailable = details.rawUrlAvailable === true;
+  const remoteIsDirectory = details.remoteIsDirectory === true;
+  const status: DownloadPreparationStatus = rawUrlAvailable && !remoteIsDirectory ? "ready" : "blocked";
+  const now = new Date().toISOString();
+  const existing = getDb()
+    .select({ id: downloadTaskPreparations.id })
+    .from(downloadTaskPreparations)
+    .where(eq(downloadTaskPreparations.downloadTaskId, plan.task.id))
+    .get();
+  const values = {
+    comicResourceId: plan.task.comicResourceId || null,
+    downloadTaskId: plan.task.id,
+    errorMessage: status === "ready" ? null : plan.readiness.reason,
+    preparedAt: now,
+    provider: plan.provider,
+    rawUrlAvailable,
+    remoteName: readinessStringDetail(details, "remoteName"),
+    remotePath,
+    remoteProvider: readinessStringDetail(details, "remoteProvider"),
+    sizeBytes: readinessNumberDetail(details, "remoteSizeBytes"),
+    status,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    getDb().update(downloadTaskPreparations).set(values).where(eq(downloadTaskPreparations.id, existing.id)).run();
+  } else {
+    getDb()
+      .insert(downloadTaskPreparations)
+      .values({
+        ...values,
+        id: randomUUID(),
+      })
+      .run();
+  }
+
+  return getDownloadTaskPreparationByTaskId(plan.task.id);
+}
+
+function attachDownloadTaskPreparations(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
+  if (tasks.length === 0) {
+    return tasks;
+  }
+
+  const preparationsByTaskId = listDownloadTaskPreparationMap(tasks.map((task) => task.id));
+
+  return tasks.map((task) => ({
+    ...task,
+    preparation: preparationsByTaskId.get(task.id) ?? null,
+  }));
+}
+
+function listDownloadTaskPreparationMap(taskIds: string[]) {
+  const rows = getDb()
+    .select({
+      id: downloadTaskPreparations.id,
+      downloadTaskId: downloadTaskPreparations.downloadTaskId,
+      comicResourceId: downloadTaskPreparations.comicResourceId,
+      provider: downloadTaskPreparations.provider,
+      status: downloadTaskPreparations.status,
+      remotePath: downloadTaskPreparations.remotePath,
+      remoteName: downloadTaskPreparations.remoteName,
+      sizeBytes: downloadTaskPreparations.sizeBytes,
+      remoteProvider: downloadTaskPreparations.remoteProvider,
+      rawUrlAvailable: downloadTaskPreparations.rawUrlAvailable,
+      preparedAt: downloadTaskPreparations.preparedAt,
+      errorMessage: downloadTaskPreparations.errorMessage,
+      createdAt: downloadTaskPreparations.createdAt,
+      updatedAt: downloadTaskPreparations.updatedAt,
+    })
+    .from(downloadTaskPreparations)
+    .where(inArray(downloadTaskPreparations.downloadTaskId, taskIds))
+    .all();
+
+  return new Map(rows.map((row) => [row.downloadTaskId, mapDownloadTaskPreparationRow(row)]));
+}
+
+function getDownloadTaskPreparationByTaskId(downloadTaskId: string): DownloadTaskPreparationRecord | null {
+  const row = getDb()
+    .select({
+      id: downloadTaskPreparations.id,
+      downloadTaskId: downloadTaskPreparations.downloadTaskId,
+      comicResourceId: downloadTaskPreparations.comicResourceId,
+      provider: downloadTaskPreparations.provider,
+      status: downloadTaskPreparations.status,
+      remotePath: downloadTaskPreparations.remotePath,
+      remoteName: downloadTaskPreparations.remoteName,
+      sizeBytes: downloadTaskPreparations.sizeBytes,
+      remoteProvider: downloadTaskPreparations.remoteProvider,
+      rawUrlAvailable: downloadTaskPreparations.rawUrlAvailable,
+      preparedAt: downloadTaskPreparations.preparedAt,
+      errorMessage: downloadTaskPreparations.errorMessage,
+      createdAt: downloadTaskPreparations.createdAt,
+      updatedAt: downloadTaskPreparations.updatedAt,
+    })
+    .from(downloadTaskPreparations)
+    .where(eq(downloadTaskPreparations.downloadTaskId, downloadTaskId))
+    .get();
+
+  return row ? mapDownloadTaskPreparationRow(row) : null;
+}
+
+function mapDownloadTaskPreparationRow(row: {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: string;
+  status: string;
+  remotePath: string | null;
+  remoteName: string | null;
+  sizeBytes: number | null;
+  remoteProvider: string | null;
+  rawUrlAvailable: boolean;
+  preparedAt: string;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}): DownloadTaskPreparationRecord {
+  return {
+    id: row.id,
+    downloadTaskId: row.downloadTaskId,
+    comicResourceId: row.comicResourceId,
+    provider: normalizeProvider(row.provider),
+    status: normalizeDownloadPreparationStatus(row.status),
+    remotePath: row.remotePath,
+    remoteName: row.remoteName,
+    sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes),
+    remoteProvider: row.remoteProvider,
+    rawUrlAvailable: Boolean(row.rawUrlAvailable),
+    preparedAt: row.preparedAt,
+    errorMessage: row.errorMessage,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 function getCloudScanSessionById(sessionId: string): CloudScanSessionRecord | null {
@@ -1375,6 +1575,14 @@ function normalizeDownloadTaskStatus(value: unknown): DownloadTaskStatus {
   throw new Error("下载任务状态无效。");
 }
 
+function normalizeDownloadPreparationStatus(value: unknown): DownloadPreparationStatus {
+  if (isDownloadPreparationStatus(value)) {
+    return value;
+  }
+
+  throw new Error("下载准备状态无效。");
+}
+
 function normalizeCloudScanStatus(value: unknown): CloudScanStatus {
   if (isCloudScanStatus(value)) {
     return value;
@@ -1407,6 +1615,10 @@ function isDownloadTaskStatus(value: unknown): value is DownloadTaskStatus {
   return DOWNLOAD_TASK_STATUSES.includes(value as DownloadTaskStatus);
 }
 
+function isDownloadPreparationStatus(value: unknown): value is DownloadPreparationStatus {
+  return DOWNLOAD_PREPARATION_STATUSES.includes(value as DownloadPreparationStatus);
+}
+
 function isCloudScanStatus(value: unknown): value is CloudScanStatus {
   return CLOUD_SCAN_STATUSES.includes(value as CloudScanStatus);
 }
@@ -1426,4 +1638,14 @@ function joinOpenListRemotePath(parentPath: string, name: string) {
 function redactOpenListRemotePath(remotePath: string, name: string) {
   const safeName = name.trim() || remotePath.split("/").filter(Boolean).pop() || "资源";
   return `openlist:/.../${safeName}`;
+}
+
+function readinessStringDetail(details: Record<string, boolean | number | string | null>, key: string) {
+  const value = details[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readinessNumberDetail(details: Record<string, boolean | number | string | null>, key: string) {
+  const value = details[key];
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
 }

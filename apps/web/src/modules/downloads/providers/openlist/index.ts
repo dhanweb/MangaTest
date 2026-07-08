@@ -54,11 +54,13 @@ export const openlistProviderAdapter: DownloadProviderAdapter = {
     }
 
     const remoteResource = await inspectOpenListResource(resource.resourceUrl, { settings });
+    const remotePathDetails: Record<string, string> | undefined = remoteResource.path ? { remotePath: remoteResource.path } : undefined;
 
     if (remoteResource.status === "not_found") {
       return {
         canDispatch: false,
         code: "remote_resource_not_found",
+        details: remotePathDetails,
         reason: remoteResource.message,
       };
     }
@@ -67,11 +69,13 @@ export const openlistProviderAdapter: DownloadProviderAdapter = {
       return {
         canDispatch: false,
         code: "remote_resource_unavailable",
+        details: remotePathDetails,
         reason: remoteResource.message,
       };
     }
 
     const details = {
+      ...(remotePathDetails ?? {}),
       rawUrlAvailable: remoteResource.resource.rawUrlAvailable,
       remoteIsDirectory: remoteResource.resource.isDirectory,
       remoteName: remoteResource.resource.name,

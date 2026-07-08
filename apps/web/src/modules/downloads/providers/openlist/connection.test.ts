@@ -321,6 +321,7 @@ describe("openlistProviderAdapter.prepare", () => {
         rawUrlAvailable: true,
         remoteIsDirectory: false,
         remoteName: "Comic.cbz",
+        remotePath: "/Library/Comic.cbz",
         remoteProvider: "Local",
         remoteSizeBytes: 1048576,
       });
@@ -384,6 +385,7 @@ describe("openlistProviderAdapter.prepare", () => {
         remoteFileCount: 1,
         remoteIsDirectory: true,
         remoteName: "Library",
+        remotePath: "/Library",
         remotePreviewNames: "Series、Comic.cbz",
         remoteProvider: "Local",
         remoteSizeBytes: 0,

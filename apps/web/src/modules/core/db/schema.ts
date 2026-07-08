@@ -25,6 +25,7 @@ export const mediaAssetUses = ["cover", "list_thumbnail", "reader_thumbnail"] as
 export const cacheEntryKinds = ["archive_file_list", "page_image"] as const;
 export const cloudScanEntryKinds = ["file", "directory"] as const;
 export const cloudScanStatuses = ["running", "completed", "failed"] as const;
+export const downloadPreparationStatuses = ["ready", "blocked"] as const;
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -304,6 +305,32 @@ export const downloadTasks = sqliteTable(
   (table) => ({
     statusIdx: index("download_tasks_status_idx").on(table.status),
     resourceIdx: index("download_tasks_resource_idx").on(table.comicResourceId),
+  }),
+);
+
+export const downloadTaskPreparations = sqliteTable(
+  "download_task_preparations",
+  {
+    id: text("id").primaryKey(),
+    downloadTaskId: text("download_task_id")
+      .notNull()
+      .references(() => downloadTasks.id),
+    comicResourceId: text("comic_resource_id").references(() => comicResources.id),
+    provider: text("provider").notNull(),
+    status: text("status", { enum: downloadPreparationStatuses }).notNull(),
+    remotePath: text("remote_path"),
+    remoteName: text("remote_name"),
+    sizeBytes: integer("size_bytes"),
+    remoteProvider: text("remote_provider"),
+    rawUrlAvailable: integer("raw_url_available", { mode: "boolean" }).notNull().default(false),
+    preparedAt: text("prepared_at").notNull(),
+    errorMessage: text("error_message"),
+    ...timestamps,
+  },
+  (table) => ({
+    providerStatusIdx: index("download_task_preparations_provider_status_idx").on(table.provider, table.status),
+    resourceIdx: index("download_task_preparations_resource_idx").on(table.comicResourceId),
+    taskIdx: uniqueIndex("download_task_preparations_task_idx").on(table.downloadTaskId),
   }),
 );
 

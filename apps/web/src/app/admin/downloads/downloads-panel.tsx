@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { CheckCircle2, CloudDownload, Plus, RotateCcw, Search, XCircle } from "lucide-react";
+import { CheckCircle2, CloudDownload, Link2, Plus, RotateCcw, Search, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
@@ -11,11 +11,13 @@ import type {
   ComicResourceType,
   DownloadableResourceRecord,
   DownloadDispatchPlan,
+  DownloadPreparationStatus,
   DownloadProvider,
   DownloadTaskEventOperation,
   DownloadTaskEventRecord,
   DownloadTaskRecord,
   DownloadTaskStatus,
+  DownloadWorkerTickResult,
 } from "@/modules/downloads";
 
 const PROVIDER_LABELS: Record<DownloadProvider, string> = {
@@ -52,6 +54,11 @@ const DISPATCH_STATUS_CONFIG: Record<DownloadDispatchPlan["status"], { label: st
   ready: { label: "就绪", bg: "#e4f9ed", color: "#00894a" },
 };
 
+const PREPARATION_STATUS_CONFIG: Record<DownloadPreparationStatus, { label: string; bg: string; color: string }> = {
+  blocked: { label: "未就绪", bg: "#fff4d6", color: "#b86b00" },
+  ready: { label: "已准备", bg: "#e4f9ed", color: "#00894a" },
+};
+
 const CLOUD_SCAN_STATUS_CONFIG: Record<CloudScanStatus, { label: string; bg: string; color: string }> = {
   completed: { label: "已完成", bg: "#e4f9ed", color: "#00894a" },
   failed: { label: "失败", bg: "#ffe1e1", color: "#d93a4e" },
@@ -61,9 +68,12 @@ const CLOUD_SCAN_STATUS_CONFIG: Record<CloudScanStatus, { label: string; bg: str
 type DownloadsApiResponse = {
   cloudScans?: CloudScanSessionRecord[];
   createdCount?: number;
+  executed?: boolean;
   resources?: DownloadableResourceRecord[];
   dispatchPlan?: DownloadDispatchPlan;
   events?: DownloadTaskEventRecord[];
+  plan?: DownloadWorkerTickResult["plan"];
+  reason?: string;
   scan?: CloudScanSessionRecord;
   skippedCount?: number;
   tasks?: DownloadTaskRecord[];
@@ -98,6 +108,7 @@ export function DownloadsPanel({
   const [pendingCloudScanImportId, setPendingCloudScanImportId] = useState<string | null>(null);
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null);
   const [pendingTaskAction, setPendingTaskAction] = useState<string | null>(null);
+  const [pendingWorkerTick, setPendingWorkerTick] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -144,7 +155,16 @@ export function DownloadsPanel({
     }
 
     return taskItems.filter((task) =>
-      [task.comicTitle, task.resourceLabel, task.redactedResource, task.sourceSite ?? "", PROVIDER_LABELS[task.provider], TASK_STATUS_CONFIG[task.status].label]
+      [
+        task.comicTitle,
+        task.resourceLabel,
+        task.redactedResource,
+        task.sourceSite ?? "",
+        PROVIDER_LABELS[task.provider],
+        TASK_STATUS_CONFIG[task.status].label,
+        task.preparation ? PREPARATION_STATUS_CONFIG[task.preparation.status].label : "",
+        task.preparation?.remoteName ?? "",
+      ]
         .join(" ")
         .toLowerCase()
         .includes(query),
@@ -195,6 +215,7 @@ export function DownloadsPanel({
 
   const activeTaskCount = taskItems.filter((task) => task.status === "queued" || task.status === "running" || task.status === "cancel_requested").length;
   const failedTaskCount = taskItems.filter((task) => task.status === "failed").length;
+  const preparedTaskCount = taskItems.filter((task) => task.preparation?.status === "ready").length;
   const canCreateSelectedTask = Boolean(selectedResource && selectedResource.activeTaskCount === 0 && !pendingResourceId);
 
   function changeSelectedResource(resourceId: string | null) {
@@ -270,6 +291,29 @@ export function DownloadsPanel({
       setError(caught instanceof Error ? caught.message : action === "cancel" ? "取消下载任务失败。" : "重试下载任务失败。");
     } finally {
       setPendingTaskAction(null);
+    }
+  }
+
+  async function runWorkerPreflight() {
+    setPendingWorkerTick(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const response = await fetch("/api/downloads/worker/tick", { method: "POST" });
+      const payload = (await response.json()) as DownloadsApiResponse;
+
+      if (!response.ok || !payload.plan) {
+        throw new Error(payload.error ?? "下载 worker 预检失败。");
+      }
+
+      setDispatchPlanItem(payload.plan);
+      setMessage(payload.reason ?? "已完成下载 worker 预检。");
+      await refreshDownloads(payload.plan.task?.comicResourceId ?? selectedResourceId);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "下载 worker 预检失败。");
+    } finally {
+      setPendingWorkerTick(false);
     }
   }
 
@@ -369,13 +413,14 @@ export function DownloadsPanel({
       <Group gap="xl" mb="lg" px="md" py="sm" style={{ background: "var(--mantine-color-pink-0)", borderRadius: 10 }}>
         <Stat label="可下载资源" value={resourceItems.length} color="var(--mantine-color-pink-6)" />
         <Stat label="活动任务" value={activeTaskCount} color="#2563eb" />
+        <Stat label="已准备链接" value={preparedTaskCount} color="#00894a" />
         <Stat label="失败任务" value={failedTaskCount} color="#d93a4e" />
         <Stat label="云端扫描" value={cloudScanItems.length} color="#00894a" />
         <Stat label="任务总数" value={taskItems.length} color="#4f46e5" />
       </Group>
 
       <Stack gap="md">
-        <DispatchPlanPanel dispatchPlan={dispatchPlanItem} />
+        <DispatchPlanPanel dispatchPlan={dispatchPlanItem} pendingWorkerTick={pendingWorkerTick} onRunWorkerPreflight={runWorkerPreflight} />
 
         <Box style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, padding: 16 }}>
           <Group align="flex-end" gap="sm" wrap="wrap">
@@ -660,6 +705,9 @@ export function DownloadsPanel({
                   <Table.Th fw={900} c="#8d5a6e" w={116}>
                     Provider
                   </Table.Th>
+                  <Table.Th fw={900} c="#8d5a6e" w={132}>
+                    准备
+                  </Table.Th>
                   <Table.Th fw={900} c="#8d5a6e">
                     目标目录
                   </Table.Th>
@@ -704,6 +752,21 @@ export function DownloadsPanel({
                       <Text size="sm">{PROVIDER_LABELS[task.provider]}</Text>
                     </Table.Td>
                     <Table.Td>
+                      {task.preparation ? (
+                        <Box>
+                          <PreparationStatusBadge status={task.preparation.status} />
+                          <Text size="xs" c="ink.5" mt={3}>
+                            {task.preparation.remoteName ?? "未知文件"}
+                            {task.preparation.sizeBytes != null ? ` · ${formatBytes(task.preparation.sizeBytes)}` : ""}
+                          </Text>
+                        </Box>
+                      ) : (
+                        <Text size="sm" c="ink.5">
+                          未准备
+                        </Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td>
                       <Text size="xs" c="ink.5" style={{ overflowWrap: "anywhere" }}>
                         {task.targetDirectory ?? "默认入库目录"}
                       </Text>
@@ -720,7 +783,7 @@ export function DownloadsPanel({
                 ))}
                 {filteredTasks.length === 0 && (
                   <Table.Tr>
-                    <Table.Td colSpan={7}>
+                    <Table.Td colSpan={8}>
                       <Text size="sm" c="ink.5" ta="center" py="md">
                         还没有下载任务
                       </Text>
@@ -900,9 +963,18 @@ function CloudScanPanel({
   );
 }
 
-function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPlan }) {
+function DispatchPlanPanel({
+  dispatchPlan,
+  onRunWorkerPreflight,
+  pendingWorkerTick,
+}: {
+  dispatchPlan: DownloadDispatchPlan;
+  onRunWorkerPreflight: () => void;
+  pendingWorkerTick: boolean;
+}) {
   const task = dispatchPlan.task;
   const resource = dispatchPlan.resource;
+  const preparation = task?.preparation ?? null;
   const readinessDetails = formatReadinessDetails(dispatchPlan.readiness?.details);
 
   return (
@@ -916,7 +988,18 @@ function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPla
             {dispatchPlan.reason}
           </Text>
         </Box>
-        <DispatchStatusBadge status={dispatchPlan.status} />
+        <Group gap="sm" wrap="nowrap">
+          <AppButton
+            leftSection={<Link2 size={16} />}
+            variant="outline"
+            loading={pendingWorkerTick}
+            disabled={!task}
+            onClick={onRunWorkerPreflight}
+          >
+            准备链接
+          </AppButton>
+          <DispatchStatusBadge status={dispatchPlan.status} />
+        </Group>
       </Group>
 
       <Group gap="lg" mt="md" wrap="wrap">
@@ -925,6 +1008,14 @@ function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPla
         <CompactInfo label="资源" value={resource ? `${RESOURCE_TYPE_LABELS[resource.resourceType]} · ${resource.displayLabel}` : "暂无"} />
         <CompactInfo label="预检时间" value={formatDate(dispatchPlan.checkedAt)} />
       </Group>
+      {preparation && (
+        <Group gap="lg" mt="md" wrap="wrap">
+          <CompactInfo label="准备状态" value={PREPARATION_STATUS_CONFIG[preparation.status].label} />
+          <CompactInfo label="远端文件" value={preparation.remoteName ?? "未知文件"} />
+          <CompactInfo label="直链" value={preparation.rawUrlAvailable ? "已确认" : "未确认"} />
+          <CompactInfo label="准备时间" value={formatDate(preparation.preparedAt)} />
+        </Group>
+      )}
       {resource && (
         <Text size="xs" c="ink.5" mt="sm" style={{ overflowWrap: "anywhere" }}>
           {resource.redactedResource}
@@ -988,6 +1079,30 @@ function ResourceTypeBadge({ type }: { type: ComicResourceType }) {
 
 function StatusBadge({ status }: { status: DownloadTaskStatus }) {
   const config = TASK_STATUS_CONFIG[status];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
+function PreparationStatusBadge({ status }: { status: DownloadPreparationStatus }) {
+  const config = PREPARATION_STATUS_CONFIG[status];
 
   return (
     <Box
