@@ -1,8 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeSettings } from "@/modules/core/settings";
 
-import { checkOpenListConnection, hashOpenListPassword, loginOpenList } from "./connection";
+import type { DownloadProviderPrepareInput } from "../types";
+
+import { checkOpenListConnection, hashOpenListPassword, inspectOpenListResource, loginOpenList, normalizeOpenListResourcePath } from "./connection";
+import { openlistProviderAdapter } from "./index";
 
 describe("checkOpenListConnection", () => {
   it("does not call OpenList when provider is disabled", async () => {
@@ -146,6 +149,132 @@ describe("loginOpenList", () => {
   });
 });
 
+describe("normalizeOpenListResourcePath", () => {
+  it("accepts plain paths and openlist-prefixed paths", () => {
+    expect(normalizeOpenListResourcePath("Library/Comic.cbz")).toBe("/Library/Comic.cbz");
+    expect(normalizeOpenListResourcePath("openlist:/Library/Comic.cbz")).toBe("/Library/Comic.cbz");
+    expect(normalizeOpenListResourcePath("openlist://Cloud/Library/Comic%20A.cbz")).toBe("/Cloud/Library/Comic A.cbz");
+    expect(normalizeOpenListResourcePath("")).toBeNull();
+    expect(normalizeOpenListResourcePath("/")).toBeNull();
+  });
+});
+
+describe("inspectOpenListResource", () => {
+  it("posts to /api/fs/get and returns only safe resource metadata", async () => {
+    const requests: Array<{ body: Record<string, unknown>; authorization: string | null; method: string; url: string }> = [];
+    const result = await inspectOpenListResource("openlist:/Library/Comic.cbz", {
+      settings: runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244/root",
+        openlistEnabled: true,
+        openlistToken: "secret-openlist-token",
+      }),
+      fetchImpl: async (input, init) => {
+        requests.push({
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          authorization: new Headers(init?.headers).get("Authorization"),
+          method: init?.method ?? "GET",
+          url: String(input),
+        });
+        return Response.json({
+          code: 200,
+          data: {
+            is_dir: false,
+            modified: "2026-01-01T00:00:00Z",
+            name: "Comic.cbz",
+            provider: "Local",
+            raw_url: "https://private.example/download/Comic.cbz?sign=secret",
+            size: 2097152,
+            type: 4,
+          },
+          message: "success",
+        });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("file_ready");
+    expect(result.path).toBe("/Library/Comic.cbz");
+    expect(result.resource).toEqual({
+      isDirectory: false,
+      modifiedAt: "2026-01-01T00:00:00Z",
+      name: "Comic.cbz",
+      provider: "Local",
+      rawUrlAvailable: true,
+      sizeBytes: 2097152,
+      type: 4,
+    });
+    expect(requests[0]?.url).toBe("http://127.0.0.1:5244/root/api/fs/get");
+    expect(requests[0]?.method).toBe("POST");
+    expect(requests[0]?.authorization).toBe("secret-openlist-token");
+    expect(requests[0]?.body).toEqual({
+      page: 1,
+      password: "",
+      path: "/Library/Comic.cbz",
+      per_page: 0,
+      refresh: false,
+    });
+    expect(JSON.stringify(result)).not.toContain("secret-openlist-token");
+    expect(JSON.stringify(result)).not.toContain("private.example");
+    expect(JSON.stringify(result)).not.toContain("sign=secret");
+  });
+
+  it("reports missing remote files", async () => {
+    const result = await inspectOpenListResource("/Missing.cbz", {
+      settings: runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistEnabled: true,
+        openlistToken: "secret-openlist-token",
+      }),
+      fetchImpl: async () => Response.json({ code: 404, message: "object not found" }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("not_found");
+    expect(result.resource).toBeNull();
+  });
+});
+
+describe("openlistProviderAdapter.prepare", () => {
+  it("probes remote file metadata before reporting execution as not implemented", async () => {
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        Response.json({
+          code: 200,
+          data: {
+            is_dir: false,
+            name: "Comic.cbz",
+            provider: "Local",
+            raw_url: "https://download.example/Comic.cbz?sign=secret",
+            size: 1048576,
+            type: 4,
+          },
+          message: "success",
+        }),
+    );
+
+    try {
+      const input = providerPrepareInput();
+      const readiness = await openlistProviderAdapter.prepare(input);
+
+      expect(readiness.canDispatch).toBe(false);
+      expect(readiness.code).toBe("provider_not_implemented");
+      expect(readiness.reason).toContain("Comic.cbz");
+      expect(readiness.details).toEqual({
+        rawUrlAvailable: true,
+        remoteIsDirectory: false,
+        remoteName: "Comic.cbz",
+        remoteProvider: "Local",
+        remoteSizeBytes: 1048576,
+      });
+      expect(JSON.stringify(readiness)).not.toContain("secret-openlist-token");
+      expect(JSON.stringify(readiness)).not.toContain("download.example");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSettings {
   return {
     cacheDirectory: ".data/cache",
@@ -163,5 +292,42 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     readerThumbnailTtlDays: 30,
     themeMode: "light",
     ...overrides,
+  };
+}
+
+function providerPrepareInput(): DownloadProviderPrepareInput {
+  return {
+    resource: {
+      comicId: "comic-1",
+      comicTitle: "Comic",
+      displayLabel: "OpenList",
+      id: "resource-1",
+      redactedResource: "openlist:...",
+      resourceType: "openlist",
+      resourceUrl: "/Library/Comic.cbz",
+      sourceSite: "example",
+    },
+    settings: runtimeSettings({
+      openlistBaseUrl: "http://127.0.0.1:5244",
+      openlistEnabled: true,
+      openlistToken: "secret-openlist-token",
+    }),
+    task: {
+      comicId: "comic-1",
+      comicResourceId: "resource-1",
+      comicTitle: "Comic",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      errorMessage: null,
+      id: "task-1",
+      provider: "openlist",
+      redactedResource: "openlist:...",
+      resourceLabel: "OpenList",
+      resourceType: "openlist",
+      retryCount: 0,
+      sourceSite: "example",
+      status: "queued",
+      targetDirectory: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
   };
 }

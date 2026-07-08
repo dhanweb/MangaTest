@@ -8,7 +8,11 @@ export type DownloadProviderReadinessCode =
   | "provider_not_implemented"
   | "missing_settings"
   | "missing_resource"
-  | "incompatible_resource";
+  | "incompatible_resource"
+  | "remote_resource_directory"
+  | "remote_resource_missing_link"
+  | "remote_resource_not_found"
+  | "remote_resource_unavailable";
 
 export interface DownloadProviderResourceSnapshot {
   id: string;
@@ -32,6 +36,7 @@ export interface DownloadProviderReadiness {
   code: DownloadProviderReadinessCode;
   reason: string;
   missingSettings?: string[];
+  details?: Record<string, boolean | number | string | null>;
 }
 
 export interface DownloadProviderAdapter {

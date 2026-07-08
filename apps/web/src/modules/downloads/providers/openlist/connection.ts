@@ -6,6 +6,17 @@ export const OPENLIST_PASSWORD_HASH_SALT = "-https://github.com/alist-org/alist"
 
 export type OpenListConnectionStatus = "disabled" | "missing_settings" | "reachable" | "unauthorized" | "unreachable" | "invalid_response";
 export type OpenListLoginStatus = "missing_settings" | "success" | "unauthorized" | "unreachable" | "invalid_response";
+export type OpenListResourceProbeStatus =
+  | "disabled"
+  | "missing_settings"
+  | "missing_resource"
+  | "file_ready"
+  | "directory"
+  | "file_without_raw_url"
+  | "unauthorized"
+  | "not_found"
+  | "unreachable"
+  | "invalid_response";
 
 export interface OpenListConnectionCheckResult {
   ok: boolean;
@@ -27,6 +38,33 @@ export interface OpenListEndpointCheck {
 }
 
 interface OpenListConnectionCheckOptions {
+  fetchImpl?: typeof fetch;
+  settings?: RuntimeSettings;
+}
+
+export interface OpenListRemoteResource {
+  name: string;
+  sizeBytes: number | null;
+  isDirectory: boolean;
+  modifiedAt: string | null;
+  provider: string | null;
+  type: number | null;
+  rawUrlAvailable: boolean;
+}
+
+export interface OpenListResourceProbeResult {
+  ok: boolean;
+  status: OpenListResourceProbeStatus;
+  checkedAt: string;
+  baseUrl: string | null;
+  path: string | null;
+  tokenConfigured: boolean;
+  message: string;
+  resource: OpenListRemoteResource | null;
+  fileApi: OpenListEndpointCheck | null;
+}
+
+interface OpenListResourceProbeOptions {
   fetchImpl?: typeof fetch;
   settings?: RuntimeSettings;
 }
@@ -224,6 +262,143 @@ export async function loginOpenList(input: OpenListLoginInput, options: OpenList
   };
 }
 
+export async function inspectOpenListResource(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListResourceProbeResult> {
+  const settings = options.settings ?? (await getRuntimeSettings());
+  const checkedAt = new Date().toISOString();
+  const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
+  const token = settings.openlistToken.trim();
+  const tokenConfigured = token.length > 0;
+  const resourcePath = normalizeOpenListResourcePath(resourceUrl);
+
+  if (!settings.openlistEnabled) {
+    return {
+      ok: false,
+      status: "disabled",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList provider 尚未启用。",
+      resource: null,
+      fileApi: null,
+    };
+  }
+
+  if (!baseUrl || !tokenConfigured) {
+    return {
+      ok: false,
+      status: "missing_settings",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 资源预检需要服务地址和访问 token。",
+      resource: null,
+      fileApi: null,
+    };
+  }
+
+  if (!resourcePath) {
+    return {
+      ok: false,
+      status: "missing_resource",
+      checkedAt,
+      baseUrl,
+      path: null,
+      tokenConfigured,
+      message: "资源缺少 OpenList 路径。",
+      resource: null,
+      fileApi: null,
+    };
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const fileApi = await postOpenListFileGet(fetchImpl, buildOpenListUrl(baseUrl, "api/fs/get"), token, resourcePath);
+  const publicFileApi = toPublicEndpointCheck(fileApi);
+
+  if (fileApi.status === 401 || fileApi.status === 403) {
+    return {
+      ok: false,
+      status: "unauthorized",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList token 未通过认证。",
+      resource: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (fileApi.status === 404 || fileApi.code === 404 || isOpenListNotFoundMessage(fileApi.message)) {
+    return {
+      ok: false,
+      status: "not_found",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 路径不存在或当前账号不可见。",
+      resource: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (!fileApi.ok || !fileApi.resource) {
+    return {
+      ok: false,
+      status: fileApi.status == null ? "unreachable" : "invalid_response",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: fileApi.message ?? "OpenList 文件信息接口返回异常。",
+      resource: null,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (fileApi.resource.isDirectory) {
+    return {
+      ok: true,
+      status: "directory",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 路径是目录，后续需要进入云端目录扫描流程。",
+      resource: fileApi.resource,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (!fileApi.resource.rawUrlAvailable) {
+    return {
+      ok: true,
+      status: "file_without_raw_url",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 文件可访问，但响应中没有可用 raw_url。",
+      resource: fileApi.resource,
+      fileApi: publicFileApi,
+    };
+  }
+
+  return {
+    ok: true,
+    status: "file_ready",
+    checkedAt,
+    baseUrl,
+    path: resourcePath,
+    tokenConfigured,
+    message: "OpenList 文件路径可访问，并返回了可用 raw_url。",
+    resource: fileApi.resource,
+    fileApi: publicFileApi,
+  };
+}
+
 async function probeOpenListEndpoint(fetchImpl: typeof fetch, url: string, headers?: HeadersInit): Promise<OpenListEndpointCheck> {
   const endpoint = redactOpenListEndpoint(url);
 
@@ -252,6 +427,56 @@ async function probeOpenListEndpoint(fetchImpl: typeof fetch, url: string, heade
       status: null,
       code: null,
       message: error instanceof Error ? error.message : "OpenList 请求失败。",
+    };
+  }
+}
+
+async function postOpenListFileGet(
+  fetchImpl: typeof fetch,
+  url: string,
+  token: string,
+  resourcePath: string,
+): Promise<OpenListEndpointCheck & { resource: OpenListRemoteResource | null }> {
+  const endpoint = redactOpenListEndpoint(url);
+
+  try {
+    const response = await fetchImpl(url, {
+      body: JSON.stringify({
+        page: 1,
+        password: "",
+        path: resourcePath,
+        per_page: 0,
+        refresh: false,
+      }),
+      cache: "no-store",
+      headers: {
+        Authorization: token,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(5000),
+    });
+    const payload = await response.json().catch(() => null);
+    const payloadCode = typeof payload?.code === "number" ? payload.code : null;
+    const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
+    const resource = normalizeOpenListRemoteResource(payload?.data);
+
+    return {
+      endpoint,
+      ok: response.ok && (payloadCode == null || payloadCode === 200) && Boolean(resource),
+      status: response.status,
+      code: payloadCode,
+      message: payloadMessage,
+      resource,
+    };
+  } catch (error) {
+    return {
+      endpoint,
+      ok: false,
+      status: null,
+      code: null,
+      message: error instanceof Error ? error.message : "OpenList 文件信息请求失败。",
+      resource: null,
     };
   }
 }
@@ -303,6 +528,48 @@ export function hashOpenListPassword(password: string) {
   return createHash("sha256").update(`${password}${OPENLIST_PASSWORD_HASH_SALT}`).digest("hex");
 }
 
+export function normalizeOpenListResourcePath(value: string | null | undefined) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  let text = value.trim();
+  if (!text) {
+    return null;
+  }
+
+  if (/^openlist:\/\//i.test(text)) {
+    try {
+      const url = new URL(text);
+      text = `${url.hostname ? `/${url.hostname}` : ""}${url.pathname}`;
+    } catch {
+      return null;
+    }
+  } else if (/^openlist:/i.test(text)) {
+    text = text.slice(text.indexOf(":") + 1);
+  } else if (/^https?:\/\//i.test(text)) {
+    try {
+      text = new URL(text).pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  text = text.replace(/\\/g, "/").trim();
+
+  try {
+    text = decodeURIComponent(text);
+  } catch {
+    // Keep the original path if it contains a literal percent sequence.
+  }
+
+  if (!text || text === "/") {
+    return null;
+  }
+
+  return `/${text.replace(/^\/+/, "").replace(/\/{2,}/g, "/")}`;
+}
+
 function toPublicEndpointCheck(value: OpenListEndpointCheck): OpenListEndpointCheck {
   return {
     code: value.code,
@@ -311,6 +578,39 @@ function toPublicEndpointCheck(value: OpenListEndpointCheck): OpenListEndpointCh
     ok: value.ok,
     status: value.status,
   };
+}
+
+function normalizeOpenListRemoteResource(value: unknown): OpenListRemoteResource | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : null;
+  const isDirectory = typeof record.is_dir === "boolean" ? record.is_dir : null;
+
+  if (!name || isDirectory === null) {
+    return null;
+  }
+
+  return {
+    name,
+    sizeBytes: typeof record.size === "number" && Number.isFinite(record.size) ? Math.max(0, Math.trunc(record.size)) : null,
+    isDirectory,
+    modifiedAt: typeof record.modified === "string" && record.modified.trim() ? record.modified : null,
+    provider: typeof record.provider === "string" && record.provider.trim() ? record.provider : null,
+    type: typeof record.type === "number" && Number.isFinite(record.type) ? Math.trunc(record.type) : null,
+    rawUrlAvailable: typeof record.raw_url === "string" && record.raw_url.trim().length > 0,
+  };
+}
+
+function isOpenListNotFoundMessage(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const text = value.toLowerCase();
+  return text.includes("not found") || text.includes("no such") || text.includes("不存在");
 }
 
 function normalizeBaseUrl(value: string) {

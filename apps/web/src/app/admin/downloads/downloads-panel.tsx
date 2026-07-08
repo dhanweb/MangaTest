@@ -668,6 +668,7 @@ function TaskActions({
 function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPlan }) {
   const task = dispatchPlan.task;
   const resource = dispatchPlan.resource;
+  const readinessDetails = formatReadinessDetails(dispatchPlan.readiness?.details);
 
   return (
     <Box style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, padding: 16 }}>
@@ -693,6 +694,13 @@ function DispatchPlanPanel({ dispatchPlan }: { dispatchPlan: DownloadDispatchPla
         <Text size="xs" c="ink.5" mt="sm" style={{ overflowWrap: "anywhere" }}>
           {resource.redactedResource}
         </Text>
+      )}
+      {readinessDetails.length > 0 && (
+        <Group gap="lg" mt="md" wrap="wrap">
+          {readinessDetails.map((detail) => (
+            <CompactInfo key={detail.label} label={detail.label} value={detail.value} />
+          ))}
+        </Group>
       )}
     </Box>
   );
@@ -847,4 +855,47 @@ function formatDate(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatReadinessDetails(details: Record<string, boolean | number | string | null> | undefined) {
+  if (!details) {
+    return [];
+  }
+
+  const entries: Array<{ label: string; value: string }> = [];
+  const append = (key: string, label: string, formatter: (value: boolean | number | string | null) => string | null) => {
+    if (!(key in details)) {
+      return;
+    }
+
+    const value = formatter(details[key]);
+    if (value) {
+      entries.push({ label, value });
+    }
+  };
+
+  append("remoteName", "远端文件", (value) => (typeof value === "string" && value.trim() ? value : null));
+  append("remoteSizeBytes", "大小", (value) => (typeof value === "number" ? formatBytes(value) : null));
+  append("remoteProvider", "OpenList 存储", (value) => (typeof value === "string" && value.trim() ? value : null));
+  append("remoteIsDirectory", "类型", (value) => (typeof value === "boolean" ? (value ? "目录" : "文件") : null));
+  append("rawUrlAvailable", "直链", (value) => (typeof value === "boolean" ? (value ? "已返回" : "未返回") : null));
+
+  return entries;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) {
+    return `${value} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
