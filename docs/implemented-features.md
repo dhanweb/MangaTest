@@ -97,9 +97,10 @@ This document records features that are already implemented in `apps/web`.
 - OpenList cloud scan file entries can be imported as OpenList `comic_resource` records for the same comic without creating download tasks.
 - OpenList download worker preflight can persist per-task download preparation records for reachable file resources that expose a raw download URL, without storing the raw URL.
 - OpenList download worker execution can stream a prepared file resource into a local temporary download path under the configured cache directory without storing or returning the raw URL.
+- Completed OpenList temporary downloads can be moved into a local download inbox manga root and trigger a library scan for the finalized file.
 - Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
 - Download admin UI can cancel queued/running tasks and retry failed/canceled tasks without invoking provider execution.
-- Download admin UI can manually run the safe worker step and show each task's latest preparation and temporary download status.
+- Download admin UI can manually run the safe worker step and show each task's latest preparation, temporary download, and inbox finalization status.
 - Download admin UI shows recent task activity for create, cancel, and retry events.
 - Download admin UI shows the current worker dispatch preflight status for the next queued task.
 

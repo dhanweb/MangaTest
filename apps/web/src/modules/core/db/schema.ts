@@ -25,6 +25,7 @@ export const mediaAssetUses = ["cover", "list_thumbnail", "reader_thumbnail"] as
 export const cacheEntryKinds = ["archive_file_list", "page_image"] as const;
 export const cloudScanEntryKinds = ["file", "directory"] as const;
 export const cloudScanStatuses = ["running", "completed", "failed"] as const;
+export const downloadFinalizationStatuses = ["completed", "failed"] as const;
 export const downloadPreparationStatuses = ["ready", "blocked"] as const;
 export const downloadTransferStatuses = ["running", "completed", "failed"] as const;
 
@@ -359,6 +360,30 @@ export const downloadTaskTransfers = sqliteTable(
     providerStatusIdx: index("download_task_transfers_provider_status_idx").on(table.provider, table.status),
     resourceIdx: index("download_task_transfers_resource_idx").on(table.comicResourceId),
     taskIdx: uniqueIndex("download_task_transfers_task_idx").on(table.downloadTaskId),
+  }),
+);
+
+export const downloadTaskFinalizations = sqliteTable(
+  "download_task_finalizations",
+  {
+    id: text("id").primaryKey(),
+    downloadTaskId: text("download_task_id")
+      .notNull()
+      .references(() => downloadTasks.id),
+    comicResourceId: text("comic_resource_id").references(() => comicResources.id),
+    provider: text("provider").notNull(),
+    status: text("status", { enum: downloadFinalizationStatuses }).notNull(),
+    mangaRootId: text("manga_root_id").references(() => mangaRoots.id),
+    finalPath: text("final_path"),
+    scanSessionId: text("scan_session_id").references(() => scanSessions.id),
+    errorMessage: text("error_message"),
+    finalizedAt: text("finalized_at").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    providerStatusIdx: index("download_task_finalizations_provider_status_idx").on(table.provider, table.status),
+    resourceIdx: index("download_task_finalizations_resource_idx").on(table.comicResourceId),
+    taskIdx: uniqueIndex("download_task_finalizations_task_idx").on(table.downloadTaskId),
   }),
 );
 

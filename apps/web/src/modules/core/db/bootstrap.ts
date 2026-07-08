@@ -308,6 +308,30 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS download_task_transfers_provider_status_idx
       ON download_task_transfers (provider, status);
 
+    CREATE TABLE IF NOT EXISTS download_task_finalizations (
+      id TEXT PRIMARY KEY NOT NULL,
+      download_task_id TEXT NOT NULL REFERENCES download_tasks(id),
+      comic_resource_id TEXT REFERENCES comic_resources(id),
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL,
+      manga_root_id TEXT REFERENCES manga_roots(id),
+      final_path TEXT,
+      scan_session_id TEXT REFERENCES scan_sessions(id),
+      error_message TEXT,
+      finalized_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS download_task_finalizations_task_idx
+      ON download_task_finalizations (download_task_id);
+
+    CREATE INDEX IF NOT EXISTS download_task_finalizations_resource_idx
+      ON download_task_finalizations (comic_resource_id);
+
+    CREATE INDEX IF NOT EXISTS download_task_finalizations_provider_status_idx
+      ON download_task_finalizations (provider, status);
+
     CREATE TABLE IF NOT EXISTS cloud_scan_sessions (
       id TEXT PRIMARY KEY NOT NULL,
       provider TEXT NOT NULL,

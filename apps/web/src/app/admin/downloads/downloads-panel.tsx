@@ -11,6 +11,7 @@ import type {
   ComicResourceType,
   DownloadableResourceRecord,
   DownloadDispatchPlan,
+  DownloadFinalizationStatus,
   DownloadPreparationStatus,
   DownloadProvider,
   DownloadTaskEventOperation,
@@ -60,6 +61,11 @@ const PREPARATION_STATUS_CONFIG: Record<DownloadPreparationStatus, { label: stri
   ready: { label: "已准备", bg: "#e4f9ed", color: "#00894a" },
 };
 
+const FINALIZATION_STATUS_CONFIG: Record<DownloadFinalizationStatus, { label: string; bg: string; color: string }> = {
+  completed: { label: "已入库", bg: "#e4f9ed", color: "#00894a" },
+  failed: { label: "入库失败", bg: "#ffe1e1", color: "#d93a4e" },
+};
+
 const TRANSFER_STATUS_CONFIG: Record<DownloadTransferStatus, { label: string; bg: string; color: string }> = {
   completed: { label: "临时完成", bg: "#e4f9ed", color: "#00894a" },
   failed: { label: "临时失败", bg: "#ffe1e1", color: "#d93a4e" },
@@ -76,6 +82,7 @@ type DownloadsApiResponse = {
   cloudScans?: CloudScanSessionRecord[];
   createdCount?: number;
   executed?: boolean;
+  finalization?: DownloadWorkerTickResult["finalization"];
   resources?: DownloadableResourceRecord[];
   dispatchPlan?: DownloadDispatchPlan;
   events?: DownloadTaskEventRecord[];
@@ -174,6 +181,8 @@ export function DownloadsPanel({
         task.preparation?.remoteName ?? "",
         task.transfer ? TRANSFER_STATUS_CONFIG[task.transfer.status].label : "",
         task.transfer?.fileName ?? "",
+        task.finalization ? FINALIZATION_STATUS_CONFIG[task.finalization.status].label : "",
+        task.finalization?.finalPath ?? "",
       ]
         .join(" ")
         .toLowerCase()
@@ -227,6 +236,7 @@ export function DownloadsPanel({
   const failedTaskCount = taskItems.filter((task) => task.status === "failed").length;
   const preparedTaskCount = taskItems.filter((task) => task.preparation?.status === "ready").length;
   const completedTransferCount = taskItems.filter((task) => task.transfer?.status === "completed").length;
+  const finalizedTaskCount = taskItems.filter((task) => task.finalization?.status === "completed").length;
   const canCreateSelectedTask = Boolean(selectedResource && selectedResource.activeTaskCount === 0 && !pendingResourceId);
 
   function changeSelectedResource(resourceId: string | null) {
@@ -426,6 +436,7 @@ export function DownloadsPanel({
         <Stat label="活动任务" value={activeTaskCount} color="#2563eb" />
         <Stat label="已准备链接" value={preparedTaskCount} color="#00894a" />
         <Stat label="临时文件" value={completedTransferCount} color="#4f46e5" />
+        <Stat label="已入库" value={finalizedTaskCount} color="#00894a" />
         <Stat label="失败任务" value={failedTaskCount} color="#d93a4e" />
         <Stat label="云端扫描" value={cloudScanItems.length} color="#00894a" />
         <Stat label="任务总数" value={taskItems.length} color="#4f46e5" />
@@ -787,6 +798,14 @@ export function DownloadsPanel({
                             </Text>
                           </Box>
                         )}
+                        {task.finalization && (
+                          <Box>
+                            <FinalizationStatusBadge status={task.finalization.status} />
+                            <Text size="xs" c="ink.5" mt={3} style={{ overflowWrap: "anywhere" }}>
+                              {task.finalization.finalPath ?? task.finalization.errorMessage ?? "等待入库"}
+                            </Text>
+                          </Box>
+                        )}
                       </Stack>
                     </Table.Td>
                     <Table.Td>
@@ -997,6 +1016,7 @@ function DispatchPlanPanel({
 }) {
   const task = dispatchPlan.task;
   const resource = dispatchPlan.resource;
+  const finalization = task?.finalization ?? null;
   const preparation = task?.preparation ?? null;
   const transfer = task?.transfer ?? null;
   const readinessDetails = formatReadinessDetails(dispatchPlan.readiness?.details);
@@ -1046,6 +1066,14 @@ function DispatchPlanPanel({
           <CompactInfo label="临时文件" value={transfer.fileName ?? "暂无"} />
           <CompactInfo label="已写入" value={formatBytes(transfer.bytesWritten)} />
           <CompactInfo label="完成时间" value={transfer.finishedAt ? formatDate(transfer.finishedAt) : "进行中"} />
+        </Group>
+      )}
+      {finalization && (
+        <Group gap="lg" mt="md" wrap="wrap">
+          <CompactInfo label="入库状态" value={FINALIZATION_STATUS_CONFIG[finalization.status].label} />
+          <CompactInfo label="入库路径" value={finalization.finalPath ?? "暂无"} />
+          <CompactInfo label="扫描批次" value={finalization.scanSessionId ?? "暂无"} />
+          <CompactInfo label="入库时间" value={formatDate(finalization.finalizedAt)} />
         </Group>
       )}
       {resource && (
@@ -1135,6 +1163,30 @@ function StatusBadge({ status }: { status: DownloadTaskStatus }) {
 
 function PreparationStatusBadge({ status }: { status: DownloadPreparationStatus }) {
   const config = PREPARATION_STATUS_CONFIG[status];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        height: 24,
+        padding: "0 8px",
+        borderRadius: 7,
+        fontWeight: 900,
+        fontSize: 12,
+        whiteSpace: "nowrap",
+        background: config.bg,
+        color: config.color,
+      }}
+    >
+      {config.label}
+    </Box>
+  );
+}
+
+function FinalizationStatusBadge({ status }: { status: DownloadFinalizationStatus }) {
+  const config = FINALIZATION_STATUS_CONFIG[status];
 
   return (
     <Box

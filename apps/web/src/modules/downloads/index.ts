@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, rename, rm, stat } from "node:fs/promises";
+import { access, copyFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -15,6 +15,7 @@ import {
   comicResources,
   comics,
   comicSources,
+  downloadTaskFinalizations,
   downloadTaskPreparations,
   downloadTaskTransfers,
   downloadTasks,
@@ -22,6 +23,7 @@ import {
   operationLogs,
 } from "@/modules/core/db";
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
+import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
 
 import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink } from "./providers/openlist/connection";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
@@ -35,6 +37,9 @@ export type DownloadProvider = (typeof DOWNLOAD_PROVIDERS)[number];
 
 export const DOWNLOAD_TASK_STATUSES = ["queued", "running", "failed", "completed", "cancel_requested", "canceled"] as const;
 export type DownloadTaskStatus = (typeof DOWNLOAD_TASK_STATUSES)[number];
+
+export const DOWNLOAD_FINALIZATION_STATUSES = ["completed", "failed"] as const;
+export type DownloadFinalizationStatus = (typeof DOWNLOAD_FINALIZATION_STATUSES)[number];
 
 export const DOWNLOAD_PREPARATION_STATUSES = ["ready", "blocked"] as const;
 export type DownloadPreparationStatus = (typeof DOWNLOAD_PREPARATION_STATUSES)[number];
@@ -100,8 +105,24 @@ export interface DownloadTaskRecord {
   retryCount: number;
   createdAt: string;
   updatedAt: string;
+  finalization?: DownloadTaskFinalizationRecord | null;
   preparation?: DownloadTaskPreparationRecord | null;
   transfer?: DownloadTaskTransferRecord | null;
+}
+
+export interface DownloadTaskFinalizationRecord {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: DownloadProvider;
+  status: DownloadFinalizationStatus;
+  mangaRootId: string | null;
+  finalPath: string | null;
+  scanSessionId: string | null;
+  errorMessage: string | null;
+  finalizedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DownloadTaskPreparationRecord {
@@ -230,6 +251,7 @@ export interface DownloadDispatchPlan {
 
 export interface DownloadWorkerTickResult {
   executed: boolean;
+  finalization: DownloadTaskFinalizationRecord | null;
   reason: string;
   plan: DownloadDispatchPlan;
   transfer: DownloadTaskTransferRecord | null;
@@ -259,6 +281,7 @@ const COMPATIBLE_PROVIDERS: Record<ComicResourceType, DownloadProvider[]> = {
 };
 
 const ACTIVE_TASK_STATUSES: DownloadTaskStatus[] = ["queued", "running", "cancel_requested"];
+const DOWNLOAD_IMPORT_DIRECTORY_NAME = "下载入库";
 const OPENLIST_CLOUD_SCAN_MAX_PAGES = 5;
 const OPENLIST_CLOUD_SCAN_PER_PAGE = 50;
 
@@ -376,7 +399,7 @@ export async function listDownloadTasks(limit = 100): Promise<DownloadTaskRecord
     updatedAt: row.updatedAt,
   }));
 
-  return attachDownloadTaskTransfers(attachDownloadTaskPreparations(tasks));
+  return attachDownloadTaskFinalizations(attachDownloadTaskTransfers(attachDownloadTaskPreparations(tasks)));
 }
 
 export async function listDownloadTaskEvents(limit = 20): Promise<DownloadTaskEventRecord[]> {
@@ -749,6 +772,31 @@ export async function planNextDownloadDispatch(): Promise<DownloadDispatchPlan> 
 }
 
 export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult> {
+  bootstrapDatabase();
+
+  const pendingFinalization = getNextPendingDownloadFinalization();
+  if (pendingFinalization) {
+    const finalization = await finalizeDownloadedTask(pendingFinalization.task, pendingFinalization.transfer);
+    const updatedTask = getDownloadTaskById(pendingFinalization.task.id);
+
+    return {
+      executed: finalization.status === "completed",
+      finalization,
+      reason:
+        finalization.status === "completed"
+          ? "下载临时文件已移动到入库目录，并已触发漫画库扫描。"
+          : finalization.errorMessage ?? "下载临时文件入库失败。",
+      plan: createDownloadDispatchPlan({
+        status: finalization.status === "completed" ? "ready" : "blocked",
+        reason: finalization.status === "completed" ? "下载临时文件已入库并扫描。" : finalization.errorMessage ?? "下载临时文件入库失败。",
+        provider: pendingFinalization.task.provider,
+        task: updatedTask ?? pendingFinalization.task,
+        resource: pendingFinalization.resource,
+      }),
+      transfer: pendingFinalization.transfer,
+    };
+  }
+
   const plan = await planNextDownloadDispatch();
   const preparation = persistDownloadTaskPreparationFromPlan(plan);
   const preparedPlan =
@@ -774,9 +822,10 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
 
     return {
       executed: transfer.status === "completed",
+      finalization: null,
       reason:
         transfer.status === "completed"
-          ? "OpenList 文件已下载到本地临时文件，等待后续入库流程接入。"
+          ? "OpenList 文件已下载到本地临时文件，等待下一次 worker 入库扫描。"
           : transfer.errorMessage ?? "OpenList 临时文件下载失败。",
       plan: transferPlan,
       transfer,
@@ -785,6 +834,7 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
 
   return {
     executed: false,
+    finalization: preparedPlan.task?.finalization ?? null,
     reason:
       preparation?.status === "ready"
         ? "OpenList 下载链接准备已记录，真实下载执行尚未接入。"
@@ -894,6 +944,9 @@ export async function retryDownloadTask(taskId: string): Promise<UpdateDownloadT
   }
 
   const now = new Date().toISOString();
+  getDb().delete(downloadTaskFinalizations).where(eq(downloadTaskFinalizations.downloadTaskId, id)).run();
+  getDb().delete(downloadTaskTransfers).where(eq(downloadTaskTransfers.downloadTaskId, id)).run();
+  getDb().delete(downloadTaskPreparations).where(eq(downloadTaskPreparations.downloadTaskId, id)).run();
   getDb()
     .update(downloadTasks)
     .set({
@@ -1023,6 +1076,7 @@ function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
 
   return {
     ...task,
+    finalization: getDownloadTaskFinalizationByTaskId(task.id),
     preparation: getDownloadTaskPreparationByTaskId(task.id),
     transfer: getDownloadTaskTransferByTaskId(task.id),
   };
@@ -1456,6 +1510,323 @@ function markDownloadTaskFinished(taskId: string, status: Extract<DownloadTaskSt
     })
     .where(eq(downloadTasks.id, taskId))
     .run();
+}
+
+function getNextPendingDownloadFinalization() {
+  const row = getDb()
+    .select({
+      taskId: downloadTaskTransfers.downloadTaskId,
+    })
+    .from(downloadTaskTransfers)
+    .where(
+      sql`${downloadTaskTransfers.status} = 'completed' and not exists (
+        select 1 from download_task_finalizations
+        where download_task_finalizations.download_task_id = ${downloadTaskTransfers.downloadTaskId}
+      )`,
+    )
+    .orderBy(downloadTaskTransfers.updatedAt)
+    .limit(1)
+    .get();
+
+  if (!row) {
+    return null;
+  }
+
+  const task = getDownloadTaskById(row.taskId);
+  const transfer = getDownloadTaskTransferByTaskId(row.taskId);
+
+  if (!task || !transfer || transfer.status !== "completed") {
+    return null;
+  }
+
+  const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
+
+  return {
+    task,
+    transfer,
+    resource: resource ? toDownloadDispatchResourceRecord(resource) : null,
+  };
+}
+
+async function finalizeDownloadedTask(task: DownloadTaskRecord, transfer: DownloadTaskTransferRecord): Promise<DownloadTaskFinalizationRecord> {
+  const finalizedAt = new Date().toISOString();
+
+  try {
+    if (!transfer.tempFilePath) {
+      throw new Error("下载临时文件路径缺失。");
+    }
+
+    const settings = await getRuntimeSettings();
+    const tempDirectory = resolveDownloadTaskTempDirectory(settings, task.id);
+    const tempFilePath = path.resolve(transfer.tempFilePath);
+
+    assertPathInside(tempDirectory, tempFilePath);
+    await stat(tempFilePath);
+
+    const importRoot = await resolveDownloadImportRoot(task);
+    const finalPath = await resolveUniqueFinalDownloadPath(importRoot.absolutePath, task, transfer);
+
+    assertPathInside(importRoot.absolutePath, finalPath);
+    await mkdir(path.dirname(finalPath), { recursive: true });
+    await moveFileAcrossDevices(tempFilePath, finalPath);
+
+    const scanResult = await scanMangaRoot(importRoot.id);
+    const finalization = upsertDownloadTaskFinalization({
+      comicResourceId: task.comicResourceId || null,
+      downloadTaskId: task.id,
+      errorMessage: null,
+      finalPath,
+      finalizedAt,
+      mangaRootId: importRoot.id,
+      provider: task.provider,
+      scanSessionId: scanResult.sessionId,
+      status: "completed",
+    });
+    markDownloadTaskFinished(task.id, "completed", null, finalizedAt);
+
+    return finalization;
+  } catch (error) {
+    const message = toSafeDownloadErrorMessage(error);
+    const finalization = upsertDownloadTaskFinalization({
+      comicResourceId: task.comicResourceId || null,
+      downloadTaskId: task.id,
+      errorMessage: message,
+      finalPath: null,
+      finalizedAt,
+      mangaRootId: null,
+      provider: task.provider,
+      scanSessionId: null,
+      status: "failed",
+    });
+    markDownloadTaskFinished(task.id, "failed", message, finalizedAt);
+
+    return finalization;
+  }
+}
+
+function attachDownloadTaskFinalizations(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
+  if (tasks.length === 0) {
+    return tasks;
+  }
+
+  const finalizationsByTaskId = listDownloadTaskFinalizationMap(tasks.map((task) => task.id));
+
+  return tasks.map((task) => ({
+    ...task,
+    finalization: finalizationsByTaskId.get(task.id) ?? null,
+  }));
+}
+
+function listDownloadTaskFinalizationMap(taskIds: string[]) {
+  const rows = getDb()
+    .select({
+      id: downloadTaskFinalizations.id,
+      downloadTaskId: downloadTaskFinalizations.downloadTaskId,
+      comicResourceId: downloadTaskFinalizations.comicResourceId,
+      provider: downloadTaskFinalizations.provider,
+      status: downloadTaskFinalizations.status,
+      mangaRootId: downloadTaskFinalizations.mangaRootId,
+      finalPath: downloadTaskFinalizations.finalPath,
+      scanSessionId: downloadTaskFinalizations.scanSessionId,
+      errorMessage: downloadTaskFinalizations.errorMessage,
+      finalizedAt: downloadTaskFinalizations.finalizedAt,
+      createdAt: downloadTaskFinalizations.createdAt,
+      updatedAt: downloadTaskFinalizations.updatedAt,
+    })
+    .from(downloadTaskFinalizations)
+    .where(inArray(downloadTaskFinalizations.downloadTaskId, taskIds))
+    .all();
+
+  return new Map(rows.map((row) => [row.downloadTaskId, mapDownloadTaskFinalizationRow(row)]));
+}
+
+function getDownloadTaskFinalizationByTaskId(downloadTaskId: string): DownloadTaskFinalizationRecord | null {
+  const row = getDb()
+    .select({
+      id: downloadTaskFinalizations.id,
+      downloadTaskId: downloadTaskFinalizations.downloadTaskId,
+      comicResourceId: downloadTaskFinalizations.comicResourceId,
+      provider: downloadTaskFinalizations.provider,
+      status: downloadTaskFinalizations.status,
+      mangaRootId: downloadTaskFinalizations.mangaRootId,
+      finalPath: downloadTaskFinalizations.finalPath,
+      scanSessionId: downloadTaskFinalizations.scanSessionId,
+      errorMessage: downloadTaskFinalizations.errorMessage,
+      finalizedAt: downloadTaskFinalizations.finalizedAt,
+      createdAt: downloadTaskFinalizations.createdAt,
+      updatedAt: downloadTaskFinalizations.updatedAt,
+    })
+    .from(downloadTaskFinalizations)
+    .where(eq(downloadTaskFinalizations.downloadTaskId, downloadTaskId))
+    .get();
+
+  return row ? mapDownloadTaskFinalizationRow(row) : null;
+}
+
+function mapDownloadTaskFinalizationRow(row: {
+  id: string;
+  downloadTaskId: string;
+  comicResourceId: string | null;
+  provider: string;
+  status: string;
+  mangaRootId: string | null;
+  finalPath: string | null;
+  scanSessionId: string | null;
+  errorMessage: string | null;
+  finalizedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}): DownloadTaskFinalizationRecord {
+  return {
+    id: row.id,
+    downloadTaskId: row.downloadTaskId,
+    comicResourceId: row.comicResourceId,
+    provider: normalizeProvider(row.provider),
+    status: normalizeDownloadFinalizationStatus(row.status),
+    mangaRootId: row.mangaRootId,
+    finalPath: row.finalPath,
+    scanSessionId: row.scanSessionId,
+    errorMessage: row.errorMessage,
+    finalizedAt: row.finalizedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function upsertDownloadTaskFinalization(input: {
+  comicResourceId: string | null;
+  downloadTaskId: string;
+  errorMessage: string | null;
+  finalPath: string | null;
+  finalizedAt: string;
+  mangaRootId: string | null;
+  provider: DownloadProvider;
+  scanSessionId: string | null;
+  status: DownloadFinalizationStatus;
+}) {
+  const now = new Date().toISOString();
+  const existing = getDb()
+    .select({ id: downloadTaskFinalizations.id })
+    .from(downloadTaskFinalizations)
+    .where(eq(downloadTaskFinalizations.downloadTaskId, input.downloadTaskId))
+    .get();
+  const values = {
+    comicResourceId: input.comicResourceId,
+    downloadTaskId: input.downloadTaskId,
+    errorMessage: input.errorMessage,
+    finalPath: input.finalPath,
+    finalizedAt: input.finalizedAt,
+    mangaRootId: input.mangaRootId,
+    provider: input.provider,
+    scanSessionId: input.scanSessionId,
+    status: input.status,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    getDb().update(downloadTaskFinalizations).set(values).where(eq(downloadTaskFinalizations.id, existing.id)).run();
+  } else {
+    getDb()
+      .insert(downloadTaskFinalizations)
+      .values({
+        ...values,
+        id: randomUUID(),
+      })
+      .run();
+  }
+
+  const finalization = getDownloadTaskFinalizationByTaskId(input.downloadTaskId);
+  if (!finalization) {
+    throw new Error("读取下载入库记录失败。");
+  }
+
+  return finalization;
+}
+
+async function resolveDownloadImportRoot(task: DownloadTaskRecord): Promise<MangaRootRecord> {
+  const repository = createMangaRootRepository();
+  const roots = await repository.list();
+  const targetDirectory = normalizeTargetDirectory(task.targetDirectory);
+  const importRootPath =
+    targetDirectory ??
+    (() => {
+      const enabledRoots = roots.filter((root) => root.isEnabled);
+      const baseRoot = enabledRoots.find((root) => path.basename(root.absolutePath) !== DOWNLOAD_IMPORT_DIRECTORY_NAME) ?? enabledRoots[0];
+
+      if (!baseRoot) {
+        throw new Error("没有可用的 manga root，无法确定下载入库目录。");
+      }
+
+      return path.join(baseRoot.absolutePath, DOWNLOAD_IMPORT_DIRECTORY_NAME);
+    })();
+  const normalizedImportRootPath = path.resolve(importRootPath);
+  const existingRoot = roots.find((root) => path.resolve(root.absolutePath) === normalizedImportRootPath);
+
+  if (existingRoot) {
+    if (!existingRoot.isEnabled) {
+      throw new Error("下载入库目录对应的 manga root 已停用。");
+    }
+
+    return existingRoot;
+  }
+
+  await mkdir(normalizedImportRootPath, { recursive: true });
+
+  return repository.create({
+    absolutePath: normalizedImportRootPath,
+    displayName: DOWNLOAD_IMPORT_DIRECTORY_NAME,
+  });
+}
+
+async function resolveUniqueFinalDownloadPath(importRootPath: string, task: DownloadTaskRecord, transfer: DownloadTaskTransferRecord) {
+  const fileName = sanitizeDownloadFileName(transfer.fileName ?? task.resourceLabel);
+  const extension = path.extname(fileName).toLowerCase();
+  const title = sanitizeDownloadFileName(task.comicTitle);
+  const candidate =
+    extension === ".zip" || extension === ".cbz"
+      ? path.join(importRootPath, `${title}${extension}`)
+      : path.join(importRootPath, title, fileName);
+
+  return resolveUniquePath(candidate);
+}
+
+async function resolveUniquePath(candidatePath: string) {
+  const extension = path.extname(candidatePath);
+  const basename = path.basename(candidatePath, extension);
+  const directory = path.dirname(candidatePath);
+  let currentPath = candidatePath;
+
+  for (let index = 1; await pathExists(currentPath); index += 1) {
+    currentPath = path.join(directory, `${basename} (${index})${extension}`);
+  }
+
+  return currentPath;
+}
+
+async function pathExists(value: string) {
+  try {
+    await access(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function moveFileAcrossDevices(sourcePath: string, targetPath: string) {
+  try {
+    await rename(sourcePath, targetPath);
+  } catch (error) {
+    if (!isCrossDeviceMoveError(error)) {
+      throw error;
+    }
+
+    await copyFile(sourcePath, targetPath);
+    await rm(sourcePath, { force: true });
+  }
+}
+
+function isCrossDeviceMoveError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === "EXDEV");
 }
 
 function getCloudScanSessionById(sessionId: string): CloudScanSessionRecord | null {
@@ -1909,6 +2280,14 @@ function normalizeDownloadTaskStatus(value: unknown): DownloadTaskStatus {
   throw new Error("下载任务状态无效。");
 }
 
+function normalizeDownloadFinalizationStatus(value: unknown): DownloadFinalizationStatus {
+  if (isDownloadFinalizationStatus(value)) {
+    return value;
+  }
+
+  throw new Error("下载入库状态无效。");
+}
+
 function normalizeDownloadPreparationStatus(value: unknown): DownloadPreparationStatus {
   if (isDownloadPreparationStatus(value)) {
     return value;
@@ -1955,6 +2334,10 @@ function isDownloadProvider(value: unknown): value is DownloadProvider {
 
 function isDownloadTaskStatus(value: unknown): value is DownloadTaskStatus {
   return DOWNLOAD_TASK_STATUSES.includes(value as DownloadTaskStatus);
+}
+
+function isDownloadFinalizationStatus(value: unknown): value is DownloadFinalizationStatus {
+  return DOWNLOAD_FINALIZATION_STATUSES.includes(value as DownloadFinalizationStatus);
 }
 
 function isDownloadPreparationStatus(value: unknown): value is DownloadPreparationStatus {

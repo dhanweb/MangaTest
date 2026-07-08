@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const ARCHIVE_FIXTURE_BASE64 =
+  "UEsDBBQAAAAIADGf4lxruW0fGAAAABYAAAAHAAAAMDAxLmpwZ0tLzE5VSCxKzsgsS1XIzE1MT1Uw5OUCAFBLAwQUAAAACAAxn+JcMgcrHRgAAAAWAAAABwAAADAwMi5wbmdLS8xOVUgsSs7ILEtVyMxNTE9VMOLlAgBQSwECFAAUAAAACAAxn+Jca7ltHxgAAAAWAAAABwAAAAAAAAAAAAAAAAAAAAAAMDAxLmpwZ1BLAQIUABQAAAAIADGf4lwyBysdGAAAABYAAAAHAAAAAAAAAAAAAAAAAD0AAAAwMDIucG5nUEsFBgAAAAACAAIAagAAAHoAAAAAAA==";
 
 describe("OpenList download preparations", () => {
   beforeEach(() => {
@@ -19,6 +22,7 @@ describe("OpenList download preparations", () => {
 
   it("persists a ready preparation and downloads the file to a safe temporary path", async () => {
     const requests: Array<{ authorization: string | null; body: Record<string, unknown>; method: string; url: string }> = [];
+    const archiveFixture = Buffer.from(ARCHIVE_FIXTURE_BASE64, "base64");
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       if (String(input).startsWith("https://private.example/")) {
         requests.push({
@@ -28,9 +32,9 @@ describe("OpenList download preparations", () => {
           url: String(input),
         });
 
-        return new Response(Buffer.from("comic-data"), {
+        return new Response(archiveFixture, {
           headers: {
-            "content-length": "10",
+            "content-length": String(archiveFixture.length),
             "content-type": "application/x-cbz",
           },
         });
@@ -62,14 +66,18 @@ describe("OpenList download preparations", () => {
     const { listDownloadTasks, runDownloadWorkerTick } = await import("./index");
 
     const tick = await runDownloadWorkerTick();
-    const tasks = await listDownloadTasks();
     const row = selectPreparation(sqlite, task.id);
     const transferRow = selectTransfer(sqlite, task.id);
     const tempFilePath = String(transferRow?.temp_file_path ?? "");
-    const tempFileContent = await readFile(tempFilePath, "utf8");
+    const tempFileContent = await readFile(tempFilePath);
+    const finalizeTick = await runDownloadWorkerTick();
+    const tasks = await listDownloadTasks();
+    const finalizationRow = selectFinalization(sqlite, task.id);
+    const finalPath = String(finalizationRow?.final_path ?? "");
+    const finalFileStat = await stat(finalPath);
 
     expect(tick.executed).toBe(true);
-    expect(tick.reason).toBe("OpenList 文件已下载到本地临时文件，等待后续入库流程接入。");
+    expect(tick.reason).toBe("OpenList 文件已下载到本地临时文件，等待下一次 worker 入库扫描。");
     expect(tick.plan.task?.preparation).toMatchObject({
       downloadTaskId: task.id,
       provider: "openlist",
@@ -81,7 +89,7 @@ describe("OpenList download preparations", () => {
       status: "ready",
     });
     expect(tick.transfer).toMatchObject({
-      bytesWritten: 10,
+      bytesWritten: archiveFixture.length,
       contentType: "application/x-cbz",
       downloadTaskId: task.id,
       fileName: "Comic.cbz",
@@ -89,9 +97,17 @@ describe("OpenList download preparations", () => {
       sizeBytes: 1048576,
       status: "completed",
     });
+    expect(finalizeTick.executed).toBe(true);
+    expect(finalizeTick.reason).toBe("下载临时文件已移动到入库目录，并已触发漫画库扫描。");
+    expect(finalizeTick.finalization).toMatchObject({
+      downloadTaskId: task.id,
+      provider: "openlist",
+      status: "completed",
+    });
     expect(tasks[0]?.preparation?.status).toBe("ready");
     expect(tasks[0]?.status).toBe("completed");
     expect(tasks[0]?.transfer?.status).toBe("completed");
+    expect(tasks[0]?.finalization?.status).toBe("completed");
     expect(row).toMatchObject({
       download_task_id: task.id,
       provider: "openlist",
@@ -101,15 +117,25 @@ describe("OpenList download preparations", () => {
       status: "ready",
     });
     expect(transferRow).toMatchObject({
-      bytes_written: 10,
+      bytes_written: archiveFixture.length,
       content_type: "application/x-cbz",
       download_task_id: task.id,
       file_name: "Comic.cbz",
       provider: "openlist",
       status: "completed",
     });
+    expect(finalizationRow).toMatchObject({
+      download_task_id: task.id,
+      provider: "openlist",
+      status: "completed",
+    });
     expect(tempFilePath).toContain(path.join("downloads", "tmp", task.id));
-    expect(tempFileContent).toBe("comic-data");
+    expect(tempFileContent.equals(archiveFixture)).toBe(true);
+    expect(finalPath).toContain(path.join("Root", "下载入库", "OpenList Comic.cbz"));
+    expect(finalFileStat.size).toBe(archiveFixture.length);
+    expect(countRows(sqlite, "manga_roots", "absolute_path like '%下载入库'")).toBe(1);
+    expect(countRows(sqlite, "local_files", "relative_path = 'OpenList Comic.cbz'")).toBe(1);
+    expect(countRows(sqlite, "pages")).toBe(2);
     expect(requests).toHaveLength(3);
     expect(requests[0]).toMatchObject({
       authorization: "secret-openlist-token",
@@ -128,10 +154,14 @@ describe("OpenList download preparations", () => {
     expect(JSON.stringify(tick)).not.toContain("secret-openlist-token");
     expect(JSON.stringify(tick)).not.toContain("private.example");
     expect(JSON.stringify(tick)).not.toContain("sign=secret");
+    expect(JSON.stringify(finalizeTick)).not.toContain("private.example");
+    expect(JSON.stringify(finalizeTick)).not.toContain("sign=secret");
     expect(JSON.stringify(row)).not.toContain("private.example");
     expect(JSON.stringify(row)).not.toContain("sign=secret");
     expect(JSON.stringify(transferRow)).not.toContain("private.example");
     expect(JSON.stringify(transferRow)).not.toContain("sign=secret");
+    expect(JSON.stringify(finalizationRow)).not.toContain("private.example");
+    expect(JSON.stringify(finalizationRow)).not.toContain("sign=secret");
   });
 
   it("records a blocked preparation for directories without executing downloads", async () => {
@@ -194,6 +224,89 @@ describe("OpenList download preparations", () => {
     expect(selectDownloadTaskStatus(sqlite, task.id)).toBe("queued");
   });
 
+  it("records a failed finalization when the import manga root becomes unavailable", async () => {
+    const archiveFixture = Buffer.from(ARCHIVE_FIXTURE_BASE64, "base64");
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      if (String(input).startsWith("https://private.example/")) {
+        return new Response(archiveFixture, {
+          headers: {
+            "content-length": String(archiveFixture.length),
+            "content-type": "application/x-cbz",
+          },
+        });
+      }
+
+      return Response.json({
+        code: 200,
+        data: {
+          is_dir: false,
+          modified: "2026-01-01T00:00:00Z",
+          name: "Comic.cbz",
+          provider: "Local",
+          raw_url: "https://private.example/download/Comic.cbz?sign=secret",
+          size: 1048576,
+          type: 4,
+        },
+        message: "success",
+      });
+    });
+
+    const { sqlite, task } = await seedOpenListTask("/Library/Comic.cbz");
+    const { listDownloadTasks, runDownloadWorkerTick } = await import("./index");
+
+    await runDownloadWorkerTick();
+
+    const transferRow = selectTransfer(sqlite, task.id);
+    const tempFilePath = String(transferRow?.temp_file_path ?? "");
+    const tempFileStat = await stat(tempFilePath);
+
+    // Simulate the import root becoming unavailable before the finalization tick.
+    sqlite.prepare("update manga_roots set is_enabled = 0").run();
+
+    const finalizeTick = await runDownloadWorkerTick();
+    const tasks = await listDownloadTasks();
+    const finalizationRow = selectFinalization(sqlite, task.id);
+
+    expect(finalizeTick.executed).toBe(false);
+    expect(finalizeTick.reason).toBe("没有可用的 manga root，无法确定下载入库目录。");
+    expect(finalizeTick.finalization).toMatchObject({
+      downloadTaskId: task.id,
+      provider: "openlist",
+      status: "failed",
+      finalPath: null,
+      errorMessage: "没有可用的 manga root，无法确定下载入库目录。",
+    });
+    expect(tasks[0]?.status).toBe("failed");
+    expect(tasks[0]?.finalization?.status).toBe("failed");
+    expect(finalizationRow).toMatchObject({
+      download_task_id: task.id,
+      provider: "openlist",
+      status: "failed",
+      final_path: null,
+      error_message: "没有可用的 manga root，无法确定下载入库目录。",
+    });
+    // The temporary file must remain intact when finalization fails so a later
+    // retry can move it into the inbox without re-downloading.
+    await expect(stat(tempFilePath)).resolves.toMatchObject({ size: tempFileStat.size });
+    expect(countRows(sqlite, "local_files")).toBe(0);
+    expect(countRows(sqlite, "pages")).toBe(0);
+
+    // Retry clears the failed finalization so the next transfer can be finalized again.
+    sqlite.prepare("update manga_roots set is_enabled = 1").run();
+    const { retryDownloadTask } = await import("./index");
+    await retryDownloadTask(task.id);
+
+    expect(selectFinalization(sqlite, task.id)).toBeUndefined();
+    expect(selectTransfer(sqlite, task.id)).toBeUndefined();
+    expect(selectPreparation(sqlite, task.id)).toBeUndefined();
+    expect(selectDownloadTaskStatus(sqlite, task.id)).toBe("queued");
+
+    expect(JSON.stringify(finalizeTick)).not.toContain("private.example");
+    expect(JSON.stringify(finalizeTick)).not.toContain("sign=secret");
+    expect(JSON.stringify(finalizationRow)).not.toContain("private.example");
+    expect(JSON.stringify(finalizationRow)).not.toContain("sign=secret");
+  });
+
   it("marks the task failed when the temporary download request is rejected", async () => {
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
       if (String(input).startsWith("https://private.example/")) {
@@ -250,10 +363,13 @@ async function seedOpenListTask(resourcePath: string) {
   const workspace = path.join(os.tmpdir(), `mangatest-openlist-prep-${randomUUID()}`);
   const dbPath = path.join(workspace, "test.sqlite");
   const comicId = randomUUID();
+  const mangaRootId = randomUUID();
+  const rootPath = path.join(workspace, "Root");
   const sourceId = randomUUID();
   const resourceId = randomUUID();
 
   await mkdir(workspace, { recursive: true });
+  await mkdir(rootPath, { recursive: true });
   process.env.MANGATEST_DB_PATH = dbPath;
 
   const { bootstrapDatabase, getSqlite } = await import("../core/db");
@@ -262,6 +378,9 @@ async function seedOpenListTask(resourcePath: string) {
 
   bootstrapDatabase();
   const sqlite = getSqlite();
+  sqlite
+    .prepare("insert into manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) values (?, ?, ?, ?, ?)")
+    .run(mangaRootId, rootPath, "Root", "children_as_comics", 1);
   sqlite
     .prepare("insert into comics (id, display_title, file_title, sort_title, status) values (?, ?, ?, ?, ?)")
     .run(comicId, "OpenList Comic", "OpenList Comic", "openlist comic", "remote_only");
@@ -292,7 +411,16 @@ function selectTransfer(sqlite: Database.Database, taskId: string) {
   return sqlite.prepare("select * from download_task_transfers where download_task_id = ?").get(taskId) as Record<string, unknown> | undefined;
 }
 
+function selectFinalization(sqlite: Database.Database, taskId: string) {
+  return sqlite.prepare("select * from download_task_finalizations where download_task_id = ?").get(taskId) as Record<string, unknown> | undefined;
+}
+
 function selectDownloadTaskStatus(sqlite: Database.Database, taskId: string) {
   const row = sqlite.prepare("select status from download_tasks where id = ?").get(taskId) as { status: string } | undefined;
   return row?.status;
+}
+
+function countRows(sqlite: Database.Database, tableName: string, whereClause?: string) {
+  const row = sqlite.prepare(`select count(*) as count from ${tableName}${whereClause ? ` where ${whereClause}` : ""}`).get() as { count: number };
+  return row.count;
 }
