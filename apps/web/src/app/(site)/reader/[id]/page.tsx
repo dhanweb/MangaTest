@@ -2,13 +2,18 @@ import { Box } from "@mantine/core";
 
 import { ReaderView } from "@/components/reader-view";
 import { getRuntimeSettings } from "@/modules/core/settings";
+import { createCollectionRepository } from "@/modules/collections";
 import { createComicRepository } from "@/modules/library/comics.repository";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReaderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [comic, settings] = await Promise.all([createComicRepository().getReaderData(id), getRuntimeSettings()]);
+  const [comic, settings, queueContext] = await Promise.all([
+    createComicRepository().getReaderData(id),
+    getRuntimeSettings(),
+    createCollectionRepository().getQueueContext(id),
+  ]);
 
   if (!comic) {
     return (
@@ -29,6 +34,7 @@ export default async function ReaderPage({ params }: { params: Promise<{ id: str
         readerPreloadEnabled: settings.readerPreloadEnabled,
         readerThumbnailSidebarDefault: settings.readerThumbnailSidebarDefault,
       }}
+      queueContext={queueContext}
     />
   );
 }

@@ -11,7 +11,7 @@ interface SiteHeaderProps {
 
 const navItems = [
   { id: "library", icon: Library, label: "漫画库", href: "/" },
-  { id: "favorites", icon: Heart, label: "收藏", href: "/?view=favorites" },
+  { id: "favorites", icon: Heart, label: "收藏", href: "/collections" },
   { id: "admin", icon: Settings, label: "管理", href: "/admin" },
 ] as const;
 

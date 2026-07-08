@@ -168,6 +168,12 @@ function formatScanStatus(status: string) {
 function formatOperation(operation: string) {
   const labels: Record<string, string> = {
     cache_cleanup: "缓存清理",
+    collection_add_comic: "加入收藏",
+    collection_create: "创建收藏",
+    collection_delete: "删除收藏",
+    collection_remove_comic: "移出收藏",
+    collection_reorder: "收藏重排",
+    collection_update: "更新收藏",
     download_task_cancel: "取消下载",
     download_task_create: "创建下载",
     download_task_retry: "重试下载",

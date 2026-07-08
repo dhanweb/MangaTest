@@ -19,6 +19,8 @@ This document records features that are already implemented in `apps/web`.
 - File maintenance: `http://127.0.0.1:4317/admin/files`
 - Comic management: `http://127.0.0.1:4317/admin/comics`
 - Tag management: `http://127.0.0.1:4317/admin/tags`
+- Collections admin: `http://127.0.0.1:4317/admin/collections`
+- Public collections: `http://127.0.0.1:4317/collections`
 - Download tasks: `http://127.0.0.1:4317/admin/downloads`
 - Settings: `http://127.0.0.1:4317/admin/settings`
 
@@ -46,6 +48,8 @@ This document records features that are already implemented in `apps/web`.
 - Reader thumbnails are generated lazily through `/api/pages/[pageId]/thumbnail`.
 - Reader thumbnail cache records use `media_assets`, include source identity and dimensions in cache keys, and update `lastAccess`.
 - Reader supports keyboard shortcuts: `Up/W`, `Down/S`, `Space`, `Shift+Space`, `Home`, `End`, `T`, and `Esc`.
+- Reader renders cross-chapter separator bars when pages transition between chapters within the same comic.
+- Reader can show queue context and a "continue to next comic" entry when the current comic belongs to an enabled reading queue.
 
 ### Covers And Media Assets
 
@@ -104,6 +108,18 @@ This document records features that are already implemented in `apps/web`.
 - Download admin UI shows recent task activity for create, cancel, and retry events.
 - Download admin UI shows the current worker dispatch preflight status for the next queued task.
 
+### Collections And Reading Queues
+
+- Collections support two kinds: `collection` for favorites categories and `queue` for reading queues.
+- Each collection stores name, description, kind, sort mode (`manual`, `recent_added`, `title`), and enabled flag.
+- Admin can create, update, delete, enable/disable collections, and the actions write redacted operation log entries.
+- Admin can add readable comics to a collection, remove them, and reorder manual sort order.
+- Adding a non-readable comic to a collection is rejected; duplicate adds are no-ops.
+- Public `/collections` page lists all collections with kind, comic count, and enabled state.
+- Public `/collections/[id]` page shows the collection's readable comics in the configured sort order and offers a "start queue" entry for queue-kind collections.
+- Reader resolves queue context for the current comic and renders a "continue to next comic" entry at the end when a next comic exists in the queue.
+- `findQueueContaining` and `getQueueContext` resolve the enabled queue a comic belongs to and its next comic, position, and total count.
+
 ### Admin And Maintenance
 
 - Admin home shows scan status, missing file count, duplicate candidate count, storage/cache summary, and recent operation logs.
@@ -116,6 +132,7 @@ This document records features that are already implemented in `apps/web`.
 - Admin comic management can merge a readable single-chapter comic into another readable comic as a chapter, then restore it as an independent comic without moving, copying, or deleting physical files.
 - Admin comic management can reorder chapters for an independent comic and persist the order through `sort_order`.
 - Dangerous maintenance actions write operation log entries.
+- Admin collections management can create, update, enable/disable, and delete collections, and add/remove/reorder comics with redacted operation log entries.
 - SQLite backup can be exported from settings.
 - Cache summary and cleanup support media assets and archive file-list cache entries.
 
@@ -135,4 +152,3 @@ This document records features that are already implemented in `apps/web`.
 - Multi-user accounts or login.
 - Dark theme.
 - RAR, CBR, 7z, and PDF scanning.
-- Collections, reading queues, and auto-next workflows.

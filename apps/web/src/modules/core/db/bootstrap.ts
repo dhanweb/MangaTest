@@ -448,6 +448,39 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS operation_logs_operation_idx
       ON operation_logs (operation);
+
+    CREATE TABLE IF NOT EXISTS collections (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      kind TEXT NOT NULL DEFAULT 'collection',
+      sort_mode TEXT NOT NULL DEFAULT 'manual',
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS collections_kind_idx
+      ON collections (kind);
+
+    CREATE INDEX IF NOT EXISTS collections_enabled_idx
+      ON collections (is_enabled);
+
+    CREATE TABLE IF NOT EXISTS collection_comics (
+      collection_id TEXT NOT NULL REFERENCES collections(id),
+      comic_id TEXT NOT NULL REFERENCES comics(id),
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (collection_id, comic_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS collection_comics_collection_sort_idx
+      ON collection_comics (collection_id, sort_order);
+
+    CREATE INDEX IF NOT EXISTS collection_comics_comic_idx
+      ON collection_comics (comic_id);
   `);
 
   bootstrapped = true;

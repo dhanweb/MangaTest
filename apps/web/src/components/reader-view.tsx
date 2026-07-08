@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject } from "react";
 
 import { AppButton } from "@/components/ui/app-components";
+import type { QueueContextRecord } from "@/modules/collections";
 import type { ReaderComicRecord } from "@/modules/library";
 import { getReaderKeyboardCommand } from "@/modules/reader/keyboard-shortcuts";
 
@@ -22,7 +23,15 @@ export interface ReaderPreferences {
   readerThumbnailSidebarDefault: boolean;
 }
 
-export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; preferences: ReaderPreferences }) {
+export function ReaderView({
+  comic,
+  preferences,
+  queueContext = null,
+}: {
+  comic: ReaderComicRecord;
+  preferences: ReaderPreferences;
+  queueContext?: QueueContextRecord | null;
+}) {
   const router = useRouter();
   const pages = useMemo(() => comic.pages.map((page, index) => ({ ...page, displayNumber: index + 1 })), [comic.pages]);
   const initialActivePage = useMemo(() => {
@@ -564,40 +573,73 @@ export function ReaderView({ comic, preferences }: { comic: ReaderComicRecord; p
             <strong>{comic.displayTitle}</strong>
           </Box>
           {pages.length > 0 ? (
-            pages.map((page) => (
-              <Box
-                component="article"
-                className="reader-page"
-                key={page.id}
-                data-page={page.displayNumber}
-                ref={(node) => {
-                  if (node) {
-                    pageRefs.current.set(page.displayNumber, node);
-                  } else {
-                    pageRefs.current.delete(page.displayNumber);
-                  }
-                }}
-              >
-                <span>PAGE {String(page.displayNumber).padStart(2, "0")}</span>
-                <img
-                  alt={`${comic.displayTitle} 第 ${page.displayNumber} 页`}
-                  className="reader-page-image"
-                  decoding="async"
-                  loading={page.displayNumber <= 2 ? "eager" : "lazy"}
-                  src={getPageImageUrl(page.id)}
-                />
-              </Box>
-            ))
+            pages.map((page, index) => {
+              const previousPage = index > 0 ? pages[index - 1] : null;
+              const chapterChanged = !previousPage || previousPage.chapterId !== page.chapterId;
+              const chapterTitle = page.chapterTitle ?? "未命名章节";
+
+              return (
+                <div key={page.id}>
+                  {index > 0 && chapterChanged ? (
+                    <Box className="reader-divider reader-chapter-divider">
+                      <span>{chapterTitle}</span>
+                    </Box>
+                  ) : null}
+                  <Box
+                    component="article"
+                    className="reader-page"
+                    data-page={page.displayNumber}
+                    ref={(node) => {
+                      if (node) {
+                        pageRefs.current.set(page.displayNumber, node);
+                      } else {
+                        pageRefs.current.delete(page.displayNumber);
+                      }
+                    }}
+                  >
+                    <span>PAGE {String(page.displayNumber).padStart(2, "0")}</span>
+                    <img
+                      alt={`${comic.displayTitle} 第 ${page.displayNumber} 页`}
+                      className="reader-page-image"
+                      decoding="async"
+                      loading={page.displayNumber <= 2 ? "eager" : "lazy"}
+                      src={getPageImageUrl(page.id)}
+                    />
+                  </Box>
+                </div>
+              );
+            })
           ) : (
             <Box className="reader-page">
               <span>暂无页面</span>
               <p>{comic.displayTitle}</p>
             </Box>
           )}
-          <Box className="reader-divider">
-            <span>当前章节已接近底部</span>
-            <strong>下一话将自动接在下面</strong>
-          </Box>
+          {queueContext && queueContext.nextComicId ? (
+            <Box className="reader-divider reader-next-comic">
+              <span>当前队列 {queueContext.position} / {queueContext.total}</span>
+              <strong>下一本：{queueContext.nextComicTitle}</strong>
+              <AppButton
+                component={Link}
+                href={`/reader/${encodeURIComponent(queueContext.nextComicId)}`}
+                variant="filled"
+                size="sm"
+                mt={6}
+              >
+                继续阅读下一本
+              </AppButton>
+            </Box>
+          ) : queueContext ? (
+            <Box className="reader-divider reader-next-comic">
+              <span>队列最后一本</span>
+              <strong>{queueContext.queue.name} 已读完</strong>
+            </Box>
+          ) : (
+            <Box className="reader-divider">
+              <span>当前漫画已读完</span>
+              <strong>返回详情页继续探索</strong>
+            </Box>
+          )}
         </Box>
       </Box>
     </Box>

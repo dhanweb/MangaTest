@@ -28,6 +28,8 @@ export const cloudScanStatuses = ["running", "completed", "failed"] as const;
 export const downloadFinalizationStatuses = ["completed", "failed"] as const;
 export const downloadPreparationStatuses = ["ready", "blocked"] as const;
 export const downloadTransferStatuses = ["running", "completed", "failed"] as const;
+export const collectionKinds = ["collection", "queue"] as const;
+export const collectionSortModes = ["manual", "recent_added", "title"] as const;
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -498,6 +500,12 @@ export const operationLogs = sqliteTable(
         "download_task_create",
         "download_task_cancel",
         "download_task_retry",
+        "collection_create",
+        "collection_update",
+        "collection_delete",
+        "collection_add_comic",
+        "collection_remove_comic",
+        "collection_reorder",
       ],
     }).notNull(),
     targetType: text("target_type").notNull(),
@@ -511,5 +519,44 @@ export const operationLogs = sqliteTable(
   (table) => ({
     targetIdx: index("operation_logs_target_idx").on(table.targetType, table.targetId),
     operationIdx: index("operation_logs_operation_idx").on(table.operation),
+  }),
+);
+
+export const collections = sqliteTable(
+  "collections",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description"),
+    kind: text("kind", { enum: collectionKinds }).notNull().default("collection"),
+    sortMode: text("sort_mode", { enum: collectionSortModes }).notNull().default("manual"),
+    isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
+    ...timestamps,
+  },
+  (table) => ({
+    kindIdx: index("collections_kind_idx").on(table.kind),
+    enabledIdx: index("collections_enabled_idx").on(table.isEnabled),
+  }),
+);
+
+export const collectionComics = sqliteTable(
+  "collection_comics",
+  {
+    collectionId: text("collection_id")
+      .notNull()
+      .references(() => collections.id),
+    comicId: text("comic_id")
+      .notNull()
+      .references(() => comics.id),
+    sortOrder: integer("sort_order").notNull().default(0),
+    addedAt: text("added_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+    ...timestamps,
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.collectionId, table.comicId] }),
+    collectionSortIdx: index("collection_comics_collection_sort_idx").on(table.collectionId, table.sortOrder),
+    comicIdx: index("collection_comics_comic_idx").on(table.comicId),
   }),
 );
