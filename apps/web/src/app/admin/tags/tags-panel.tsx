@@ -114,6 +114,30 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
     close();
   }
 
+  async function deleteTag(item: TagRow) {
+    if (item.comicCount > 0) {
+      return;
+    }
+    if (!window.confirm(`只删除标签记录，不会修改漫画文件。\n\n确认删除 ${item.canonical}？`)) {
+      return;
+    }
+
+    setError("");
+    const response = await fetch("/api/tags", {
+      method: "DELETE",
+      body: JSON.stringify({ id: item.id }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const payload = (await response.json()) as { deleted?: boolean; error?: string };
+
+    if (!response.ok || !payload.deleted) {
+      setError(payload.error ?? "删除标签失败。");
+      return;
+    }
+
+    setItems((current) => current.filter((tag) => tag.id !== item.id));
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -218,13 +242,20 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
                   </Table.Td>
                   <Table.Td>
                     <Group gap={4} wrap="nowrap">
-                      <Tooltip label="编辑标签后续实现" withArrow>
+                      <Tooltip label="编辑标签" withArrow>
                         <ActionIcon variant="subtle" color="ink" size="md" onClick={() => openEdit(tag)} aria-label={`编辑 ${tag.canonical}`}>
                           <Pencil size={15} />
                         </ActionIcon>
                       </Tooltip>
-                      <Tooltip label="删除后续实现" withArrow>
-                        <ActionIcon variant="subtle" color="red" size="md" disabled aria-label={`删除 ${tag.canonical}`}>
+                      <Tooltip label={tag.comicCount > 0 ? "已有漫画绑定，不能删除" : "删除标签"} withArrow>
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          size="md"
+                          disabled={tag.comicCount > 0}
+                          onClick={() => deleteTag(tag)}
+                          aria-label={`删除 ${tag.canonical}`}
+                        >
                           <Trash2 size={15} />
                         </ActionIcon>
                       </Tooltip>
@@ -245,6 +276,12 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
           </Table.Tbody>
         </Table>
       </Box>
+
+      {error && !opened ? (
+        <Text size="sm" c="red.7" mt="sm">
+          {error}
+        </Text>
+      ) : null}
 
       <Modal
         opened={opened}

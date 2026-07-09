@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { asc, eq, sql } from "drizzle-orm";
 
-import { bootstrapDatabase, comicTags, getDb, tags } from "@/modules/core/db";
+import { bootstrapDatabase, chapterTags, comicTags, getDb, tags } from "@/modules/core/db";
 
 import { createCanonicalTag, type CanonicalTag } from ".";
 
@@ -17,6 +17,7 @@ export interface TagRepository {
   create(input: SaveTagInput): Promise<CanonicalTag>;
   upsert(input: SaveTagInput): Promise<CanonicalTag>;
   update(id: string, input: SaveTagInput): Promise<CanonicalTag | null>;
+  deleteUnused(id: string): Promise<{ deleted: boolean }>;
 }
 
 export function createTagRepository(): TagRepository {
@@ -131,6 +132,35 @@ export function createTagRepository(): TagRepository {
         .get();
 
       return row ?? null;
+    },
+
+    async deleteUnused(id) {
+      bootstrapDatabase();
+      const db = getDb();
+      const existing = db.select({ id: tags.id }).from(tags).where(eq(tags.id, id)).get();
+
+      if (!existing) {
+        throw new Error("标签不存在。");
+      }
+
+      const comicUsage = db
+        .select({ count: sql<number>`count(*)` })
+        .from(comicTags)
+        .where(eq(comicTags.tagId, id))
+        .get();
+      const chapterUsage = db
+        .select({ count: sql<number>`count(*)` })
+        .from(chapterTags)
+        .where(eq(chapterTags.tagId, id))
+        .get();
+
+      if (Number(comicUsage?.count ?? 0) > 0 || Number(chapterUsage?.count ?? 0) > 0) {
+        throw new Error("这个标签已经绑定漫画或章节，不能直接删除。请先移除绑定关系。");
+      }
+
+      db.delete(tags).where(eq(tags.id, id)).run();
+
+      return { deleted: true };
     },
   };
 }

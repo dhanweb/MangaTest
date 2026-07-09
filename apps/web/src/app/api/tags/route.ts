@@ -39,6 +39,21 @@ export async function PATCH(request: Request) {
   }
 }
 
+export async function DELETE(request: Request) {
+  const payload = await request.json().catch(() => null);
+
+  if (!payload || typeof payload !== "object" || typeof (payload as Record<string, unknown>).id !== "string") {
+    return Response.json({ error: "id is required." }, { status: 400 });
+  }
+
+  try {
+    await createTagRepository().deleteUnused((payload as { id: string }).id);
+    return Response.json({ deleted: true });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Failed to delete tag." }, { status: 400 });
+  }
+}
+
 function parseTagPayload(payload: unknown) {
   if (!payload || typeof payload !== "object") {
     return null;
