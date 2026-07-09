@@ -19,8 +19,8 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import Link from "next/link";
-import Draggable from "react-draggable";
-import { useRef, type ReactNode } from "react";
+import { DraggableCore, type DraggableData } from "react-draggable";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 // Mantine polymorphic components expose interaction props through the final
 // rendered element. Keep this wrapper permissive to match the prototype API.
@@ -193,6 +193,10 @@ export function DraggableModal({
   ...props
 }: AppModalProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const innerDragStyle: CSSProperties = {
+    transform: `translate3d(${position.x}px, ${position.y}px, 0)`,
+  };
   const mergedStyles =
     typeof styles === "function"
       ? styles
@@ -207,15 +211,32 @@ export function DraggableModal({
             fontSize: "18px",
             ...styles?.title,
           },
+          inner: {
+            ...styles?.inner,
+            ...innerDragStyle,
+          },
         };
 
+  const handleDrag = (_event: MouseEvent, data: DraggableData) => {
+    setPosition((current) => ({
+      x: current.x + data.deltaX,
+      y: current.y + data.deltaY,
+    }));
+  };
+
+  const handleClose = () => {
+    setPosition({ x: 0, y: 0 });
+    onClose();
+  };
+
   return (
-    <MantineModal.Root opened={opened} onClose={onClose} styles={mergedStyles} {...props}>
+    <MantineModal.Root opened={opened} onClose={handleClose} styles={mergedStyles} {...props}>
       {withOverlay && <MantineModal.Overlay {...overlayProps} />}
-      <Draggable
+      <DraggableCore
         handle=".app-draggable-modal-header"
         cancel="input, textarea, button, select, option, a, [role='button'], [data-no-drag]"
         nodeRef={contentRef}
+        onDrag={handleDrag}
       >
         <MantineModal.Content ref={contentRef}>
           <MantineModal.Header
@@ -230,7 +251,7 @@ export function DraggableModal({
           </MantineModal.Header>
           <MantineModal.Body>{children}</MantineModal.Body>
         </MantineModal.Content>
-      </Draggable>
+      </DraggableCore>
     </MantineModal.Root>
   );
 }
