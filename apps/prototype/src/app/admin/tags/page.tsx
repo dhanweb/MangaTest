@@ -5,7 +5,6 @@ import {
   ActionIcon,
   Box,
   Group,
-  Modal,
   Stack,
   Table,
   Text,
@@ -13,7 +12,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
-import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import {
   NAMESPACE_LABELS,
   namespaceLabel,
@@ -197,7 +196,7 @@ export default function TagsPage() {
       </Box>
 
       {/* Add / Edit Modal */}
-      <Modal
+      <DraggableModal
         opened={opened}
         onClose={close}
         title={editTarget ? "编辑标签" : "添加标签"}
@@ -275,7 +274,7 @@ export default function TagsPage() {
             </AppButton>
           </Group>
         </Stack>
-      </Modal>
+      </DraggableModal>
     </Box>
   );
 }

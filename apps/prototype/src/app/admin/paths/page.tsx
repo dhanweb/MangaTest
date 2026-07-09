@@ -5,7 +5,6 @@ import {
   ActionIcon,
   Box,
   Group,
-  Modal,
   Stack,
   Table,
   Text,
@@ -14,7 +13,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Folder, Pencil, Plus, RefreshCcw, Search, Trash2 } from "lucide-react";
-import { AppButton, AppInput } from "@/components/ui/app-components";
+import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
 import { scanPaths, type ScanPath } from "@/lib/mock-data";
 
 const STATUS_MAP: Record<ScanPath["status"], { label: string; bg: string; color: string }> = {
@@ -193,7 +192,7 @@ export default function PathsPage() {
       </Box>
 
       {/* Add / Edit Modal */}
-      <Modal
+      <DraggableModal
         opened={opened}
         onClose={close}
         title={editTarget ? "编辑路径" : "添加路径"}
@@ -221,7 +220,7 @@ export default function PathsPage() {
             </AppButton>
           </Group>
         </Stack>
-      </Modal>
+      </DraggableModal>
     </Box>
   );
 }

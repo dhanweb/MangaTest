@@ -1,11 +1,11 @@
 "use client";
 
-import { Box, FileInput, Group, Modal, Radio, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
+import { Box, FileInput, Group, Radio, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
 import { ArrowDown, ArrowLeft, ArrowUp, EyeOff, GitMerge, GripVertical, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 
-import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
 import { namespaceLabel, tagDisplayLabel } from "@/modules/tags";
@@ -771,7 +771,7 @@ function MergeTargetModal({
   selectedId: string | null;
 }) {
   return (
-    <Modal opened={opened} onClose={onClose} title="选择合并目标漫画" size="xl" styles={{ title: { fontWeight: 800 }, header: { borderBottom: "1px solid var(--mantine-color-pink-1)" } }}>
+    <DraggableModal opened={opened} onClose={onClose} title="选择合并目标漫画" size="xl" styles={{ title: { fontWeight: 800 }, header: { borderBottom: "1px solid var(--mantine-color-pink-1)" } }}>
       <Stack gap="md">
         <TextInput
           placeholder="搜索标题、路径或元数据..."
@@ -835,7 +835,7 @@ function MergeTargetModal({
           </AppButton>
         </Group>
       </Stack>
-    </Modal>
+    </DraggableModal>
   );
 }
 

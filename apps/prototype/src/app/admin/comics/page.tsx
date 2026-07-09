@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import {
   Box,
   Group,
-  Modal,
   Pagination,
   Select,
   SimpleGrid,
@@ -15,7 +14,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Library, Search } from "lucide-react";
-import { AppButton, AppInput, AppSelect, AppTextarea } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSelect, AppTextarea, DraggableModal } from "@/components/ui/app-components";
 import { comics, statusLabel, statusOptions, type Comic } from "@/lib/mock-data";
 
 const PAGE_SIZE_OPTIONS = [
@@ -178,7 +177,7 @@ export default function ComicsPage() {
       </Group>
 
       {/* Edit Modal */}
-      <Modal
+      <DraggableModal
         opened={opened}
         onClose={close}
         title="编辑漫画"
@@ -214,7 +213,7 @@ export default function ComicsPage() {
             </Group>
           </Stack>
         )}
-      </Modal>
+      </DraggableModal>
     </Box>
   );
 }

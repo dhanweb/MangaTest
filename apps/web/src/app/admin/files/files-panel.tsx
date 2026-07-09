@@ -1,10 +1,10 @@
 "use client";
 
-import { ActionIcon, Box, Group, Modal, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { EyeOff, FileWarning, FolderSync, RefreshCcw, Search, Trash2, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { AppButton, AppInput } from "@/components/ui/app-components";
+import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord, ScanAllMangaRootsResult } from "@/modules/library";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
@@ -491,7 +491,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
         </Stack>
       </Box>
 
-      <Modal
+      <DraggableModal
         opened={repairTarget !== null}
         onClose={() => setRepairTarget(null)}
         title="修复缺失文件路径"
@@ -520,7 +520,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
             </AppButton>
           </Group>
         </Stack>
-      </Modal>
+      </DraggableModal>
     </Box>
   );
 }

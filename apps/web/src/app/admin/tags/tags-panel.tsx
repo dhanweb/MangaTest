@@ -1,11 +1,11 @@
 "use client";
 
-import { ActionIcon, Box, Group, Modal, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import type { CanonicalTag } from "@/modules/tags";
 import { NAMESPACE_LABELS, namespaceLabel, namespaceOptionLabel, tagDisplayLabel } from "@/modules/tags";
 
@@ -283,7 +283,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
         </Text>
       ) : null}
 
-      <Modal
+      <DraggableModal
         opened={opened}
         onClose={close}
         title={editTarget ? "编辑标签" : "添加标签"}
@@ -331,7 +331,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             </AppButton>
           </Group>
         </Stack>
-      </Modal>
+      </DraggableModal>
     </Box>
   );
 }

@@ -4,6 +4,7 @@ import {
   Badge as MantineBadge,
   Button as MantineButton,
   Modal as MantineModal,
+  type ModalProps as MantineModalProps,
   Select as MantineSelect,
   type SelectProps,
   Switch as MantineSwitch,
@@ -18,7 +19,8 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import Draggable from "react-draggable";
+import { useRef, type ReactNode } from "react";
 
 // Mantine polymorphic components expose interaction props through the final
 // rendered element. Keep this wrapper permissive to match the prototype API.
@@ -168,23 +170,68 @@ type AppModalProps = {
   onClose: () => void;
   title: string;
   children: ReactNode;
-} & React.ComponentProps<typeof MantineModal>;
+} & MantineModalProps;
 
 export function AppModal({ opened, onClose, title, children, ...props }: AppModalProps) {
   return (
-    <MantineModal
-      opened={opened}
-      onClose={onClose}
-      title={title}
-      size="xl"
-      styles={{
-        title: { fontWeight: 700, fontSize: "18px" },
-        header: { borderBottom: "1px solid var(--mantine-color-pink-1)" },
-      }}
-      {...props}
-    >
+    <DraggableModal opened={opened} onClose={onClose} title={title} size="xl" {...props}>
       {children}
-    </MantineModal>
+    </DraggableModal>
+  );
+}
+
+export function DraggableModal({
+  children,
+  closeButtonProps,
+  onClose,
+  opened,
+  overlayProps,
+  styles,
+  title,
+  withCloseButton = true,
+  withOverlay = true,
+  ...props
+}: AppModalProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const mergedStyles =
+    typeof styles === "function"
+      ? styles
+      : {
+          ...styles,
+          header: {
+            borderBottom: "1px solid var(--mantine-color-pink-1)",
+            ...styles?.header,
+          },
+          title: {
+            fontWeight: 700,
+            fontSize: "18px",
+            ...styles?.title,
+          },
+        };
+
+  return (
+    <MantineModal.Root opened={opened} onClose={onClose} styles={mergedStyles} {...props}>
+      {withOverlay && <MantineModal.Overlay {...overlayProps} />}
+      <Draggable
+        handle=".app-draggable-modal-header"
+        cancel="input, textarea, button, select, option, a, [role='button'], [data-no-drag]"
+        nodeRef={contentRef}
+      >
+        <MantineModal.Content ref={contentRef}>
+          <MantineModal.Header
+            className="app-draggable-modal-header"
+            style={{
+              cursor: "move",
+              userSelect: "none",
+            }}
+          >
+            <MantineModal.Title>{title}</MantineModal.Title>
+            {withCloseButton && <MantineModal.CloseButton {...closeButtonProps} />}
+          </MantineModal.Header>
+          <MantineModal.Body>{children}</MantineModal.Body>
+        </MantineModal.Content>
+      </Draggable>
+    </MantineModal.Root>
   );
 }
 

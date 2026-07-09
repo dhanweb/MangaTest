@@ -1,10 +1,9 @@
 "use client";
 
-import { Modal } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Plus } from "lucide-react";
 
-import { AppButton } from "@/components/ui/app-components";
+import { AppButton, DraggableModal } from "@/components/ui/app-components";
 
 import { MangaRootForm } from "./manga-root-form";
 
@@ -16,7 +15,7 @@ export function MangaRootDialog() {
       <AppButton leftSection={<Plus size={16} />} onClick={open}>
         添加路径
       </AppButton>
-      <Modal
+      <DraggableModal
         opened={opened}
         onClose={close}
         title="添加路径"
@@ -27,7 +26,7 @@ export function MangaRootDialog() {
         }}
       >
         <MangaRootForm />
-      </Modal>
+      </DraggableModal>
     </>
   );
 }
