@@ -591,7 +591,7 @@ export function ReaderView({
                     className="reader-page"
                     data-page={page.displayNumber}
                     style={{
-                      aspectRatio: String(pageAspectRatios[page.id] ?? "2 / 3"),
+                      aspectRatio: aspectRatioFor(page, pageAspectRatios),
                     }}
                     ref={(node) => {
                       if (node) {
@@ -667,4 +667,15 @@ function getPageImageUrl(pageId: string) {
 
 function getPageThumbnailUrl(pageId: string) {
   return `/api/pages/${encodeURIComponent(pageId)}/thumbnail?w=176&h=264`;
+}
+
+function aspectRatioFor(page: { id: string; width: number | null; height: number | null }, measured: Record<string, number>) {
+  const measuredRatio = measured[page.id];
+  if (typeof measuredRatio === "number" && measuredRatio > 0) {
+    return String(measuredRatio);
+  }
+  if (page.width && page.height && page.width > 0 && page.height > 0) {
+    return `${page.width} / ${page.height}`;
+  }
+  return "2 / 3";
 }

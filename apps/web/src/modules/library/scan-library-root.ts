@@ -153,6 +153,8 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
                 sourceKind: page.sourceKind,
                 internalPath: page.internalPath,
                 archiveIndex: page.archiveIndex,
+                width: page.width,
+                height: page.height,
               })),
             )
             .run();

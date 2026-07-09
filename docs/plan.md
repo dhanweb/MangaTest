@@ -734,16 +734,43 @@ Downloads 和 OpenList provider：
 - 插件写接口至少需要本地 token。
 - MVP 不做完整登录系统。
 
-## 13. 当前原型状态
+## 13. 当前开发状态
 
-`apps/prototype` 用于验证关键交互：
+截至 2026-07-09，`apps/web` 已经从原型参照进入正式 MVP 实现收尾阶段。第一阶段 MVP 的主体能力已经基本落地：
 
-- 首页漫画列表、搜索、标签筛选、分页
-- 漫画详情页和章节列表
-- reader 垂直阅读、缩略图导航、图钉返回顶部
-- admin 文件维护、漫画管理、标签管理、设置
+- Next.js 本地自托管 web app
+- SQLite + Drizzle 数据模型和启动初始化
+- manga root 绝对路径设置、创建后手动扫描
+- 目录 / zip / cbz 扫描入库
+- comic、local_file、chapter、page 基础记录
+- scan_session 结果记录
+- 前台漫画列表、搜索、标签筛选、详情页
+- 垂直 reader、页面图片 API、阅读进度保存
+- reader 快捷键、缩略图侧边栏、沉浸式相关偏好
+- archive 文件列表缓存和按需页面读取
+- 封面、列表缩略图、reader 缩略图和缓存清理
+- 基础标签存储、中文展示、手动绑定
+- 后台首页、漫画管理、文件维护、标签、设置
+- 缺失文件检测、路径修复、隐藏 / 软删除 / 恢复
+- SQLite 备份导出
+- 危险操作日志
 
-从现在开始，`apps/web` 实现对应页面和工作流时，必须优先参照 `apps/prototype` 已验证的视觉密度、导航结构、页面布局和交互手感。
+当前重点不再是从 `apps/prototype` 迁移页面，而是稳定 `apps/web`：
+
+- 修复测试和真实使用中暴露的 MVP 边缘问题
+- 补齐必要的空状态、错误提示和操作反馈
+- 校准前台漫画网站体验与后台管理入口的主次关系
+- 对扫描、reader、缓存、文件维护和备份做端到端验证
+- 保持文档与真实实现同步
+
+部分后续阶段能力已经提前进入 `apps/web`：
+
+- 第二阶段的一部分：标题 / 元数据编辑、标签维护、封面上传 / 重新生成、重复候选、合并为章节和恢复
+- 第三阶段的一部分：`metadata-ingest`、导入 token、来源站状态检查、metadata 导入和 remote-only 记录
+- 第四阶段的一部分：Downloads provider 注册、OpenList 连接检查、OpenList cloud scan、资源导入、下载准备、临时下载、finalization
+- 第五阶段的一部分：collections / reading queue 和队列阅读导航
+
+`apps/prototype` 现在保留为交互和视觉参考，不再代表项目主阶段。`apps/web` 继续实现或调整对应页面时，仍应参照 `apps/prototype` 已验证的视觉密度、导航结构、页面布局和交互手感。
 
 `apps/prototype` 同时是已验证 UI 依赖栈的参考。当前原型使用 Next.js App Router、TypeScript、Tailwind CSS、Mantine、shadcn/ui 和 lucide-react；其中 Mantine (`@mantine/core`, `@mantine/hooks`) 是原型页面中按钮、输入、选择器、开关、弹窗、tabs 等控件的主要实现来源。
 

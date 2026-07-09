@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { eq } from "drizzle-orm";
+import sharp from "sharp";
 import yauzl from "yauzl";
 
 import { bootstrapDatabase, cacheEntries, getDb } from "@/modules/core/db";
@@ -32,6 +33,8 @@ export interface LocalComicPage {
   sourceKind: "filesystem" | "archive";
   internalPath: string;
   archiveIndex: number | null;
+  width: number | null;
+  height: number | null;
 }
 
 export async function enumerateMangaRootChildren(rootPath: string): Promise<LocalComicEntry[]> {
@@ -113,10 +116,13 @@ async function enumerateDirectoryPages(rootPath: string): Promise<LocalComicPage
       }
 
       if (child.isFile() && IMAGE_EXTENSIONS.has(path.extname(child.name).toLowerCase())) {
+        const dimensions = await readImageDimensions(absolutePath).catch(() => null);
         pages.push({
           sourceKind: "filesystem",
           internalPath: toPortablePath(path.relative(rootPath, absolutePath)),
           archiveIndex: null,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null,
         });
       }
     }
@@ -143,21 +149,55 @@ function enumerateArchivePages(absolutePath: string): Promise<LocalComicPage[]> 
       const pages: LocalComicPage[] = [];
       let entryIndex = 0;
 
-      zipFile.readEntry();
-      zipFile.on("entry", (entry) => {
+      function handleEntry(entry: yauzl.Entry) {
         const archiveIndex = entryIndex;
         entryIndex += 1;
 
         if (!entry.fileName.endsWith("/") && IMAGE_EXTENSIONS.has(path.extname(entry.fileName).toLowerCase())) {
-          pages.push({
-            sourceKind: "archive",
-            internalPath: toPortablePath(entry.fileName),
-            archiveIndex,
+          zipFile.openReadStream(entry, (streamError, stream) => {
+            if (streamError || !stream) {
+              pages.push({
+                sourceKind: "archive",
+                internalPath: toPortablePath(entry.fileName),
+                archiveIndex,
+                width: null,
+                height: null,
+              });
+              zipFile.readEntry();
+              return;
+            }
+
+            readImageDimensionsFromStream(stream)
+              .then((dimensions) => {
+                pages.push({
+                  sourceKind: "archive",
+                  internalPath: toPortablePath(entry.fileName),
+                  archiveIndex,
+                  width: dimensions?.width ?? null,
+                  height: dimensions?.height ?? null,
+                });
+              })
+              .catch(() => {
+                pages.push({
+                  sourceKind: "archive",
+                  internalPath: toPortablePath(entry.fileName),
+                  archiveIndex,
+                  width: null,
+                  height: null,
+                });
+              })
+              .finally(() => {
+                zipFile.readEntry();
+              });
           });
+          return;
         }
 
         zipFile.readEntry();
-      });
+      }
+
+      zipFile.readEntry();
+      zipFile.on("entry", handleEntry);
       zipFile.once("error", reject);
       zipFile.once("end", () => {
         resolve(pages.sort((a, b) => pathCollator.compare(a.internalPath, b.internalPath)));
@@ -225,27 +265,82 @@ function createArchiveFileListCacheKey(absolutePath: string, stat: { size: numbe
 
 function parseCachedArchivePages(metadataJson: string) {
   try {
-    const parsed = JSON.parse(metadataJson) as { pages?: LocalComicPage[] };
+    const parsed = JSON.parse(metadataJson) as { pages?: unknown[] };
     if (!Array.isArray(parsed.pages)) {
       return null;
     }
 
-    return parsed.pages.filter(isCachedArchivePage);
+    const pages = parsed.pages.filter(isCachedArchivePage);
+    if (pages.some((page) => !("width" in page) || !("height" in page))) {
+      return null;
+    }
+
+    return pages.map((page) => ({
+      sourceKind: "archive" as const,
+      internalPath: page.internalPath,
+      archiveIndex: page.archiveIndex,
+      width: typeof page.width === "number" ? page.width : null,
+      height: typeof page.height === "number" ? page.height : null,
+    }));
   } catch {
     return null;
   }
 }
 
-function isCachedArchivePage(page: LocalComicPage): page is LocalComicPage {
+function isCachedArchivePage(page: unknown): page is LocalComicPage {
   return (
-    page?.sourceKind === "archive" &&
-    typeof page.internalPath === "string" &&
-    (typeof page.archiveIndex === "number" || page.archiveIndex === null)
+    typeof page === "object" &&
+    page !== null &&
+    (page as LocalComicPage).sourceKind === "archive" &&
+    typeof (page as LocalComicPage).internalPath === "string" &&
+    ((typeof (page as LocalComicPage).archiveIndex === "number") ||
+      (page as LocalComicPage).archiveIndex === null)
   );
 }
 
 function compareDirentsByName(a: { name: string }, b: { name: string }) {
   return pathCollator.compare(a.name, b.name);
+}
+
+async function readImageDimensions(filePath: string): Promise<{ width: number; height: number } | null> {
+  const metadata = await sharp(filePath).metadata();
+  if (metadata.width && metadata.height) {
+    return { width: metadata.width, height: metadata.height };
+  }
+  return null;
+}
+
+async function readImageDimensionsFromStream(stream: NodeJS.ReadableStream): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    let settled = false;
+
+    const finish = (result: { width: number; height: number } | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+
+    stream.on("data", (chunk: Buffer) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    stream.on("end", async () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        const metadata = await sharp(buffer).metadata();
+        if (metadata.width && metadata.height) {
+          finish({ width: metadata.width, height: metadata.height });
+        } else {
+          finish(null);
+        }
+      } catch {
+        finish(null);
+      }
+    });
+    stream.on("error", () => finish(null));
+  });
 }
 
 function toPortablePath(input: string) {

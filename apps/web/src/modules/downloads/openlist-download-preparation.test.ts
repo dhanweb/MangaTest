@@ -226,7 +226,7 @@ describe("OpenList download preparations", () => {
 
   it("records a failed finalization when the import manga root becomes unavailable", async () => {
     const archiveFixture = Buffer.from(ARCHIVE_FIXTURE_BASE64, "base64");
-    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+    vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
       if (String(input).startsWith("https://private.example/")) {
         return new Response(archiveFixture, {
           headers: {

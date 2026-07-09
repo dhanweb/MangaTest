@@ -7,9 +7,6 @@ import Database from "better-sqlite3";
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
-const ARCHIVE_FIXTURE_BASE64 =
-  "UEsDBBQAAAAIADGf4lxruW0fGAAAABYAAAAHAAAAMDAxLmpwZ0tLzE5VSCxKzsgsS1XIzE1MT1Uw5OUCAFBLAwQUAAAACAAxn+JcMgcrHRgAAAAWAAAABwAAADAwMi5wbmdLS8xOVUgsSs7ILEtVyMxNTE9VMOLlAgBQSwECFAAUAAAACAAxn+Jca7ltHxgAAAAWAAAABwAAAAAAAAAAAAAAAAAAAAAAMDAxLmpwZ1BLAQIUABQAAAAIADGf4lwyBysdGAAAABYAAAAHAAAAAAAAAAAAAAAAAD0AAAAwMDIucG5nUEsFBgAAAAACAAIAagAAAHoAAAAAAA==";
-
 describe("scanMangaRoot", () => {
   it("imports directory and cbz comics, then marks missing local files on rescan", async () => {
     const workspace = path.join(os.tmpdir(), `mangatest-scan-${randomUUID()}`);
@@ -41,7 +38,13 @@ describe("scanMangaRoot", () => {
     await mkdir(directoryComicPath, { recursive: true });
     await writeFile(path.join(directoryComicPath, "001.jpg"), jpegFixture);
     await writeFile(path.join(directoryComicPath, "002.png"), pngFixture);
-    await writeFile(path.join(rootPath, "Archive Comic.cbz"), Buffer.from(ARCHIVE_FIXTURE_BASE64, "base64"));
+    await writeFile(
+      path.join(rootPath, "Archive Comic.cbz"),
+      createStoredZip([
+        { name: "001.jpg", data: jpegFixture },
+        { name: "002.png", data: pngFixture },
+      ]),
+    );
 
     process.env.MANGATEST_DB_PATH = dbPath;
 
@@ -84,6 +87,15 @@ describe("scanMangaRoot", () => {
     expect(directoryImage?.data.length).toBe(jpegFixture.length);
     expect(archiveImage?.contentType).toBe("image/jpeg");
     expect(archiveImage?.data.length).toBeGreaterThan(0);
+
+    // Scans persist page image dimensions so the reader can reserve the right
+    // placeholder height before the image loads.
+    const directoryPageRow = selectPageDimensions(sqlite, directoryPage.id);
+    const secondDirectoryPageRow = selectPageDimensions(sqlite, secondDirectoryPage.id);
+    const archivePageRow = selectPageDimensions(sqlite, archivePage.id);
+    expect(directoryPageRow).toMatchObject({ width: 16, height: 24 });
+    expect(secondDirectoryPageRow).toMatchObject({ width: 12, height: 18 });
+    expect(archivePageRow).toMatchObject({ width: 16, height: 24 });
 
     const { getRuntimeSettings, saveRuntimeSettings } = await import("../core/settings");
     const savedSettings = await saveRuntimeSettings({
@@ -670,6 +682,12 @@ function selectPageBySourceKind(sqlite: Database.Database, sourceKind: "filesyst
     .get(sourceKind, offset) as { id: string };
 }
 
+function selectPageDimensions(sqlite: Database.Database, pageId: string) {
+  return sqlite
+    .prepare("select width, height from pages where id = ?")
+    .get(pageId) as { width: number | null; height: number | null } | undefined;
+}
+
 function selectLastReadPageId(sqlite: Database.Database, comicId: string) {
   const row = sqlite.prepare("select last_read_page_id as pageId from comics where id = ?").get(comicId) as
     | { pageId: string | null }
@@ -755,3 +773,86 @@ function selectDownloadTaskStatus(sqlite: Database.Database, taskId: string) {
   const row = sqlite.prepare("select status from download_tasks where id = ?").get(taskId) as { status: string } | undefined;
   return row?.status ?? null;
 }
+
+function createStoredZip(entries: Array<{ name: string; data: Buffer }>) {
+  const localParts: Buffer[] = [];
+  const centralParts: Buffer[] = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const nameBuffer = Buffer.from(entry.name);
+    const crc = crc32(entry.data);
+    const localHeader = Buffer.alloc(30);
+
+    localHeader.writeUInt32LE(0x04034b50, 0);
+    localHeader.writeUInt16LE(20, 4);
+    localHeader.writeUInt16LE(0, 6);
+    localHeader.writeUInt16LE(0, 8);
+    localHeader.writeUInt16LE(0, 10);
+    localHeader.writeUInt16LE(0, 12);
+    localHeader.writeUInt32LE(crc, 14);
+    localHeader.writeUInt32LE(entry.data.length, 18);
+    localHeader.writeUInt32LE(entry.data.length, 22);
+    localHeader.writeUInt16LE(nameBuffer.length, 26);
+    localHeader.writeUInt16LE(0, 28);
+
+    localParts.push(localHeader, nameBuffer, entry.data);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(0x02014b50, 0);
+    centralHeader.writeUInt16LE(20, 4);
+    centralHeader.writeUInt16LE(20, 6);
+    centralHeader.writeUInt16LE(0, 8);
+    centralHeader.writeUInt16LE(0, 10);
+    centralHeader.writeUInt16LE(0, 12);
+    centralHeader.writeUInt16LE(0, 14);
+    centralHeader.writeUInt32LE(crc, 16);
+    centralHeader.writeUInt32LE(entry.data.length, 20);
+    centralHeader.writeUInt32LE(entry.data.length, 24);
+    centralHeader.writeUInt16LE(nameBuffer.length, 28);
+    centralHeader.writeUInt16LE(0, 30);
+    centralHeader.writeUInt16LE(0, 32);
+    centralHeader.writeUInt16LE(0, 34);
+    centralHeader.writeUInt16LE(0, 36);
+    centralHeader.writeUInt32LE(0, 38);
+    centralHeader.writeUInt32LE(offset, 42);
+    centralParts.push(centralHeader, nameBuffer);
+
+    offset += localHeader.length + nameBuffer.length + entry.data.length;
+  }
+
+  const centralDirectoryOffset = offset;
+  const centralDirectorySize = centralParts.reduce((size, part) => size + part.length, 0);
+  const endOfCentralDirectory = Buffer.alloc(22);
+
+  endOfCentralDirectory.writeUInt32LE(0x06054b50, 0);
+  endOfCentralDirectory.writeUInt16LE(0, 4);
+  endOfCentralDirectory.writeUInt16LE(0, 6);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 8);
+  endOfCentralDirectory.writeUInt16LE(entries.length, 10);
+  endOfCentralDirectory.writeUInt32LE(centralDirectorySize, 12);
+  endOfCentralDirectory.writeUInt32LE(centralDirectoryOffset, 16);
+  endOfCentralDirectory.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...localParts, ...centralParts, endOfCentralDirectory]);
+}
+
+function crc32(buffer: Buffer) {
+  let crc = 0xffffffff;
+
+  for (const byte of buffer) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ byte) & 0xff];
+  }
+
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const CRC32_TABLE = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+
+  return value >>> 0;
+});
