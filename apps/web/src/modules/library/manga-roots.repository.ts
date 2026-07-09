@@ -1,7 +1,7 @@
 import { asc, eq, sql } from "drizzle-orm";
 
 import { bootstrapDatabase, getDb } from "@/modules/core/db";
-import { localFiles, mangaRoots } from "@/modules/core/db/schema";
+import { localFiles, mangaRoots, scanSessions } from "@/modules/core/db/schema";
 
 import { createMangaRootRecord, type MangaRootDraft, type MangaRootRecord, type MangaRootWithStats } from "./manga-roots";
 
@@ -9,6 +9,14 @@ export interface MangaRootRepository {
   list(): Promise<MangaRootRecord[]>;
   listWithStats(): Promise<MangaRootWithStats[]>;
   create(input: MangaRootDraft): Promise<MangaRootRecord>;
+  updateSettings(input: MangaRootSettingsUpdate): Promise<MangaRootRecord>;
+  deleteUnused(id: string): Promise<{ deleted: boolean }>;
+}
+
+export interface MangaRootSettingsUpdate {
+  id: string;
+  displayName?: string;
+  isEnabled: boolean;
 }
 
 export function createMangaRootRepository(): MangaRootRepository {
@@ -71,6 +79,59 @@ export function createMangaRootRepository(): MangaRootRepository {
       db.insert(mangaRoots).values(record).run();
 
       return record;
+    },
+
+    async updateSettings(input) {
+      bootstrapDatabase();
+      const db = getDb();
+      const existing = db.select().from(mangaRoots).where(eq(mangaRoots.id, input.id)).get();
+
+      if (!existing) {
+        throw new Error("漫画根目录不存在。");
+      }
+
+      const now = new Date().toISOString();
+      db.update(mangaRoots)
+        .set({
+          displayName: input.displayName?.trim() || null,
+          isEnabled: input.isEnabled,
+          updatedAt: now,
+        })
+        .where(eq(mangaRoots.id, input.id))
+        .run();
+
+      return {
+        id: existing.id,
+        absolutePath: existing.absolutePath,
+        displayName: input.displayName?.trim() || null,
+        scanMode: existing.scanMode,
+        isEnabled: input.isEnabled,
+      };
+    },
+
+    async deleteUnused(id) {
+      bootstrapDatabase();
+      const db = getDb();
+      const existing = db.select().from(mangaRoots).where(eq(mangaRoots.id, id)).get();
+
+      if (!existing) {
+        throw new Error("漫画根目录不存在。");
+      }
+
+      const usage = db
+        .select({ count: sql<number>`count(*)` })
+        .from(localFiles)
+        .where(eq(localFiles.mangaRootId, id))
+        .get();
+
+      if (Number(usage?.count ?? 0) > 0) {
+        throw new Error("这个路径已有入库漫画，不能删除。可以先停用路径，系统不会删除真实文件。");
+      }
+
+      db.update(scanSessions).set({ mangaRootId: null, updatedAt: new Date().toISOString() }).where(eq(scanSessions.mangaRootId, id)).run();
+      db.delete(mangaRoots).where(eq(mangaRoots.id, id)).run();
+
+      return { deleted: true };
     },
   };
 }

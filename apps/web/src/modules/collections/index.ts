@@ -473,12 +473,12 @@ function getCollectionById(id: string): CollectionRecord | null {
 }
 
 function listCollectionItems(collectionId: string, sortMode: CollectionSortMode): CollectionItemRecord[] {
-  const orderClause =
+  const orderClauses =
     sortMode === "title"
-      ? asc(comics.sortTitle)
+      ? [asc(comics.sortTitle), asc(collectionComics.sortOrder)]
       : sortMode === "recent_added"
-        ? desc(collectionComics.addedAt)
-        : asc(collectionComics.sortOrder);
+        ? [desc(collectionComics.addedAt), desc(collectionComics.sortOrder)]
+        : [asc(collectionComics.sortOrder)];
 
   const rows = getDb()
     .select({
@@ -497,7 +497,7 @@ function listCollectionItems(collectionId: string, sortMode: CollectionSortMode)
     .innerJoin(comics, eq(comics.id, collectionComics.comicId))
     .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
     .where(and(eq(collectionComics.collectionId, collectionId), eq(comics.status, "readable")))
-    .orderBy(orderClause)
+    .orderBy(...orderClauses)
     .all();
 
   return rows.map((row) => ({

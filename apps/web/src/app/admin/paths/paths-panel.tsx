@@ -1,13 +1,14 @@
 "use client";
 
 import { ActionIcon, Box, Group, Table, Text, TextInput, Tooltip } from "@mantine/core";
-import { Folder, Pencil, RefreshCcw, Search, Trash2 } from "lucide-react";
+import { Folder, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppBadge } from "@/components/ui/app-components";
 import type { MangaRootWithStats, ScanSessionRecord } from "@/modules/library";
 
-import { scanMangaRootAction } from "./actions";
+import { deleteMangaRootAction, scanMangaRootAction } from "./actions";
+import { MangaRootEditDialog } from "./manga-root-edit-dialog";
 import { MangaRootDialog } from "./manga-root-dialog";
 
 interface PathsPanelProps {
@@ -135,16 +136,29 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                         </ActionIcon>
                       </Tooltip>
                     </form>
-                    <Tooltip label="编辑路径后续实现" withArrow>
-                      <ActionIcon variant="subtle" color="ink" size="md" disabled aria-label={`编辑 ${root.absolutePath}`}>
-                        <Pencil size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="删除路径后续实现" withArrow>
-                      <ActionIcon variant="subtle" color="red" size="md" disabled aria-label={`删除 ${root.absolutePath}`}>
-                        <Trash2 size={15} />
-                      </ActionIcon>
-                    </Tooltip>
+                    <MangaRootEditDialog root={root} />
+                    <form
+                      action={deleteMangaRootAction}
+                      onSubmit={(event) => {
+                        if (!window.confirm(`只删除路径记录，不会删除真实文件。\n\n确认删除 ${root.absolutePath}？`)) {
+                          event.preventDefault();
+                        }
+                      }}
+                    >
+                      <input name="mangaRootId" type="hidden" value={root.id} />
+                      <Tooltip label={root.comicCount > 0 ? "已有入库漫画，不能删除；可先停用路径" : "删除路径记录"} withArrow>
+                        <ActionIcon
+                          variant="subtle"
+                          color="red"
+                          size="md"
+                          type="submit"
+                          disabled={root.comicCount > 0}
+                          aria-label={`删除 ${root.absolutePath}`}
+                        >
+                          <Trash2 size={15} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </form>
                   </Group>
                 </Table.Td>
               </Table.Tr>

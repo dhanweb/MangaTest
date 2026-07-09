@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createAndScanMangaRoot } from "@/modules/library/create-and-scan-manga-root";
+import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
 import { scanMangaRoot } from "@/modules/library/scan-library-root";
 
 export interface SaveMangaRootState {
@@ -50,4 +51,54 @@ export async function scanMangaRootAction(formData: FormData) {
   }
 
   revalidatePath("/admin/paths");
+}
+
+export async function updateMangaRootAction(_state: SaveMangaRootState, formData: FormData): Promise<SaveMangaRootState> {
+  const id = String(formData.get("mangaRootId") ?? "");
+  const displayName = String(formData.get("displayName") ?? "");
+  const isEnabled = formData.get("isEnabled") === "on";
+
+  if (!id) {
+    return {
+      status: "error",
+      message: "缺少漫画根目录 ID。",
+    };
+  }
+
+  try {
+    await createMangaRootRepository().updateSettings({
+      id,
+      displayName,
+      isEnabled,
+    });
+    revalidatePath("/admin/paths");
+    revalidatePath("/");
+
+    return {
+      status: "success",
+      message: "路径设置已保存。",
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "保存路径设置失败。",
+    };
+  }
+}
+
+export async function deleteMangaRootAction(formData: FormData) {
+  const id = String(formData.get("mangaRootId") ?? "");
+
+  if (!id) {
+    return;
+  }
+
+  try {
+    await createMangaRootRepository().deleteUnused(id);
+  } catch {
+    return;
+  }
+
+  revalidatePath("/admin/paths");
+  revalidatePath("/");
 }
