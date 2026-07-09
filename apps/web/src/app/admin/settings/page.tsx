@@ -4,7 +4,7 @@ import { Box, Group, Stack, Text } from "@mantine/core";
 import { Download, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AppButton, AppInput, AppSelect, AppSwitch } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppSwitch } from "@/components/ui/app-components";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
 import type {
@@ -353,6 +353,37 @@ function SettingsRow({ label, note, children }: { label: string; note?: string; 
   );
 }
 
+function ReadonlyValue({ value, tone = "neutral" }: { value: string; tone?: "neutral" | "on" | "off" }) {
+  const colors = {
+    neutral: { background: "white", color: "var(--mantine-color-ink-7)" },
+    off: { background: "#f1f3f5", color: "#53606c" },
+    on: { background: "#e4f9ed", color: "#00894a" },
+  }[tone];
+
+  return (
+    <Box
+      component="span"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minHeight: 32,
+        minWidth: 120,
+        padding: "0 10px",
+        border: "1px solid var(--mantine-color-pink-2)",
+        borderRadius: 7,
+        background: colors.background,
+        color: colors.color,
+        fontSize: 13,
+        fontWeight: 800,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {value}
+    </Box>
+  );
+}
+
 function GeneralSettings({
   isSaving,
   onSave,
@@ -412,7 +443,7 @@ function GeneralSettings({
 
       <SettingsGroup title="自动化">
         <SettingsRow label="启动时自动扫描" note="MVP 阶段保留设置入口，当前由后台手动触发扫描。">
-          <AppSwitch disabled aria-label="自动扫描" />
+          <ReadonlyValue value="关闭" tone="off" />
         </SettingsRow>
         <SettingsRow label="定时扫描" note="按 cron 表达式定时扫描目录变更。">
           <AppInput value="未启用" readOnly style={{ width: 180 }} />
@@ -457,7 +488,7 @@ function ReaderSettings({
     <>
       <SettingsGroup title="阅读行为">
         <SettingsRow label="默认阅读模式" note="打开漫画后的阅读方式。">
-          <AppSelect value="滚动模式" data={["滚动模式", "分页模式"].map((value) => ({ value, label: value }))} disabled />
+          <ReadonlyValue value="滚动模式" tone="on" />
         </SettingsRow>
         <SettingsRow label="图片预加载" note="提前加载后续页面图片以减少等待。">
           <AppSwitch
@@ -467,7 +498,7 @@ function ReaderSettings({
           />
         </SettingsRow>
         <SettingsRow label="阅读进度记录" note="自动记录每本漫画的阅读位置。">
-          <AppSwitch defaultChecked disabled aria-label="阅读进度" />
+          <ReadonlyValue value="已启用" tone="on" />
         </SettingsRow>
         <SettingsRow label="默认显示缩略图侧栏" note="桌面端打开 reader 时默认显示页面缩略图侧栏。">
           <AppSwitch
@@ -659,10 +690,10 @@ function DownloadSettings({
 
       <SettingsGroup title="Provider">
         <SettingsRow label="aria2" note="后续用于磁链和 torrent 任务。">
-          <AppSwitch disabled aria-label="aria2 provider" />
+          <ReadonlyValue value="未启用" tone="off" />
         </SettingsRow>
         <SettingsRow label="内置 HTTP" note="后续用于直链下载任务。">
-          <AppSwitch disabled aria-label="内置 HTTP provider" />
+          <ReadonlyValue value="未启用" tone="off" />
         </SettingsRow>
       </SettingsGroup>
 
@@ -796,32 +827,21 @@ function ScanSettings() {
           <AppInput value="__MACOSX, .DS_Store, .thumb" readOnly style={{ width: 280 }} />
         </SettingsRow>
         <SettingsRow label="封面优先级" note="自动选择封面的优先级策略。">
-          <AppSelect
-            value="cover"
-            data={[
-              { value: "cover", label: "cover.* 文件优先" },
-              { value: "first", label: "第一页优先" },
-            ]}
-            disabled
-          />
+          <ReadonlyValue value="cover.* 优先" tone="on" />
         </SettingsRow>
         <SettingsRow label="扫描后生成缩略图" note="扫描完成后自动生成缩略图缓存。">
-          <AppSwitch disabled aria-label="生成缩略图" />
+          <ReadonlyValue value="懒生成" tone="neutral" />
         </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="文件校验">
         <SettingsRow label="计算文件 hash" note="扫描时计算 SHA-256 用于重复检测和路径修复。">
-          <AppSwitch disabled aria-label="计算 hash" />
+          <ReadonlyValue value="未启用" tone="off" />
         </SettingsRow>
         <SettingsRow label="自动修复路径" note="检测到文件移动后自动更新数据库路径。">
-          <AppSwitch disabled aria-label="自动修复路径" />
+          <ReadonlyValue value="手动修复" tone="neutral" />
         </SettingsRow>
       </SettingsGroup>
-
-      <Group justify="flex-end" mt="md">
-        <AppButton disabled>保存扫描设置</AppButton>
-      </Group>
     </>
   );
 }
@@ -871,25 +891,25 @@ function SecuritySettings({
           />
         </SettingsRow>
         <SettingsRow label="写接口保护" note="启用后非本机 IP 的写操作需令牌验证。">
-          <AppSwitch defaultChecked disabled aria-label="写接口保护" />
+          <ReadonlyValue value="已启用" tone="on" />
         </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="日志与隐私">
         <SettingsRow label="磁链脱敏" note="日志中不记录完整 magnet 链接。">
-          <AppSwitch defaultChecked disabled aria-label="磁链脱敏" />
+          <ReadonlyValue value="已启用" tone="on" />
         </SettingsRow>
         <SettingsRow label="敏感配置隐藏" note="前台不暴露 OpenList token、115 cookie 等配置。">
-          <AppSwitch defaultChecked disabled aria-label="敏感配置隐藏" />
+          <ReadonlyValue value="已启用" tone="on" />
         </SettingsRow>
         <SettingsRow label="操作日志" note="记录关键操作：删除、路径修改、导入来源。">
-          <AppSwitch disabled aria-label="操作日志" />
+          <ReadonlyValue value="已启用" tone="on" />
         </SettingsRow>
       </SettingsGroup>
 
       <SettingsGroup title="局域网访问">
         <SettingsRow label="允许局域网 IP" note="允许同局域网内其他设备访问本服务。">
-          <AppSwitch disabled aria-label="局域网访问" />
+          <ReadonlyValue value="未启用" tone="off" />
         </SettingsRow>
       </SettingsGroup>
 

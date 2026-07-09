@@ -121,6 +121,8 @@ export const localFiles = sqliteTable(
     isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
     isMissing: integer("is_missing", { mode: "boolean" }).notNull().default(false),
     missingSince: text("missing_since"),
+    isIgnored: integer("is_ignored", { mode: "boolean" }).notNull().default(false),
+    ignoredAt: text("ignored_at"),
     ...timestamps,
   },
   (table) => ({
@@ -506,6 +508,7 @@ export const operationLogs = sqliteTable(
         "collection_add_comic",
         "collection_remove_comic",
         "collection_reorder",
+        "ignore_file_issue",
       ],
     }).notNull(),
     targetType: text("target_type").notNull(),

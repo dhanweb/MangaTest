@@ -73,6 +73,8 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
             .set({
               isMissing: false,
               missingSince: null,
+              isIgnored: false,
+              ignoredAt: null,
               updatedAt: now,
             })
             .where(eq(localFiles.id, file.id))

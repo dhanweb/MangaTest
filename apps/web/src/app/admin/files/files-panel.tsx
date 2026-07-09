@@ -31,6 +31,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   const [isRepairing, setIsRepairing] = useState(false);
   const [isRechecking, setIsRechecking] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  const [pendingIgnoreId, setPendingIgnoreId] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState("");
   const [scanError, setScanError] = useState("");
 
@@ -200,6 +201,32 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
   }
 
+  async function ignoreIssue(issue: FileMaintenanceIssueRecord) {
+    if (pendingIgnoreId) {
+      return;
+    }
+
+    setPendingIgnoreId(issue.id);
+    setScanMessage("");
+    setScanError("");
+
+    try {
+      const response = await fetch(`/api/local-files/${encodeURIComponent(issue.id)}/ignore`, { method: "POST" });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "忽略缺失文件问题失败。");
+      }
+
+      setItems((current) => current.filter((item) => item.id !== issue.id));
+      setScanMessage("已忽略这条缺失文件问题；重新检查或重新扫描发现文件恢复后会自动清除忽略状态。");
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "忽略缺失文件问题失败。");
+    } finally {
+      setPendingIgnoreId(null);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -337,8 +364,15 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
                         <Wrench size={15} />
                       </ActionIcon>
                     </Tooltip>
-                    <Tooltip label="忽略后续实现" withArrow>
-                      <ActionIcon variant="subtle" color="ink" size="md" disabled aria-label="忽略">
+                    <Tooltip label="忽略此问题" withArrow>
+                      <ActionIcon
+                        variant="subtle"
+                        color="ink"
+                        size="md"
+                        loading={pendingIgnoreId === issue.id}
+                        onClick={() => ignoreIssue(issue)}
+                        aria-label="忽略此问题"
+                      >
                         <FileWarning size={15} />
                       </ActionIcon>
                     </Tooltip>

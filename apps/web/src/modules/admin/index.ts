@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { getCacheSummary, type CacheSummary } from "@/modules/core/cache";
 import { bootstrapDatabase, comics, getDb, localFiles, operationLogs, scanSessions } from "@/modules/core/db";
@@ -35,7 +35,13 @@ export async function getAdminHealthSummary(): Promise<AdminHealthSummary> {
     getCacheSummary(),
     createDuplicateCandidateRepository().listGroups(),
     Promise.resolve(db.select().from(scanSessions).orderBy(desc(scanSessions.createdAt)).limit(1).get()),
-    Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(localFiles).where(eq(localFiles.isMissing, true)).get()),
+    Promise.resolve(
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(localFiles)
+        .where(and(eq(localFiles.isMissing, true), eq(localFiles.isIgnored, false)))
+        .get(),
+    ),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(comics).where(eq(comics.status, "readable")).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(localFiles).get()),
     Promise.resolve(db.select({ count: sql<number>`count(*)` }).from(operationLogs).get()),

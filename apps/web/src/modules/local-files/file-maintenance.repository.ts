@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { bootstrapDatabase, comics, getDb, localFiles, mangaRoots, operationLogs } from "@/modules/core/db";
 import { validateAbsolutePath } from "@/modules/local-files/path-safety";
@@ -21,6 +21,7 @@ export interface FileMaintenanceIssueRecord {
 export interface FileMaintenanceRepository {
   listIssues(): Promise<FileMaintenanceIssueRecord[]>;
   recheckMissingFiles(): Promise<{ checkedCount: number; restoredCount: number; stillMissingCount: number }>;
+  ignoreMissingIssue(localFileId: string): Promise<{ localFileId: string }>;
   repairMissingPath(localFileId: string, nextAbsolutePath: string): Promise<{ localFileId: string; absolutePath: string }>;
 }
 
@@ -41,7 +42,7 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         })
         .from(localFiles)
         .leftJoin(comics, eq(comics.id, localFiles.comicId))
-        .where(eq(localFiles.isMissing, true))
+        .where(and(eq(localFiles.isMissing, true), eq(localFiles.isIgnored, false)))
         .all();
 
       return rows.map((row) => ({
@@ -88,6 +89,8 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
             .set({
               isMissing: false,
               missingSince: null,
+              isIgnored: false,
+              ignoredAt: null,
               mtimeMs: Math.trunc(stat!.mtimeMs),
               ...(stat!.isFile() ? { sizeBytes: stat!.size } : {}),
               updatedAt: now,
@@ -114,6 +117,58 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         restoredCount,
         stillMissingCount: missingRows.length - restoredCount,
       };
+    },
+
+    async ignoreMissingIssue(localFileId) {
+      bootstrapDatabase();
+      const db = getDb();
+      const row = db
+        .select({
+          id: localFiles.id,
+          absolutePath: localFiles.absolutePath,
+          isMissing: localFiles.isMissing,
+          isIgnored: localFiles.isIgnored,
+        })
+        .from(localFiles)
+        .where(eq(localFiles.id, localFileId))
+        .get();
+
+      if (!row) {
+        throw new Error("找不到要忽略的本地文件记录。");
+      }
+
+      if (!row.isMissing) {
+        throw new Error("只能忽略当前缺失的文件问题。");
+      }
+
+      if (row.isIgnored) {
+        return { localFileId };
+      }
+
+      const now = new Date().toISOString();
+      db.transaction((tx) => {
+        tx.update(localFiles)
+          .set({
+            isIgnored: true,
+            ignoredAt: now,
+            updatedAt: now,
+          })
+          .where(eq(localFiles.id, localFileId))
+          .run();
+
+        tx.insert(operationLogs)
+          .values({
+            id: randomUUID(),
+            operation: "ignore_file_issue",
+            targetType: "local_file",
+            targetId: localFileId,
+            summary: "忽略缺失文件问题",
+            detailJson: JSON.stringify({ absolutePath: row.absolutePath }),
+          })
+          .run();
+      });
+
+      return { localFileId };
     },
 
     async repairMissingPath(localFileId, nextAbsolutePath) {
@@ -173,6 +228,8 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
           mtimeMs: Math.trunc(stat.mtimeMs),
           isMissing: false,
           missingSince: null,
+          isIgnored: false,
+          ignoredAt: null,
           updatedAt: now,
           ...(stat.isFile() ? { sizeBytes: stat.size } : {}),
         };

@@ -95,6 +95,8 @@ export function bootstrapDatabase() {
       is_primary INTEGER NOT NULL DEFAULT 0,
       is_missing INTEGER NOT NULL DEFAULT 0,
       missing_since TEXT,
+      is_ignored INTEGER NOT NULL DEFAULT 0,
+      ignored_at TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
@@ -483,5 +485,19 @@ export function bootstrapDatabase() {
       ON collection_comics (comic_id);
   `);
 
+  ensureColumn("local_files", "is_ignored", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn("local_files", "ignored_at", "TEXT");
+
   bootstrapped = true;
+}
+
+function ensureColumn(tableName: string, columnName: string, definition: string) {
+  const sqlite = getSqlite();
+  const columns = sqlite.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+
+  if (columns.some((column) => column.name === columnName)) {
+    return;
+  }
+
+  sqlite.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }

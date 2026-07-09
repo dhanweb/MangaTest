@@ -30,22 +30,40 @@ const EMPTY_METADATA_DRAFT = {
   originalTitle: "",
 };
 
-export function ComicsPanel({ availableTags, comics }: { availableTags: TagRow[]; comics: LibraryComicAdminRowRecord[] }) {
+export function ComicsPanel({
+  availableTags,
+  comics,
+  initialEditComicId,
+}: {
+  availableTags: TagRow[];
+  comics: LibraryComicAdminRowRecord[];
+  initialEditComicId?: string;
+}) {
+  const initialEditTarget = initialEditComicId ? (comics.find((comic) => comic.id === initialEditComicId) ?? null) : null;
+  const initialEditTargetIsMerged = Boolean(initialEditTarget?.parentComicId || initialEditTarget?.mergedAsChapterId);
   const [rows, setRows] = useState(() => comics);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState("10");
   const [search, setSearch] = useState("");
-  const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(null);
+  const [editTarget, setEditTarget] = useState<LibraryComicAdminRowRecord | null>(initialEditTarget);
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
-  const [metadataDraft, setMetadataDraft] = useState(EMPTY_METADATA_DRAFT);
+  const [metadataDraft, setMetadataDraft] = useState(() =>
+    initialEditTarget
+      ? {
+          displayTitle: initialEditTarget.displayTitle,
+          metadataQueryTitle: initialEditTarget.metadataQueryTitle ?? "",
+          originalTitle: initialEditTarget.originalTitle ?? "",
+        }
+      : EMPTY_METADATA_DRAFT,
+  );
   const [assignedTagsByComicId, setAssignedTagsByComicId] = useState<Record<string, AssignedComicTag[]>>({});
   const [chaptersByComicId, setChaptersByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
   const [chapterDraftsByComicId, setChapterDraftsByComicId] = useState<Record<string, LibraryChapterRecord[]>>({});
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [isLoadingTags, setIsLoadingTags] = useState(false);
-  const [isLoadingChapters, setIsLoadingChapters] = useState(false);
+  const [isLoadingTags, setIsLoadingTags] = useState(Boolean(initialEditTarget));
+  const [isLoadingChapters, setIsLoadingChapters] = useState(Boolean(initialEditTarget && !initialEditTargetIsMerged));
   const [actionError, setActionError] = useState("");
   const [coverError, setCoverError] = useState("");
   const [coverMessage, setCoverMessage] = useState("");
