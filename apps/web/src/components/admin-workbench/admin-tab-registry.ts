@@ -7,7 +7,7 @@ interface AdminTabInfo {
 }
 
 const EXACT_TITLES: Record<string, AdminTabInfo> = {
-  "/admin": { title: "后台首页", kind: "dashboard", closeable: false },
+  "/admin": { title: "后台首页", kind: "dashboard", closeable: true },
   "/admin/paths": { title: "漫画路径", kind: "list", closeable: true },
   "/admin/comics": { title: "漫画管理", kind: "list", closeable: true },
   "/admin/files": { title: "文件维护", kind: "list", closeable: true },

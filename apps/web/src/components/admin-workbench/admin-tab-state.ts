@@ -73,7 +73,15 @@ export function closeAdminTab(cache: AdminTabCache, tabId: string, now = Date.no
   const closingIndex = cache.tabs.findIndex((tab) => tab.id === tabId);
   const closingTab = cache.tabs[closingIndex];
 
-  if (!closingTab?.closeable) {
+  if (!closingTab) {
+    return cache;
+  }
+
+  if (cache.tabs.length <= 1) {
+    return closingTab.id === DEFAULT_ADMIN_TAB_ID ? cache : createInitialAdminTabCache(now);
+  }
+
+  if (!closingTab.closeable && closingTab.id !== DEFAULT_ADMIN_TAB_ID) {
     return cache;
   }
 
@@ -105,9 +113,9 @@ function pruneTabs(cache: AdminTabCache): AdminTabCache {
     return cache;
   }
 
-  const pinned = cache.tabs.filter((tab) => !tab.closeable || tab.id === cache.activeTabId);
+  const pinned = cache.tabs.filter((tab) => tab.id === cache.activeTabId);
   const closeable = cache.tabs
-    .filter((tab) => tab.closeable && tab.id !== cache.activeTabId)
+    .filter((tab) => tab.id !== cache.activeTabId)
     .sort((a, b) => b.lastActiveAt - a.lastActiveAt);
   const keepIds = new Set([...pinned, ...closeable].slice(0, MAX_ADMIN_TABS).map((tab) => tab.id));
 

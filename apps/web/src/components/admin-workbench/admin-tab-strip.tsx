@@ -22,6 +22,7 @@ export function AdminTabStrip() {
         <Group gap={0} wrap="nowrap" style={{ minWidth: "max-content" }}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
+            const canClose = tabs.length > 1;
 
             return (
               <Box
@@ -50,7 +51,7 @@ export function AdminTabStrip() {
                 <Text size="sm" fw={800} truncate style={{ flex: 1, minWidth: 0 }}>
                   {tab.title}
                 </Text>
-                {tab.closeable ? (
+                {canClose ? (
                   <ActionIcon
                     aria-label={`关闭 ${tab.title}`}
                     color="pink"
