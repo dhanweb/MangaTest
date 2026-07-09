@@ -78,7 +78,7 @@ export function ComicDetailView({ comic }: { comic: LibraryComicDetailRecord }) 
             <AppButton variant={favorite ? "light" : "outline"} color="pink" onClick={() => setFavorite((cur) => !cur)} leftSection={<Heart size={16} />}>
               {favorite ? "已收藏" : "收藏"}
             </AppButton>
-            <AppLink href={`/admin/comics?edit=${encodeURIComponent(comic.id)}`} variant="outline" leftSection={<Edit3 size={16} />}>
+            <AppLink href={`/admin/comics/${comic.id}`} variant="outline" leftSection={<Edit3 size={16} />}>
               编辑信息
             </AppLink>
           </Group>
