@@ -20,6 +20,7 @@ export interface FileMaintenanceIssueRecord {
 
 export interface FileMaintenanceRepository {
   listIssues(): Promise<FileMaintenanceIssueRecord[]>;
+  recheckMissingFiles(): Promise<{ checkedCount: number; restoredCount: number; stillMissingCount: number }>;
   repairMissingPath(localFileId: string, nextAbsolutePath: string): Promise<{ localFileId: string; absolutePath: string }>;
 }
 
@@ -53,6 +54,66 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         detail: "文件路径不存在，可能是磁盘已断开连接或文件被移动。",
         detectedAt: row.missingSince ?? row.updatedAt,
       }));
+    },
+
+    async recheckMissingFiles() {
+      bootstrapDatabase();
+      const db = getDb();
+      const missingRows = db
+        .select({
+          id: localFiles.id,
+          comicId: localFiles.comicId,
+          absolutePath: localFiles.absolutePath,
+          kind: localFiles.kind,
+        })
+        .from(localFiles)
+        .where(eq(localFiles.isMissing, true))
+        .all();
+
+      let restoredCount = 0;
+      const now = new Date().toISOString();
+
+      for (const row of missingRows) {
+        const stat = await fs.stat(row.absolutePath).catch(() => null);
+        const existsAsExpected =
+          Boolean(stat) &&
+          ((row.kind === "directory" && stat?.isDirectory()) || ((row.kind === "zip" || row.kind === "cbz") && stat?.isFile()));
+
+        if (!existsAsExpected) {
+          continue;
+        }
+
+        db.transaction((tx) => {
+          tx.update(localFiles)
+            .set({
+              isMissing: false,
+              missingSince: null,
+              mtimeMs: Math.trunc(stat!.mtimeMs),
+              ...(stat!.isFile() ? { sizeBytes: stat!.size } : {}),
+              updatedAt: now,
+            })
+            .where(eq(localFiles.id, row.id))
+            .run();
+
+          if (row.comicId) {
+            tx.update(comics)
+              .set({
+                status: "readable",
+                updatedAt: now,
+              })
+              .where(eq(comics.id, row.comicId))
+              .run();
+          }
+        });
+
+        restoredCount += 1;
+      }
+
+      return {
+        checkedCount: missingRows.length,
+        restoredCount,
+        stillMissingCount: missingRows.length - restoredCount,
+      };
     },
 
     async repairMissingPath(localFileId, nextAbsolutePath) {

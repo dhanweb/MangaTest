@@ -29,6 +29,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   const [pendingDuplicateAction, setPendingDuplicateAction] = useState<string | null>(null);
   const [repairError, setRepairError] = useState("");
   const [isRepairing, setIsRepairing] = useState(false);
+  const [isRechecking, setIsRechecking] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
   const [scanError, setScanError] = useState("");
@@ -165,6 +166,40 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
   }
 
+  async function recheckMissingFiles() {
+    if (isRechecking) {
+      return;
+    }
+
+    setIsRechecking(true);
+    setScanMessage("");
+    setScanError("");
+
+    try {
+      const response = await fetch("/api/local-files/recheck", { method: "POST" });
+      const payload = (await response.json()) as {
+        result?: { checkedCount: number; restoredCount: number; stillMissingCount: number };
+        error?: string;
+      };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "重新检查缺失文件失败。");
+      }
+
+      setScanMessage(
+        `重新检查完成：检查 ${payload.result.checkedCount} 条缺失记录，恢复 ${payload.result.restoredCount} 条，仍缺失 ${payload.result.stillMissingCount} 条。`,
+      );
+
+      if (payload.result.restoredCount > 0) {
+        window.setTimeout(() => window.location.reload(), 700);
+      }
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "重新检查缺失文件失败。");
+    } finally {
+      setIsRechecking(false);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -222,8 +257,8 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           />
         </Box>
         <Group gap="sm">
-          <AppButton variant="outline" disabled leftSection={<RefreshCcw size={16} />}>
-            重新扫描
+          <AppButton variant="outline" loading={isRechecking} onClick={recheckMissingFiles} leftSection={<RefreshCcw size={16} />}>
+            重新检查
           </AppButton>
           <AppButton loading={isScanning} onClick={scanAllRoots} leftSection={<FolderSync size={16} />}>
             全部扫描
