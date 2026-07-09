@@ -212,6 +212,7 @@ export function DraggableModal({
   overlayProps,
   styles,
   title,
+  transitionProps,
   withCloseButton = true,
   withOverlay = true,
   ...props
@@ -252,14 +253,17 @@ export function DraggableModal({
     setPosition({ x: 0, y: 0 });
     onClose();
   };
+  const offsetParent = typeof document === "undefined" ? undefined : document.body;
+  const draggableTransitionProps = transitionProps ?? { duration: 0 };
 
   return (
-    <MantineModal.Root opened={opened} onClose={handleClose} styles={mergedStyles} {...props}>
+    <MantineModal.Root opened={opened} onClose={handleClose} styles={mergedStyles} transitionProps={draggableTransitionProps} {...props}>
       {withOverlay && <MantineModal.Overlay {...overlayProps} />}
       <DraggableCore
         handle=".app-draggable-modal-header"
         cancel="input, textarea, button, select, option, a, [role='button'], [data-no-drag]"
         nodeRef={contentRef}
+        offsetParent={offsetParent}
         onDrag={handleDrag}
       >
         <MantineModal.Content ref={contentRef}>
