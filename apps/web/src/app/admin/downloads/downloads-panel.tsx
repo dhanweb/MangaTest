@@ -4,6 +4,7 @@ import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/co
 import { CheckCircle2, CloudDownload, Link2, Plus, RotateCcw, Search, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
 import type {
   CloudScanSessionRecord,
@@ -115,10 +116,10 @@ export function DownloadsPanel({
   const [dispatchPlanItem, setDispatchPlanItem] = useState(dispatchPlan);
   const [resourceItems, setResourceItems] = useState(resources);
   const [taskItems, setTaskItems] = useState(tasks);
-  const [search, setSearch] = useState("");
-  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(() => resources[0]?.id ?? null);
-  const [provider, setProvider] = useState<DownloadProvider>(() => resources[0]?.defaultProvider ?? "aria2");
-  const [targetDirectory, setTargetDirectory] = useState("");
+  const [search, setSearch] = useAdminTabState("search", "");
+  const [selectedResourceId, setSelectedResourceId] = useAdminTabState<string | null>("selectedResourceId", resources[0]?.id ?? null);
+  const [provider, setProvider] = useAdminTabState<DownloadProvider>("provider", resources[0]?.defaultProvider ?? "aria2");
+  const [targetDirectory, setTargetDirectory] = useAdminTabState("targetDirectory", "");
   const [pendingCloudScanResourceId, setPendingCloudScanResourceId] = useState<string | null>(null);
   const [pendingCloudScanImportId, setPendingCloudScanImportId] = useState<string | null>(null);
   const [pendingResourceId, setPendingResourceId] = useState<string | null>(null);

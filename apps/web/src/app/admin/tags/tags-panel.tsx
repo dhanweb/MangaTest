@@ -5,6 +5,7 @@ import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import type { CanonicalTag } from "@/modules/tags";
 import { NAMESPACE_LABELS, namespaceLabel, namespaceOptionLabel, tagDisplayLabel } from "@/modules/tags";
@@ -27,8 +28,8 @@ const DEFAULT_TAG_FORM: TagFormState = {
 
 export function TagsPanel({ tags }: { tags: TagRow[] }) {
   const [items, setItems] = useState(tags);
-  const [search, setSearch] = useState("");
-  const [namespaceFilter, setNamespaceFilter] = useState<string | null>(null);
+  const [search, setSearch] = useAdminTabState("search", "");
+  const [namespaceFilter, setNamespaceFilter] = useAdminTabState<string | null>("namespaceFilter", null);
   const [opened, { open, close }] = useDisclosure(false);
   const [editTarget, setEditTarget] = useState<TagRow | null>(null);
   const [form, setForm] = useState<TagFormState>(DEFAULT_TAG_FORM);

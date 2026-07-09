@@ -233,7 +233,7 @@ export function LibraryHome({
             <Text size="sm" c="ink.5" maw={460} mx="auto" mt={8} mb={20}>
               先在后台配置 manga root，再执行一次手动扫描。
             </Text>
-            <AppLink href="/admin/paths" variant="filled">
+            <AppLink href="/admin/paths" variant="filled" target="_blank" rel="noreferrer">
               配置漫画路径
             </AppLink>
           </Box>

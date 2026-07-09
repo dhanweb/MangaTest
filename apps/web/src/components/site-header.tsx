@@ -55,28 +55,34 @@ export function SiteHeader({ active = "library" }: SiteHeaderProps) {
         </Box>
 
         <Group component="nav" gap={12} aria-label="主导航">
-          {navItems.map((item) => (
-            <Box
-              key={item.id}
-              component={Link}
-              href={item.href}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                minHeight: 36,
-                padding: "0 14px",
-                borderRadius: 9,
-                color: "white",
-                fontWeight: 800,
-                textDecoration: "none",
-                background: active === item.id ? "rgba(255,255,255,0.18)" : "transparent",
-              }}
-            >
-              <item.icon size={16} />
-              {item.label}
-            </Box>
-          ))}
+          {navItems.map((item) => {
+            const isAdmin = item.id === "admin";
+
+            return (
+              <Box
+                key={item.id}
+                component={Link}
+                href={item.href}
+                rel={isAdmin ? "noreferrer" : undefined}
+                target={isAdmin ? "_blank" : undefined}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  minHeight: 36,
+                  padding: "0 14px",
+                  borderRadius: 9,
+                  color: "white",
+                  fontWeight: 800,
+                  textDecoration: "none",
+                  background: active === item.id ? "rgba(255,255,255,0.18)" : "transparent",
+                }}
+              >
+                <item.icon size={16} />
+                {item.label}
+              </Box>
+            );
+          })}
         </Group>
       </Group>
     </Box>

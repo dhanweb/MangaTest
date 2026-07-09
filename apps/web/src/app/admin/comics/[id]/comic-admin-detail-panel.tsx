@@ -5,6 +5,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, EyeOff, GitMerge, GripVertical, Plus, Re
 import Link from "next/link";
 import { useEffect, useMemo, useState, type DragEvent } from "react";
 
+import { useAdminTabTitle } from "@/components/admin-workbench/use-admin-tab-title";
 import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
@@ -57,6 +58,8 @@ export function ComicAdminDetailPanel({
   const [mergeModalOpened, setMergeModalOpened] = useState(false);
   const [mergeSearch, setMergeSearch] = useState("");
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
+
+  useAdminTabTitle(currentComic.displayTitle);
 
   const currentTags = assignedTags;
   const currentChapters = chapterDrafts;

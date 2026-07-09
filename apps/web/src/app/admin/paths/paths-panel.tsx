@@ -2,8 +2,9 @@
 
 import { ActionIcon, Box, Group, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { Folder, RefreshCcw, Search, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppBadge } from "@/components/ui/app-components";
 import type { MangaRootWithStats, ScanSessionRecord } from "@/modules/library";
 
@@ -17,7 +18,7 @@ interface PathsPanelProps {
 }
 
 export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useAdminTabState("search", "");
 
   const filteredRoots = useMemo(() => {
     const query = search.trim().toLowerCase();

@@ -4,6 +4,7 @@ import { Box, Group, Stack, Text } from "@mantine/core";
 import { Download, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSwitch } from "@/components/ui/app-components";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
@@ -37,7 +38,7 @@ const OPENLIST_LOGIN_STATUS_CONFIG: Record<OpenListLoginStatus, { label: string;
 };
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>("常规设置");
+  const [activeTab, setActiveTab] = useAdminTabState<SettingsTab>("activeSettingsTab", "常规设置");
   const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [isExportingBackup, setIsExportingBackup] = useState(false);

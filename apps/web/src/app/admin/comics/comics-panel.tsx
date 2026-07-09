@@ -3,8 +3,9 @@
 import { Box, Group, Pagination, Select, Table, Text, TextInput } from "@mantine/core";
 import { Library, Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton } from "@/components/ui/app-components";
 import type { LibraryComicAdminRowRecord } from "@/modules/library";
 
@@ -15,9 +16,9 @@ const PAGE_SIZE_OPTIONS = [
 ];
 
 export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }) {
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState("10");
-  const [search, setSearch] = useState("");
+  const [page, setPage] = useAdminTabState("page", 1);
+  const [pageSize, setPageSize] = useAdminTabState("pageSize", "10");
+  const [search, setSearch] = useAdminTabState("search", "");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();

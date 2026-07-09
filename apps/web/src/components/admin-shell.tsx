@@ -4,7 +4,12 @@ import { Box } from "@mantine/core";
 import { Bookmark, CloudDownload, Folder, Gauge, Library, Settings, Tag, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Suspense } from "react";
 
+import { AdminCachedOutlet } from "@/components/admin-workbench/admin-cached-outlet";
+import { AdminNavigationInterceptor } from "@/components/admin-workbench/admin-navigation-interceptor";
+import { AdminTabProvider, useAdminTabs } from "@/components/admin-workbench/admin-tab-provider";
+import { AdminTabStrip } from "@/components/admin-workbench/admin-tab-strip";
 import { SiteHeader } from "@/components/site-header";
 
 const navItems = [
@@ -19,7 +24,27 @@ const navItems = [
 ];
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense fallback={<AdminShellFallback />}>
+      <AdminTabProvider>
+        <AdminShellInner>{children}</AdminShellInner>
+      </AdminTabProvider>
+    </Suspense>
+  );
+}
+
+function AdminShellFallback() {
+  return (
+    <>
+      <SiteHeader active="admin" />
+      <Box style={{ minHeight: "calc(100vh - 60px)", background: "#fff7fb", padding: "24px 32px 48px" }} />
+    </>
+  );
+}
+
+function AdminShellInner({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { openTab } = useAdminTabs();
 
   return (
     <>
@@ -46,6 +71,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 component={Link}
                 href={item.href}
+                onClick={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  openTab(item.href, item.label);
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -68,7 +101,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           })}
         </Box>
 
-        <Box style={{ flex: 1, minWidth: 0, overflowY: "auto", height: "100%", padding: "24px 32px 48px" }}>{children}</Box>
+        <Box style={{ flex: 1, minWidth: 0, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
+          <AdminTabStrip />
+          <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 32px 48px" }}>
+            <AdminNavigationInterceptor>
+              <AdminCachedOutlet>{children}</AdminCachedOutlet>
+            </AdminNavigationInterceptor>
+          </Box>
+        </Box>
       </Box>
     </>
   );

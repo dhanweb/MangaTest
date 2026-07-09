@@ -4,6 +4,7 @@ import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/co
 import { EyeOff, FileWarning, FolderSync, RefreshCcw, Search, Trash2, Wrench } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord, ScanAllMangaRootsResult } from "@/modules/library";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
@@ -22,7 +23,7 @@ const STATUS_LABELS: Record<DuplicateCandidateGroupRecord["candidates"][number][
 export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: DuplicateCandidateGroupRecord[]; issues: FileMaintenanceIssueRecord[] }) {
   const [items, setItems] = useState(issues);
   const [duplicateItems, setDuplicateItems] = useState(duplicateGroups);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useAdminTabState("search", "");
   const [repairTarget, setRepairTarget] = useState<FileMaintenanceIssueRecord | null>(null);
   const [repairPath, setRepairPath] = useState("");
   const [duplicateError, setDuplicateError] = useState("");
