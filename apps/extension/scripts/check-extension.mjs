@@ -20,6 +20,7 @@ const referencedFiles = [
   "src/content/site-adapters.js",
   "src/content/metadata-contract.js",
   "src/content/collect-page-metadata.js",
+  "src/background/torrent-magnet.js",
   "src/popup/popup.css",
   "src/popup/popup.js",
 ].filter(Boolean);
@@ -58,6 +59,42 @@ checkFixture({
   },
 });
 
+checkFixture({
+  file: "test-fixtures/exhentai-gallery.html",
+  url: "https://exhentai.org/g/3242017/mock-token/",
+  expected: {
+    adapterId: "ehentai-gallery",
+    site: "exhentai.org",
+    sourceId: "exhentai.org/g/3242017",
+    sourceUrl: "https://exhentai.org/g/3242017/mock-token/",
+    title: "[sample] The Single Hunter Meets Girl [English]",
+    originalTitle: "[sample] 独身ハンターの出逢い [英訳]",
+    tagCount: 2,
+    resourceCount: 0,
+    tags: [
+      { namespace: "parody", name: "honkai star rail", displayNameZh: "崩坏：星穹铁道" },
+      { namespace: "female", name: "sole female", displayNameZh: "单女主" },
+    ],
+  },
+});
+
+checkFixture({
+  file: "test-fixtures/exhentai-torrents.html",
+  url: "https://exhentai.org/gallerytorrents.php?gid=3242017&t=mocktoken",
+  expected: {
+    adapterId: "ehentai-torrents",
+    site: "exhentai.org",
+    sourceId: "exhentai.org/g/3242017",
+    sourceUrl: "https://exhentai.org/g/3242017/",
+    title: "[sample] The Single Hunter Meets Girl [English]",
+    tagCount: 0,
+    resourceCount: 2,
+    firstResourceUrl: "https://exhentai.org/torrent/3242017/mock-download-token/mockhash1.torrent",
+  },
+});
+
+await checkTorrentMagnet();
+
 console.log("Extension manifest and collector checks passed.");
 
 function checkFixture({ file, url, expected }) {
@@ -68,9 +105,28 @@ function checkFixture({ file, url, expected }) {
   assert(result.site === expected.site, `${file} site mismatch`);
   assert(result.sourceId === expected.sourceId, `${file} sourceId mismatch`);
   assert(result.title === expected.title, `${file} title mismatch`);
+  if (expected.sourceUrl) {
+    assert(result.sourceUrl === expected.sourceUrl, `${file} sourceUrl mismatch`);
+  }
   assert((result.originalTitle ?? null) === (expected.originalTitle ?? result.originalTitle ?? null), `${file} originalTitle mismatch`);
   assert(result.tags.length === expected.tagCount, `${file} tag count mismatch`);
   assert(result.resources.length === expected.resourceCount, `${file} resource count mismatch`);
+  if (expected.firstResourceUrl) {
+    assert(result.resources[0]?.url === expected.firstResourceUrl, `${file} first resource URL mismatch`);
+  }
+  if (expected.tags) {
+    for (const tag of expected.tags) {
+      assert(
+        result.tags.some(
+          (candidate) =>
+            candidate.namespace === tag.namespace &&
+            candidate.name === tag.name &&
+            candidate.displayNameZh === tag.displayNameZh,
+        ),
+        `${file} missing tag ${tag.namespace}:${tag.name}`,
+      );
+    }
+  }
 }
 
 function runCollector(html, url) {
@@ -119,8 +175,20 @@ function createDocument(html, location) {
 }
 
 function querySelector(html, selector, location) {
+  if (selector === "#gn") {
+    return parseElements(html, "h1", location).find((element) => element.getAttribute("id") === "gn") ?? null;
+  }
+
+  if (selector === "#gj") {
+    return parseElements(html, "h1", location).find((element) => element.getAttribute("id") === "gj") ?? null;
+  }
+
   if (selector === "h1") {
     return elementFromTag(html, "h1", location);
+  }
+
+  if (selector === "#gd1 img") {
+    return parseElements(sectionById(html, "gd1"), "img", location)[0] ?? null;
   }
 
   if (selector === "#info h1") {
@@ -153,15 +221,47 @@ function querySelectorAll(html, selector, location) {
     return parseElements(html, "a", location).filter((element) => Boolean(element.getAttribute("href")));
   }
 
+  if (selector === 'a[href*="/torrent/"]') {
+    return parseElements(html, "a", location).filter((element) => element.href.includes("/torrent/"));
+  }
+
   if (selector === "#tags .tag-container") {
     return blocksByClass(sectionById(html, "tags"), "tag-container").map((block) => createElement("div", {}, block, location));
   }
 
   if (selector === "#taglist a, .gt, .gtl, .gtw") {
-    return parseElements(sectionById(html, "taglist"), "a", location);
+    return parseElements(html, "a", location).filter((element) => element.getAttribute("id")?.startsWith("ta_"));
   }
 
   return [];
+}
+
+async function checkTorrentMagnet() {
+  const context = {
+    ArrayBuffer,
+    Map,
+    Set,
+    TextDecoder,
+    Uint8Array,
+    URL,
+    crypto: globalThis.crypto,
+    encodeURIComponent,
+    fetch: async () => {
+      throw new Error("Unexpected fetch in torrentToMagnet check");
+    },
+    self: {},
+  };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/background/torrent-magnet.js"), "utf8"), context, {
+    filename: "src/background/torrent-magnet.js",
+  });
+
+  const torrent = new TextEncoder().encode("d8:announce14:http://tracker4:infod6:lengthi1e4:name4:demoe5:other4:nopee");
+  const magnet = await context.self.MangaTestTorrentMagnet.torrentToMagnet(torrent);
+
+  assert(magnet.startsWith("magnet:?xt=urn%3Abtih%3A"), "torrentToMagnet must produce a btih magnet");
+  assert(magnet.includes("dn=demo"), "torrentToMagnet must include torrent name");
+  assert(magnet.includes("tr=http%3A%2F%2Ftracker"), "torrentToMagnet must include tracker");
 }
 
 function findElementByAttr(html, tag, attrName, attrValue, location) {

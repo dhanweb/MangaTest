@@ -83,11 +83,11 @@
   function mergeTags(primary = [], fallback = []) {
     const tags = new Map();
 
-    for (const tag of [...primary, ...fallback]) {
+    for (const tag of primary.length > 0 ? primary : fallback) {
       if (!tag?.namespace || !tag?.name) {
         continue;
       }
-      addTag(tags, tag.namespace, tag.name);
+      addTag(tags, tag.namespace, tag.name, tag.displayNameZh);
     }
 
     return Array.from(tags.values()).slice(0, MAX_TAGS);
@@ -173,7 +173,7 @@
     return Array.from(resources.values()).slice(0, MAX_RESOURCES);
   }
 
-  function addTag(tags, namespace, name) {
+  function addTag(tags, namespace, name, displayNameZh) {
     const cleanName = cleanText(name).toLowerCase();
     const cleanNamespace = cleanText(namespace).toLowerCase();
 
@@ -186,6 +186,7 @@
       tags.set(key, {
         namespace: cleanNamespace,
         name: cleanName,
+        displayNameZh: cleanText(displayNameZh) || null,
       });
     }
   }

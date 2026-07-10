@@ -1,6 +1,7 @@
 const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:4317",
   importToken: "",
+  lastExhentaiMetadata: null,
   siteName: "",
 };
 
@@ -60,7 +61,7 @@ async function collectFromCurrentTab() {
       files: ["src/content/site-adapters.js", "src/content/metadata-contract.js", "src/content/collect-page-metadata.js"],
     });
 
-    collectedMetadata = withPopupFields(result?.result);
+    collectedMetadata = await prepareCollectedMetadata(withPopupFields(result?.result));
     renderPreview(collectedMetadata);
     await refreshMetadataStatus(collectedMetadata);
     setStatus("已采集预览，可以提交入库。", "success");
@@ -86,11 +87,14 @@ async function submitMetadata() {
   try {
     await persistSettings();
 
+    setStatus("正在解析种子资源...");
+    const metadataWithMagnets = await resolveTorrentResources(collectedMetadata);
     const payload = {
-      ...collectedMetadata,
+      ...metadataWithMagnets,
       comicId:
         elements.useLocalMatch.checked && latestMetadataStatus?.localMatchComicId ? latestMetadataStatus.localMatchComicId : undefined,
     };
+    setStatus("正在提交到 MangaTest...");
     const response = await fetch(`${normalizeServerUrl(elements.serverUrl.value)}/api/metadata/import`, {
       method: "POST",
       body: JSON.stringify(payload),
@@ -132,6 +136,56 @@ function withPopupFields(metadata) {
   return {
     ...metadata,
     site: elements.siteName.value.trim() || metadata.site || inferSiteName(activeTab?.url ?? ""),
+  };
+}
+
+async function prepareCollectedMetadata(metadata) {
+  if (metadata.adapterId === "ehentai-torrents") {
+    return mergeStoredExhentaiMetadata(metadata);
+  }
+
+  if (metadata.adapterId === "ehentai-gallery") {
+    await chrome.storage.local.set({ lastExhentaiMetadata: metadata });
+  }
+
+  return metadata;
+}
+
+async function mergeStoredExhentaiMetadata(metadata) {
+  const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
+  const stored = settings.lastExhentaiMetadata;
+
+  if (!stored || stored.sourceId !== metadata.sourceId) {
+    return metadata;
+  }
+
+  return {
+    ...stored,
+    adapterId: metadata.adapterId,
+    resources: metadata.resources || [],
+  };
+}
+
+async function resolveTorrentResources(metadata) {
+  const resources = Array.isArray(metadata.resources) ? metadata.resources : [];
+  const torrentResources = resources.filter((resource) => resource?.type === "torrent");
+
+  if (torrentResources.length === 0) {
+    return metadata;
+  }
+
+  const response = await chrome.runtime.sendMessage({
+    type: "MANGATEST_RESOLVE_TORRENTS",
+    resources: torrentResources,
+  });
+
+  if (!response?.ok) {
+    throw new Error(response?.error || "种子转换磁链失败。");
+  }
+
+  return {
+    ...metadata,
+    resources: [...resources.filter((resource) => resource?.type !== "torrent"), ...response.resources],
   };
 }
 

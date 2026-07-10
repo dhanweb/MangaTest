@@ -56,7 +56,11 @@
 
       if (namespace && name && !seen.has(key)) {
         seen.add(key);
-        tags.push({ namespace, name });
+        tags.push({
+          namespace,
+          name,
+          displayNameZh: cleanText(tag?.displayNameZh) || null,
+        });
       }
     }
 

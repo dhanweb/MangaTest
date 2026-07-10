@@ -96,5 +96,6 @@ Success response:
 
 - Do not send cookies, source-site authorization headers, or private account data.
 - Magnet URLs may be submitted as resources, but logs and normal UI must not show them unredacted.
+- ExHentai `.torrent` URLs should be converted to magnet links in the extension before submit when possible, so private torrent URLs do not need to be stored.
 - `display_title` on existing comics is user-owned and must not be overwritten by metadata imports.
 - `comicId` is optional and should only be sent by the extension after the user explicitly chooses a single local match.
