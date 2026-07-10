@@ -1,7 +1,6 @@
 import {
   ADMIN_TAB_CACHE_VERSION,
   ADMIN_TABS_STORAGE_KEY,
-  DEFAULT_ADMIN_TAB_ID,
   type AdminTab,
   type AdminTabCache,
   type StorageLike,
@@ -58,7 +57,6 @@ function isAdminTabCache(value: unknown): value is AdminTabCache {
     typeof cache.activeTabId === "string" &&
     Array.isArray(cache.tabs) &&
     cache.tabs.length > 0 &&
-    cache.tabs.some((tab) => isAdminTab(tab) && tab.id === DEFAULT_ADMIN_TAB_ID) &&
     cache.tabs.every(isAdminTab) &&
     cache.tabs.some((tab) => tab.id === cache.activeTabId)
   );

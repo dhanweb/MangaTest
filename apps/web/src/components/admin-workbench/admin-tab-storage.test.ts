@@ -44,4 +44,14 @@ describe("admin tab storage", () => {
 
     expect(loadAdminTabCache(storage)).toBeNull();
   });
+
+  it("allows caches without the dashboard tab", () => {
+    const storage = new MemoryStorage();
+    const cache = openAdminTab(createInitialAdminTabCache(100), "/admin/comics", undefined, 200);
+    const withoutDashboard = { ...cache, tabs: cache.tabs.filter((tab) => tab.id !== "/admin") };
+
+    saveAdminTabCache(storage, withoutDashboard);
+
+    expect(loadAdminTabCache(storage)).toEqual(withoutDashboard);
+  });
 });

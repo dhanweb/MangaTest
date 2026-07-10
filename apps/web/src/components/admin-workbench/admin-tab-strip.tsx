@@ -4,6 +4,7 @@ import { ActionIcon, Box, Group, ScrollArea, Text, Tooltip } from "@mantine/core
 import { RefreshCw, X } from "lucide-react";
 
 import { useAdminTabs } from "./admin-tab-provider";
+import { DEFAULT_ADMIN_TAB_ID } from "./admin-tab-types";
 
 export function AdminTabStrip() {
   const { activeTabId, tabs, activateTab, closeTab, refreshActiveTab } = useAdminTabs();
@@ -22,7 +23,7 @@ export function AdminTabStrip() {
         <Group gap={0} wrap="nowrap" style={{ minWidth: "max-content" }}>
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
-            const canClose = tabs.length > 1;
+            const canClose = tabs.length > 1 || tab.id !== DEFAULT_ADMIN_TAB_ID;
 
             return (
               <Box
