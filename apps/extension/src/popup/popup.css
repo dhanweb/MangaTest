@@ -100,6 +100,31 @@ dl div {
   gap: 4px;
 }
 
+#match-target {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #fde0eb;
+  padding-top: 8px;
+  color: #5e4051;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#match-target[hidden] {
+  display: none;
+}
+
+#match-target input {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
+}
+
+#match-target span {
+  overflow-wrap: anywhere;
+}
+
 dt,
 dd {
   margin: 0;

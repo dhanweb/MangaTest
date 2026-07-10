@@ -14,10 +14,13 @@ const elements = {
   previewResources: document.querySelector("#preview-resources"),
   previewTags: document.querySelector("#preview-tags"),
   previewTitle: document.querySelector("#preview-title"),
+  matchTarget: document.querySelector("#match-target"),
+  matchTargetLabel: document.querySelector("#match-target-label"),
   serverUrl: document.querySelector("#server-url"),
   siteName: document.querySelector("#site-name"),
   status: document.querySelector("#status"),
   submitButton: document.querySelector("#submit-button"),
+  useLocalMatch: document.querySelector("#use-local-match"),
 };
 
 let activeTab = null;
@@ -54,7 +57,7 @@ async function collectFromCurrentTab() {
     await persistSettings();
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: activeTab.id },
-      files: ["src/content/site-adapters.js", "src/content/collect-page-metadata.js"],
+      files: ["src/content/site-adapters.js", "src/content/metadata-contract.js", "src/content/collect-page-metadata.js"],
     });
 
     collectedMetadata = withPopupFields(result?.result);
@@ -83,21 +86,26 @@ async function submitMetadata() {
   try {
     await persistSettings();
 
+    const payload = {
+      ...collectedMetadata,
+      comicId:
+        elements.useLocalMatch.checked && latestMetadataStatus?.localMatchComicId ? latestMetadataStatus.localMatchComicId : undefined,
+    };
     const response = await fetch(`${normalizeServerUrl(elements.serverUrl.value)}/api/metadata/import`, {
       method: "POST",
-      body: JSON.stringify(collectedMetadata),
+      body: JSON.stringify(payload),
       headers: {
         Authorization: `Bearer ${elements.importToken.value.trim()}`,
         "Content-Type": "application/json",
       },
     });
-    const payload = await response.json().catch(() => ({}));
+    const responsePayload = await response.json().catch(() => ({}));
 
     if (!response.ok) {
-      throw new Error(payload.error || "提交失败。");
+      throw new Error(responsePayload.error || "提交失败。");
     }
 
-    const result = payload.result;
+    const result = responsePayload.result;
     const status = result.createdComic ? "已创建远程记录" : result.matchedBy === "local_title" ? "已匹配本地漫画" : "已更新漫画 metadata";
 
     latestMetadataStatus = {
@@ -129,6 +137,8 @@ function withPopupFields(metadata) {
 
 function renderPreview(metadata) {
   elements.preview.hidden = false;
+  elements.matchTarget.hidden = true;
+  elements.useLocalMatch.checked = false;
   elements.previewTitle.textContent = metadata.title || "未识别标题";
   elements.previewTags.textContent = String(metadata.tags?.length ?? 0);
   elements.previewResources.textContent = String(metadata.resources?.length ?? 0);
@@ -171,8 +181,13 @@ async function fetchMetadataStatus(metadata) {
 }
 
 function renderImportStatus(status) {
+  elements.matchTarget.hidden = true;
+  elements.useLocalMatch.checked = false;
+
   if (!status?.imported) {
     if (status?.localMatchComicId) {
+      elements.matchTarget.hidden = false;
+      elements.matchTargetLabel.textContent = `提交到本地漫画：${status.localMatchDisplayTitle || status.localMatchComicId}`;
       elements.previewImportStatus.textContent = status.localMatchReadable ? "可匹配本地" : "可匹配缺失记录";
       return;
     }

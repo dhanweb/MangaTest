@@ -306,5 +306,6 @@
     return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   }
 
-  return collectPageMetadata();
+  const metadata = collectPageMetadata();
+  return window.MangaTestMetadataContract ? window.MangaTestMetadataContract.normalizeMetadataPayload(metadata) : metadata;
 })();

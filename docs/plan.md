@@ -763,6 +763,7 @@ Downloads 和 OpenList provider：
 - 避免设置页暴露不可保存的假控件；MVP 固定策略用只读状态展示
 - 后台管理入口从前台打开时默认使用浏览器新标签页，后台内部提供类似浏览器的应用页签工作台
 - 后台应用页签需要缓存已打开页签，并尽量保留页签切换时的页面交互状态
+- 后续阶段启动点：优先打通 Chrome MV3 插件采集详情页 metadata、状态查询、提交入库和 remote-only / 本地匹配闭环
 - 校准前台漫画网站体验与后台管理入口的主次关系
 - 对扫描、reader、缓存、文件维护和备份做端到端验证
 - 保持文档与真实实现同步
@@ -770,7 +771,7 @@ Downloads 和 OpenList provider：
 部分后续阶段能力已经提前进入 `apps/web`：
 
 - 第二阶段的一部分：标题 / 元数据编辑、标签维护、封面上传 / 重新生成、重复候选、合并为章节和恢复
-- 第三阶段的一部分：`metadata-ingest`、导入 token、来源站状态检查、metadata 导入和 remote-only 记录
+- 第三阶段的一部分：Chrome MV3 插件详情页采集、`metadata-ingest`、导入 token、来源站状态检查、metadata 导入、remote-only 记录和显式本地匹配提交
 - 第四阶段的一部分：Downloads provider 注册、OpenList 连接检查、OpenList cloud scan、资源导入、下载准备、临时下载、finalization
 - 第五阶段的一部分：collections / reading queue 和队列阅读导航
 
