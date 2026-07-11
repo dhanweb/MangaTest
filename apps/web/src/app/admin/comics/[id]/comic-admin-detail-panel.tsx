@@ -1,24 +1,28 @@
 "use client";
 
-import { Box, FileInput, Group, Radio, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput } from "@mantine/core";
-import { ArrowDown, ArrowLeft, ArrowUp, EyeOff, GitMerge, GripVertical, Plus, RefreshCw, RotateCcw, Save, Search, Trash2, Upload, X } from "lucide-react";
+import {
+  ActionIcon, Badge, Box, Group, Paper, Radio, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, TextInput,
+} from "@mantine/core";
+import {
+  ArrowLeft, BookOpen, EyeOff, GitMerge, GripVertical, RotateCcw, Save, Search, Trash2, Upload,
+} from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabTitle } from "@/components/admin-workbench/use-admin-tab-title";
-import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
+import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
 import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
-import { namespaceLabel, tagDisplayLabel } from "@/modules/tags";
+import { namespaceLabel } from "@/modules/tags";
 
 type TagRow = CanonicalTag & { comicCount: number };
-type AssignedComicTag = CanonicalTag & {
-  source: "scan" | "metadata" | "manual";
-  isUserEdited: boolean;
-  assignedAt: string;
-};
+type ComicTagViewModel = CanonicalTag & { source: "scan" | "metadata" | "manual"; isUserEdited: boolean; assignedAt: string };
+type SourceRecord = { id: string; site: string; sourceId: string | null; sourceUrl: string; originalTitle: string | null; coverUrl: string | null; createdAt: string; updatedAt: string };
+type ResourceRecord = { id: string; comicSourceId: string | null; resourceType: string; displayLabel: string | null; redactedResource: string | null; createdAt: string; sourceSite: string | null; taskId: string | null; taskStatus: string | null; taskErrorMessage: string | null; taskCreatedAt: string | null };
+type ProgressRecord = { id: string; chapterId: string; pageId: string; pageNumber: number; progressPercent: number; updatedAt: string; chapterTitle: string | null; chapterPageCount: number } | null;
+type LocalFileRecord = { id: string; kind: string; absolutePath: string; relativePath: string; sizeBytes: number | null; mtimeMs: number | null; contentHash: string | null; isPrimary: boolean; isMissing: boolean; isIgnored: boolean; createdAt: string; updatedAt: string };
+type LogRecord = { id: string; operation: string; targetType: string; targetId: string; summary: string; createdAt: string };
 
-const EMPTY_ASSIGNED_TAGS: AssignedComicTag[] = [];
 const EMPTY_CHAPTERS: LibraryChapterRecord[] = [];
 
 export function ComicAdminDetailPanel({
@@ -33,905 +37,584 @@ export function ComicAdminDetailPanel({
   const [rows, setRows] = useState(comics);
   const [tagRows, setTagRows] = useState(availableTags);
   const [currentComic, setCurrentComic] = useState(comic);
-  const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
-  const [selectedCoverFile, setSelectedCoverFile] = useState<File | null>(null);
+  const [activeTab, setActiveTab] = useState<string | null>("basic");
+
   const [metadataDraft, setMetadataDraft] = useState({
     displayTitle: comic.displayTitle,
     metadataQueryTitle: comic.metadataQueryTitle ?? "",
     originalTitle: comic.originalTitle ?? "",
   });
-  const [newTagDraft, setNewTagDraft] = useState({ namespace: "tag", name: "", displayNameZh: "" });
-  const [assignedTags, setAssignedTags] = useState<AssignedComicTag[]>(EMPTY_ASSIGNED_TAGS);
+
+  const [assignedTags, setAssignedTags] = useState<ComicTagViewModel[]>([]);
+  const [isLoadingTags, setIsLoadingTags] = useState(true);
   const [savedChapters, setSavedChapters] = useState<LibraryChapterRecord[]>(EMPTY_CHAPTERS);
   const [chapterDrafts, setChapterDrafts] = useState<LibraryChapterRecord[]>(EMPTY_CHAPTERS);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [isLoadingTags, setIsLoadingTags] = useState(true);
   const [isLoadingChapters, setIsLoadingChapters] = useState(!isMergedComic(comic));
-  const [actionError, setActionError] = useState("");
-  const [coverError, setCoverError] = useState("");
-  const [coverMessage, setCoverMessage] = useState("");
-  const [metadataError, setMetadataError] = useState("");
-  const [metadataMessage, setMetadataMessage] = useState("");
-  const [mergeError, setMergeError] = useState("");
-  const [chapterError, setChapterError] = useState("");
-  const [tagError, setTagError] = useState("");
+  const [sources, setSources] = useState<SourceRecord[]>([]);
+  const [resources, setResources] = useState<ResourceRecord[]>([]);
+  const [progress, setProgress] = useState<ProgressRecord>(null);
+  const [localFileRecords, setLocalFileRecords] = useState<LocalFileRecord[]>([]);
+  const [logs, setLogs] = useState<LogRecord[]>([]);
+  const [isLoadingSources, setIsLoadingSources] = useState(true);
+  const [isLoadingResources, setIsLoadingResources] = useState(true);
+  const [isLoadingProgress, setIsLoadingProgress] = useState(true);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(true);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(true);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [mergeModalOpened, setMergeModalOpened] = useState(false);
   const [mergeSearch, setMergeSearch] = useState("");
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
 
   useAdminTabTitle(currentComic.displayTitle);
 
-  const currentTags = assignedTags;
-  const currentChapters = chapterDrafts;
-  const chapterOrderChanged = currentChapters.map((chapter) => chapter.id).join("|") !== savedChapters.map((chapter) => chapter.id).join("|");
   const editTargetIsMerged = isMergedComic(currentComic);
-  const parentComic = currentComic.parentComicId ? rows.find((row) => row.id === currentComic.parentComicId) : null;
-  const canReorderChapters = !editTargetIsMerged && currentChapters.length > 1;
-  const assignedTagIds = useMemo(() => new Set(currentTags.map((tag) => tag.id)), [currentTags]);
-  const availableTagOptions = useMemo(
-    () =>
-      tagRows
-        .filter((tag) => !assignedTagIds.has(tag.id))
-        .map((tag) => ({
-          value: tag.id,
-          label: `${tagDisplayLabel(tag)} · ${namespaceLabel(tag.namespace)}`,
-        })),
-    [assignedTagIds, tagRows],
+  const parentComic = currentComic.parentComicId ? rows.find((r) => r.id === currentComic.parentComicId) : null;
+  const chapterOrderChanged = chapterDrafts.map((c) => c.id).join("|") !== savedChapters.map((c) => c.id).join("|");
+  const canReorderChapters = !editTargetIsMerged && chapterDrafts.length > 1;
+  const tagGroups = useMemo(() => getTagGroups(assignedTags), [assignedTags]);
+  const mergeCandidates = useMemo(
+    () => rows.filter((r) => r.id !== currentComic.id && r.status === "readable" && !r.parentComicId && !r.mergedAsChapterId)
+      .filter((r) => { const q = mergeSearch.trim().toLowerCase(); return q ? [r.displayTitle, r.fileTitle, r.originalTitle ?? "", r.metadataQueryTitle ?? "", r.primaryLocalPath ?? ""].join(" ").toLowerCase().includes(q) : true; }),
+    [currentComic.id, mergeSearch, rows],
   );
-  const mergeCandidates = useMemo(() => {
-    const query = mergeSearch.trim().toLowerCase();
-    return rows
-      .filter((row) => row.id !== currentComic.id && row.status === "readable" && !row.parentComicId && !row.mergedAsChapterId)
-      .filter((row) =>
-        query
-          ? [row.displayTitle, row.fileTitle, row.originalTitle ?? "", row.metadataQueryTitle ?? "", row.primaryLocalPath ?? ""].join(" ").toLowerCase().includes(query)
-          : true,
-      );
-  }, [currentComic.id, mergeSearch, rows]);
+
+  const showMsg = useCallback((text: string, tone: "success" | "error") => { setMsg({ text, tone }); setTimeout(() => setMsg(null), 4000); }, []);
 
   useEffect(() => {
-    let isCanceled = false;
-
-    fetch(`/api/comics/${currentComic.id}/tags`)
-      .then((response) => response.json())
-      .then((payload: { tags?: AssignedComicTag[]; error?: string }) => {
-        if (isCanceled) {
-          return;
-        }
-
-        if (!payload.tags) {
-          throw new Error(payload.error ?? "读取漫画标签失败。");
-        }
-
-        setAssignedTags(payload.tags);
-      })
-      .catch((error) => {
-        if (!isCanceled) {
-          setTagError(error instanceof Error ? error.message : "读取漫画标签失败。");
-        }
-      })
-      .finally(() => {
-        if (!isCanceled) {
-          setIsLoadingTags(false);
-        }
-      });
-
-    return () => {
-      isCanceled = true;
-    };
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/tags`).then((r) => r.json()).then((d: { tags?: ComicTagViewModel[] }) => { if (!c && d.tags) setAssignedTags(d.tags); }).catch(() => {}).finally(() => { if (!c) setIsLoadingTags(false); });
+    return () => { c = true; };
   }, [currentComic.id]);
 
   useEffect(() => {
-    if (editTargetIsMerged) {
-      return;
-    }
-
-    let isCanceled = false;
-
-    fetch(`/api/comics/${currentComic.id}/chapters/order`)
-      .then((response) => response.json())
-      .then((payload: { chapters?: LibraryChapterRecord[]; error?: string }) => {
-        if (isCanceled) {
-          return;
-        }
-
-        if (!payload.chapters) {
-          throw new Error(payload.error ?? "读取章节顺序失败。");
-        }
-
-        setSavedChapters(payload.chapters);
-        setChapterDrafts(payload.chapters);
-      })
-      .catch((error) => {
-        if (!isCanceled) {
-          setChapterError(error instanceof Error ? error.message : "读取章节顺序失败。");
-        }
-      })
-      .finally(() => {
-        if (!isCanceled) {
-          setIsLoadingChapters(false);
-        }
-      });
-
-    return () => {
-      isCanceled = true;
-    };
+    if (editTargetIsMerged) { setIsLoadingChapters(false); return; }
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/chapters/order`).then((r) => r.json()).then((d: { chapters?: LibraryChapterRecord[] }) => { if (!c && d.chapters) { setSavedChapters(d.chapters); setChapterDrafts(d.chapters); } }).catch(() => {}).finally(() => { if (!c) setIsLoadingChapters(false); });
+    return () => { c = true; };
   }, [currentComic.id, editTargetIsMerged]);
 
-  function patchCurrentComic(patch: Partial<LibraryComicAdminRowRecord>) {
-    setCurrentComic((current) => ({ ...current, ...patch }));
-    setRows((current) => current.map((row) => (row.id === currentComic.id ? { ...row, ...patch } : row)));
-  }
+  useEffect(() => {
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/sources`).then((r) => r.json()).then((d: { sources?: SourceRecord[] }) => { if (!c && d.sources) setSources(d.sources); }).catch(() => {}).finally(() => { if (!c) setIsLoadingSources(false); });
+    return () => { c = true; };
+  }, [currentComic.id]);
 
-  async function saveComicMetadata() {
-    setPendingAction("metadata");
-    setMetadataError("");
-    setMetadataMessage("");
+  useEffect(() => {
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/resources`).then((r) => r.json()).then((d: { resources?: ResourceRecord[] }) => { if (!c && d.resources) setResources(d.resources); }).catch(() => {}).finally(() => { if (!c) setIsLoadingResources(false); });
+    return () => { c = true; };
+  }, [currentComic.id]);
 
+  useEffect(() => {
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/progress`).then((r) => r.json()).then((d: { progress?: ProgressRecord }) => { if (!c) setProgress(d.progress ?? null); }).catch(() => {}).finally(() => { if (!c) setIsLoadingProgress(false); });
+    return () => { c = true; };
+  }, [currentComic.id]);
+
+  useEffect(() => {
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/local-files`).then((r) => r.json()).then((d: { files?: LocalFileRecord[] }) => { if (!c && d.files) setLocalFileRecords(d.files); }).catch(() => {}).finally(() => { if (!c) setIsLoadingFiles(false); });
+    return () => { c = true; };
+  }, [currentComic.id]);
+
+  useEffect(() => {
+    let c = false;
+    fetch(`/api/comics/${currentComic.id}/logs`).then((r) => r.json()).then((d: { logs?: LogRecord[] }) => { if (!c && d.logs) setLogs(d.logs); }).catch(() => {}).finally(() => { if (!c) setIsLoadingLogs(false); });
+    return () => { c = true; };
+  }, [currentComic.id]);
+
+  function patchComic(p: Partial<LibraryComicAdminRowRecord>) { setCurrentComic((c) => ({ ...c, ...p })); setRows((r) => r.map((row) => (row.id === currentComic.id ? { ...row, ...p } : row))); }
+
+  async function saveMeta() {
+    setPendingAction("meta");
     try {
-      const response = await fetch(`/api/comics/${currentComic.id}/metadata`, {
-        method: "PATCH",
-        body: JSON.stringify(metadataDraft),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as {
-        comic?: {
-          id: string;
-          displayTitle: string;
-          fileTitle: string;
-          metadataQueryTitle: string | null;
-          originalTitle: string | null;
-          updatedAt: string;
-        };
-        error?: string;
-      };
-
-      if (!response.ok || !payload.comic) {
-        throw new Error(payload.error ?? "保存漫画元数据失败。");
-      }
-
-      patchCurrentComic({
-        displayTitle: payload.comic.displayTitle,
-        metadataQueryTitle: payload.comic.metadataQueryTitle,
-        originalTitle: payload.comic.originalTitle,
-        updatedAt: payload.comic.updatedAt,
-      });
-      setMetadataDraft({
-        displayTitle: payload.comic.displayTitle,
-        metadataQueryTitle: payload.comic.metadataQueryTitle ?? "",
-        originalTitle: payload.comic.originalTitle ?? "",
-      });
-      setMetadataMessage("漫画元数据已保存。");
-    } catch (error) {
-      setMetadataError(error instanceof Error ? error.message : "保存漫画元数据失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      const res = await fetch(`/api/comics/${currentComic.id}/metadata`, { method: "PATCH", body: JSON.stringify(metadataDraft), headers: { "Content-Type": "application/json" } });
+      const p = await res.json() as { comic?: { displayTitle: string; metadataQueryTitle: string | null; originalTitle: string | null; updatedAt: string }; error?: string };
+      if (!res.ok || !p.comic) throw new Error(p.error ?? "保存失败");
+      patchComic({ displayTitle: p.comic.displayTitle, metadataQueryTitle: p.comic.metadataQueryTitle, originalTitle: p.comic.originalTitle });
+      setMetadataDraft({ displayTitle: p.comic.displayTitle, metadataQueryTitle: p.comic.metadataQueryTitle ?? "", originalTitle: p.comic.originalTitle ?? "" });
+      showMsg("已保存", "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "保存失败", "error"); } finally { setPendingAction(null); }
   }
 
-  async function uploadCover() {
-    if (!selectedCoverFile) {
-      return;
-    }
-
-    setPendingAction("cover:upload");
-    setCoverError("");
-    setCoverMessage("");
-
+  async function reloadCover() {
+    setPendingAction("cover");
     try {
-      const formData = new FormData();
-      formData.append("file", selectedCoverFile);
-      const response = await fetch(`/api/comics/${currentComic.id}/cover`, { method: "PUT", body: formData });
-      const payload = (await response.json()) as { result?: { generatedCount: number }; error?: string };
-
-      if (!response.ok || !payload.result) {
-        throw new Error(payload.error ?? "上传封面失败。");
-      }
-
-      setSelectedCoverFile(null);
-      setCoverMessage(`已上传手动封面，并生成 ${payload.result.generatedCount} 个封面缓存。`);
-    } catch (error) {
-      setCoverError(error instanceof Error ? error.message : "上传封面失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      await fetch(`/api/comics/${currentComic.id}/cover`, { method: "POST" });
+      showMsg("封面已重新生成", "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "重新生成失败", "error"); } finally { setPendingAction(null); }
   }
 
-  async function regenerateCover() {
-    setPendingAction("cover:regenerate");
-    setCoverError("");
-    setCoverMessage("");
-
-    try {
-      const response = await fetch(`/api/comics/${currentComic.id}/cover`, { method: "POST" });
-      const payload = (await response.json()) as { result?: { generatedCount: number; removedCacheCount: number }; error?: string };
-
-      if (!response.ok || !payload.result) {
-        throw new Error(payload.error ?? "重新生成封面失败。");
-      }
-
-      setCoverMessage(`已重新生成 ${payload.result.generatedCount} 个封面缓存，清理旧缓存 ${payload.result.removedCacheCount} 个。`);
-    } catch (error) {
-      setCoverError(error instanceof Error ? error.message : "重新生成封面失败。");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function changeComicStatus(action: ComicMaintenanceAction) {
+  async function changeStatus(action: ComicMaintenanceAction) {
     setPendingAction(action);
-    setActionError("");
-
     try {
-      const response = await fetch(`/api/comics/${currentComic.id}/status`, {
-        method: "PATCH",
-        body: JSON.stringify({ action }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as {
-        comic?: { id: string; status: LibraryComicAdminRowRecord["status"] };
-        error?: string;
-      };
-
-      if (!response.ok || !payload.comic) {
-        throw new Error(payload.error ?? "漫画状态更新失败。");
-      }
-
-      patchCurrentComic({ status: payload.comic.status });
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : "漫画状态更新失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      const res = await fetch(`/api/comics/${currentComic.id}/status`, { method: "PATCH", body: JSON.stringify({ action }), headers: { "Content-Type": "application/json" } });
+      const p = await res.json() as { comic?: { status: LibraryComicAdminRowRecord["status"] }; error?: string };
+      if (!res.ok || !p.comic) throw new Error(p.error ?? "操作失败");
+      patchComic({ status: p.comic.status });
+      showMsg(`状态已更新`, "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "操作失败", "error"); } finally { setPendingAction(null); }
   }
 
-  async function addTagToComic(tagId: string) {
-    setPendingAction("tag:add");
-    setTagError("");
-
-    try {
-      const response = await fetch(`/api/comics/${currentComic.id}/tags`, {
-        method: "POST",
-        body: JSON.stringify({ tagId }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as { tags?: AssignedComicTag[]; error?: string };
-
-      if (!response.ok || !payload.tags) {
-        throw new Error(payload.error ?? "绑定漫画标签失败。");
-      }
-
-      setAssignedTags(payload.tags);
-      setSelectedTagId(null);
-    } catch (error) {
-      setTagError(error instanceof Error ? error.message : "绑定漫画标签失败。");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function createAndBindTag() {
-    if (!newTagDraft.namespace.trim() || !newTagDraft.name.trim()) {
-      setTagError("标签分类和名称不能为空。");
-      return;
-    }
-
-    setPendingAction("tag:create");
-    setTagError("");
-
-    try {
-      const response = await fetch("/api/tags", {
-        method: "POST",
-        body: JSON.stringify({
-          namespace: newTagDraft.namespace,
-          name: newTagDraft.name,
-          displayNameZh: newTagDraft.displayNameZh || null,
-        }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as { tag?: CanonicalTag; error?: string };
-
-      if (!response.ok || !payload.tag) {
-        throw new Error(payload.error ?? "创建标签失败。");
-      }
-
-      const createdTag = payload.tag;
-
-      setTagRows((current) => [...current, { ...createdTag, comicCount: 0 }]);
-      setNewTagDraft({ namespace: newTagDraft.namespace, name: "", displayNameZh: "" });
-      await addTagToComic(createdTag.id);
-    } catch (error) {
-      setTagError(error instanceof Error ? error.message : "创建并绑定标签失败。");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function removeTagFromComic(tagId: string) {
-    setPendingAction(`tag:remove:${tagId}`);
-    setTagError("");
-
-    try {
-      const response = await fetch(`/api/comics/${currentComic.id}/tags`, {
-        method: "DELETE",
-        body: JSON.stringify({ tagId }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as { tags?: AssignedComicTag[]; error?: string };
-
-      if (!response.ok || !payload.tags) {
-        throw new Error(payload.error ?? "移除漫画标签失败。");
-      }
-
-      setAssignedTags(payload.tags);
-    } catch (error) {
-      setTagError(error instanceof Error ? error.message : "移除漫画标签失败。");
-    } finally {
-      setPendingAction(null);
-    }
-  }
-
-  async function mergeComicAsChapter() {
-    if (!selectedMergeTargetId) {
-      return;
-    }
-
+  async function mergeComic() {
+    if (!selectedMergeTargetId) return;
     setPendingAction("merge");
-    setMergeError("");
-
     try {
-      const response = await fetch(`/api/comics/${currentComic.id}/merge`, {
-        method: "POST",
-        body: JSON.stringify({ targetComicId: selectedMergeTargetId }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as { comics?: LibraryComicAdminRowRecord[]; error?: string };
-
-      if (!response.ok || !payload.comics) {
-        throw new Error(payload.error ?? "合并章节失败。");
-      }
-
-      setRows(payload.comics);
-      setCurrentComic(payload.comics.find((row) => row.id === currentComic.id) ?? currentComic);
-      setSelectedMergeTargetId(null);
-      setMergeModalOpened(false);
-      setIsLoadingChapters(false);
-    } catch (error) {
-      setMergeError(error instanceof Error ? error.message : "合并章节失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      const res = await fetch(`/api/comics/${currentComic.id}/merge`, { method: "POST", body: JSON.stringify({ targetComicId: selectedMergeTargetId }), headers: { "Content-Type": "application/json" } });
+      const p = await res.json() as { comics?: LibraryComicAdminRowRecord[]; error?: string };
+      if (!res.ok || !p.comics) throw new Error(p.error ?? "合并失败");
+      setRows(p.comics); setCurrentComic(p.comics.find((r) => r.id === currentComic.id) ?? currentComic);
+      setSelectedMergeTargetId(null); setMergeModalOpened(false); setIsLoadingChapters(false);
+      showMsg("已合并为章节", "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "合并失败", "error"); } finally { setPendingAction(null); }
   }
 
-  async function restoreMergedComic() {
-    const parentComicId = currentComic.parentComicId;
+  async function restoreMerge() {
     setPendingAction("merge:restore");
-    setMergeError("");
-
     try {
-      const response = await fetch(`/api/comics/${currentComic.id}/merge`, { method: "DELETE" });
-      const payload = (await response.json()) as { comics?: LibraryComicAdminRowRecord[]; error?: string };
-
-      if (!response.ok || !payload.comics) {
-        throw new Error(payload.error ?? "恢复合并漫画失败。");
-      }
-
-      setRows(payload.comics);
-      setCurrentComic(payload.comics.find((row) => row.id === currentComic.id) ?? currentComic);
-      if (parentComicId) {
-        setSavedChapters(EMPTY_CHAPTERS);
-        setChapterDrafts(EMPTY_CHAPTERS);
-        setIsLoadingChapters(true);
-      }
-    } catch (error) {
-      setMergeError(error instanceof Error ? error.message : "恢复合并漫画失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      const res = await fetch(`/api/comics/${currentComic.id}/merge`, { method: "DELETE" });
+      const p = await res.json() as { comics?: LibraryComicAdminRowRecord[]; error?: string };
+      if (!res.ok || !p.comics) throw new Error(p.error ?? "恢复失败");
+      setRows(p.comics); setCurrentComic(p.comics.find((r) => r.id === currentComic.id) ?? currentComic);
+      setSavedChapters(EMPTY_CHAPTERS); setChapterDrafts(EMPTY_CHAPTERS); setIsLoadingChapters(true);
+      showMsg("已恢复", "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "恢复失败", "error"); } finally { setPendingAction(null); }
   }
 
-  function reorderChapterDraft(fromIndex: number, toIndex: number) {
-    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || toIndex >= currentChapters.length) {
-      return;
-    }
-
-    const nextChapters = [...currentChapters];
-    const [movedChapter] = nextChapters.splice(fromIndex, 1);
-    if (!movedChapter) {
-      return;
-    }
-
-    nextChapters.splice(toIndex, 0, movedChapter);
-    setChapterDrafts(nextChapters);
+  function moveChapter(id: string, dir: -1 | 1) {
+    const idx = chapterDrafts.findIndex((c) => c.id === id); const to = idx + dir;
+    if (idx === to || to < 0 || to >= chapterDrafts.length) return;
+    const next = [...chapterDrafts]; const [m] = next.splice(idx, 1); if (!m) return; next.splice(to, 0, m); setChapterDrafts(next);
   }
 
-  function moveChapter(chapterId: string, direction: -1 | 1) {
-    const currentIndex = currentChapters.findIndex((chapter) => chapter.id === chapterId);
-    reorderChapterDraft(currentIndex, currentIndex + direction);
-  }
-
-  function dropChapter(event: DragEvent<HTMLDivElement>, targetChapterId: string) {
-    event.preventDefault();
-    const draggedChapterId = event.dataTransfer.getData("text/plain");
-    const fromIndex = currentChapters.findIndex((chapter) => chapter.id === draggedChapterId);
-    const toIndex = currentChapters.findIndex((chapter) => chapter.id === targetChapterId);
-    reorderChapterDraft(fromIndex, toIndex);
+  function dropChapter(ev: React.DragEvent, targetId: string) {
+    ev.preventDefault(); const draggedId = ev.dataTransfer.getData("text/plain");
+    const from = chapterDrafts.findIndex((c) => c.id === draggedId); const to = chapterDrafts.findIndex((c) => c.id === targetId);
+    if (from === to || from < 0 || to < 0) return;
+    const next = [...chapterDrafts]; const [m] = next.splice(from, 1); if (!m) return; next.splice(to, 0, m); setChapterDrafts(next);
   }
 
   async function saveChapterOrder() {
-    setPendingAction("chapters:order");
-    setChapterError("");
-
+    setPendingAction("chapters");
     try {
-      const response = await fetch(`/api/comics/${currentComic.id}/chapters/order`, {
-        method: "PATCH",
-        body: JSON.stringify({ chapterIds: currentChapters.map((chapter) => chapter.id) }),
-        headers: { "Content-Type": "application/json" },
-      });
-      const payload = (await response.json()) as { chapters?: LibraryChapterRecord[]; error?: string };
-
-      if (!response.ok || !payload.chapters) {
-        throw new Error(payload.error ?? "保存章节顺序失败。");
-      }
-
-      setSavedChapters(payload.chapters);
-      setChapterDrafts(payload.chapters);
-    } catch (error) {
-      setChapterError(error instanceof Error ? error.message : "保存章节顺序失败。");
-    } finally {
-      setPendingAction(null);
-    }
+      const res = await fetch(`/api/comics/${currentComic.id}/chapters/order`, { method: "PATCH", body: JSON.stringify({ chapterIds: chapterDrafts.map((c) => c.id) }), headers: { "Content-Type": "application/json" } });
+      const p = await res.json() as { chapters?: LibraryChapterRecord[]; error?: string };
+      if (!res.ok || !p.chapters) throw new Error(p.error ?? "保存失败");
+      setSavedChapters(p.chapters); setChapterDrafts(p.chapters); showMsg("章节顺序已保存", "success");
+    } catch (err) { showMsg(err instanceof Error ? err.message : "保存失败", "error"); } finally { setPendingAction(null); }
   }
 
-  return (
-    <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
-      <Group justify="space-between" align="flex-start" mb="lg">
-        <Box style={{ minWidth: 0 }}>
-          <AppButton component={Link} href="/admin/comics" variant="transparent" leftSection={<ArrowLeft size={15} />} px={0} mb="xs">
-            返回漫画管理
-          </AppButton>
-          <Text component="h1" size="24px" fw={900} c="ink.8" m={0}>
-            {currentComic.displayTitle}
-          </Text>
-          <Text size="sm" c="ink.5" mt={4} style={{ overflowWrap: "anywhere" }}>
-            {currentComic.fileTitle}
-          </Text>
-        </Box>
-        <StatusBadge status={currentComic.status} missing={currentComic.isPrimaryFileMissing} merged={editTargetIsMerged} />
-      </Group>
-
-      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-        <Section title="标题与元数据" note="文件标题保留扫描来源，不会被这里的编辑覆盖。">
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-            <AppInput label="展示标题" value={metadataDraft.displayTitle} onChange={(event) => setMetadataDraft((current) => ({ ...current, displayTitle: event.currentTarget.value }))} />
-            <AppInput label="文件标题" value={currentComic.fileTitle} readOnly />
-            <AppInput label="原始标题" value={metadataDraft.originalTitle} onChange={(event) => setMetadataDraft((current) => ({ ...current, originalTitle: event.currentTarget.value }))} />
-            <AppInput
-              label="元数据查询标题"
-              value={metadataDraft.metadataQueryTitle}
-              onChange={(event) => setMetadataDraft((current) => ({ ...current, metadataQueryTitle: event.currentTarget.value }))}
-            />
-            <AppInput label="格式" value={formatKind(currentComic.localFileKind)} readOnly />
-            <AppInput label="状态" value={statusLabel(currentComic.status, editTargetIsMerged)} readOnly />
-          </SimpleGrid>
-          <Group justify="flex-end" mt="sm">
-            <AppButton size="xs" leftSection={<Save size={14} />} disabled={!metadataDraft.displayTitle.trim()} loading={pendingAction === "metadata"} onClick={saveComicMetadata}>
-              保存信息
-            </AppButton>
-          </Group>
-          <Message success={metadataMessage} error={metadataError} />
-        </Section>
-
-        <Section title="本地文件" note="这里仅展示数据库记录，不提供物理删除文件操作。">
-          <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" mb="sm">
-            <Metric label="页数" value={String(currentComic.pageCount)} />
-            <Metric label="章节" value={String(currentComic.chapterCount)} />
-            <Metric label="格式" value={formatKind(currentComic.localFileKind)} />
-            <Metric label="状态" value={statusLabel(currentComic.status, editTargetIsMerged)} />
-          </SimpleGrid>
-          <AppInput label="本地路径" value={currentComic.primaryLocalPath ?? "未关联主文件"} readOnly />
-        </Section>
-      </SimpleGrid>
-
-      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="md">
-        <Section title="封面缓存" note="手动封面会优先用于首页和详情页；自动封面仍可从当前封面页重新生成。">
-          <Group gap="sm" align="flex-end">
-            <FileInput
-              accept="image/*"
-              clearable
-              label="上传手动封面"
-              placeholder="选择图片文件"
-              value={selectedCoverFile}
-              onChange={setSelectedCoverFile}
-              disabled={editTargetIsMerged}
-              style={{ flex: 1, minWidth: 220 }}
-            />
-            <AppButton leftSection={<Upload size={15} />} disabled={editTargetIsMerged || !selectedCoverFile} loading={pendingAction === "cover:upload"} onClick={uploadCover}>
-              上传封面
-            </AppButton>
-            <AppButton
-              variant="outline"
-              leftSection={<RefreshCw size={15} />}
-              disabled={currentComic.status !== "readable" || currentComic.isPrimaryFileMissing}
-              loading={pendingAction === "cover:regenerate"}
-              onClick={regenerateCover}
-            >
-              重新生成
-            </AppButton>
-          </Group>
-          <Message success={coverMessage} error={coverError} />
-        </Section>
-
-        <Section title="漫画标签" note="可从已有 canonical 标签中选择，也可以直接创建新标签并绑定。">
-          <Group justify="space-between" align="flex-start" mb="xs">
-            <Group gap={8} wrap="wrap">
-              {currentTags.length > 0 ? (
-                currentTags.map((tag) => (
-                  <AppButton key={tag.id} variant="outline" size="xs" rightSection={<X size={13} />} loading={pendingAction === `tag:remove:${tag.id}`} onClick={() => removeTagFromComic(tag.id)}>
-                    {tagDisplayLabel(tag)}
-                  </AppButton>
-                ))
-              ) : (
-                <Text size="sm" c="ink.5">
-                  暂未绑定标签。
-                </Text>
-              )}
-            </Group>
-            {isLoadingTags && (
-              <Text size="xs" c="ink.5">
-                读取中...
-              </Text>
-            )}
-          </Group>
-
-          <Group gap="sm" align="flex-end">
-            <AppSelect
-              searchable
-              clearable
-              label="添加已有标签"
-              placeholder={availableTagOptions.length > 0 ? "选择标签" : "没有可添加的标签"}
-              value={selectedTagId}
-              onChange={setSelectedTagId}
-              data={availableTagOptions}
-              disabled={availableTagOptions.length === 0}
-              style={{ flex: 1, minWidth: 220 }}
-            />
-            <AppButton leftSection={<Plus size={15} />} disabled={!selectedTagId} loading={pendingAction === "tag:add"} onClick={() => selectedTagId && addTagToComic(selectedTagId)}>
-              绑定
-            </AppButton>
-          </Group>
-
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm" mt="sm">
-            <AppInput label="新标签分类" value={newTagDraft.namespace} onChange={(event) => setNewTagDraft((current) => ({ ...current, namespace: event.currentTarget.value }))} />
-            <AppInput label="新标签名称" value={newTagDraft.name} onChange={(event) => setNewTagDraft((current) => ({ ...current, name: event.currentTarget.value }))} />
-            <AppInput label="中文显示名" value={newTagDraft.displayNameZh} onChange={(event) => setNewTagDraft((current) => ({ ...current, displayNameZh: event.currentTarget.value }))} />
-          </SimpleGrid>
-          <Group justify="flex-end" mt="sm">
-            <AppButton variant="outline" leftSection={<Plus size={15} />} disabled={!newTagDraft.namespace.trim() || !newTagDraft.name.trim()} loading={pendingAction === "tag:create"} onClick={createAndBindTag}>
-              创建并绑定
-            </AppButton>
-          </Group>
-          <Message error={tagError} />
-        </Section>
-      </SimpleGrid>
-
-      <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" mt="md">
-        <Section title="章节顺序" note="合并后的章节归属可在目标漫画中继续排序。">
-          <Group justify="space-between" align="center" mb="sm">
-            {isLoadingChapters ? (
-              <Text size="xs" c="ink.5">
-                读取中...
-              </Text>
-            ) : (
-              <Text size="xs" c="ink.5">
-                {currentChapters.length} 个章节
-              </Text>
-            )}
-            <AppButton size="xs" leftSection={<Save size={14} />} disabled={!canReorderChapters || !chapterOrderChanged} loading={pendingAction === "chapters:order"} onClick={saveChapterOrder}>
-              保存顺序
-            </AppButton>
-          </Group>
-
-          <Stack gap={6}>
-            {currentChapters.length > 0 ? (
-              currentChapters.map((chapter, index) => (
-                <Box
-                  key={chapter.id}
-                  draggable={canReorderChapters}
-                  onDragStart={(event) => event.dataTransfer.setData("text/plain", chapter.id)}
-                  onDragOver={(event) => {
-                    if (canReorderChapters) {
-                      event.preventDefault();
-                    }
-                  }}
-                  onDrop={(event) => dropChapter(event, chapter.id)}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "30px minmax(0, 1fr) auto",
-                    gap: 10,
-                    alignItems: "center",
-                    minHeight: 46,
-                    padding: "8px 10px",
-                    border: "1px solid var(--mantine-color-pink-1)",
-                    borderRadius: 8,
-                    background: chapterOrderChanged ? "var(--mantine-color-pink-0)" : "white",
-                  }}
-                >
-                  <GripVertical size={16} style={{ color: "var(--mantine-color-ink-4)", cursor: canReorderChapters ? "grab" : "default" }} />
-                  <Box style={{ minWidth: 0 }}>
-                    <Text size="sm" fw={700} truncate>
-                      {chapter.title ?? (currentChapters.length === 1 ? "单章节" : `章节 ${index + 1}`)}
-                    </Text>
-                    <Text size="xs" c="ink.5">
-                      {chapter.pageCount} 页 · #{index + 1}
-                    </Text>
-                  </Box>
-                  <Group gap={4} wrap="nowrap">
-                    <AppButton aria-label="上移章节" variant="outline" size="xs" disabled={!canReorderChapters || index === 0} onClick={() => moveChapter(chapter.id, -1)}>
-                      <ArrowUp size={14} />
-                    </AppButton>
-                    <AppButton aria-label="下移章节" variant="outline" size="xs" disabled={!canReorderChapters || index === currentChapters.length - 1} onClick={() => moveChapter(chapter.id, 1)}>
-                      <ArrowDown size={14} />
-                    </AppButton>
-                  </Group>
-                </Box>
-              ))
-            ) : (
-              <Text size="sm" c="ink.5">
-                暂无章节。
-              </Text>
-            )}
-          </Stack>
-          <Message error={chapterError} />
-        </Section>
-
-        <Section title="章节合并" note="合并只移动数据库章节归属，不移动、不复制、不删除真实文件。MVP 仅支持单章节漫画。">
-          {editTargetIsMerged ? (
-            <Group justify="space-between" align="center">
-              <Text size="sm" c="ink.6">
-                已合并到：{parentComic?.displayTitle ?? currentComic.parentComicId}
-              </Text>
-              <AppButton variant="outline" leftSection={<RotateCcw size={15} />} loading={pendingAction === "merge:restore"} onClick={restoreMergedComic}>
-                恢复为独立漫画
-              </AppButton>
-            </Group>
-          ) : (
-            <Group justify="space-between" align="center">
-              <Text size="sm" c="ink.6">
-                从漫画列表中选择目标，可查看页数、章节、状态和路径后再确认。
-              </Text>
-              <AppButton
-                leftSection={<GitMerge size={15} />}
-                disabled={currentComic.status !== "readable" || mergeCandidates.length === 0}
-                onClick={() => setMergeModalOpened(true)}
-              >
-                选择合并目标
-              </AppButton>
-            </Group>
-          )}
-          <Message error={mergeError} />
-        </Section>
-      </SimpleGrid>
-
-      <Section title="记录维护" note="隐藏会从前台列表移除；软删除只是标记数据库记录，后续可从后台恢复。" mt="md">
-        {actionError && (
-          <Text size="sm" c="red.7" mb="sm">
-            {actionError}
-          </Text>
-        )}
-        <Group justify="flex-end">
-          {!editTargetIsMerged && (currentComic.status === "hidden" || currentComic.status === "deleted") ? (
-            <AppButton variant="outline" leftSection={<RotateCcw size={15} />} loading={pendingAction === "restore"} onClick={() => changeComicStatus("restore")}>
-              恢复记录
-            </AppButton>
-          ) : !editTargetIsMerged ? (
-            <AppButton variant="outline" leftSection={<EyeOff size={15} />} loading={pendingAction === "hide"} onClick={() => changeComicStatus("hide")}>
-              隐藏
-            </AppButton>
-          ) : null}
-          {!editTargetIsMerged && currentComic.status !== "deleted" && (
-            <AppButton color="red" variant="outline" leftSection={<Trash2 size={15} />} loading={pendingAction === "soft_delete"} onClick={() => changeComicStatus("soft_delete")}>
-              软删除
-            </AppButton>
-          )}
-        </Group>
-      </Section>
-
-      <MergeTargetModal
-        candidates={mergeCandidates}
-        opened={mergeModalOpened}
-        search={mergeSearch}
-        selectedId={selectedMergeTargetId}
-        isMerging={pendingAction === "merge"}
-        onClose={() => setMergeModalOpened(false)}
-        onConfirm={mergeComicAsChapter}
-        onSearchChange={setMergeSearch}
-        onSelect={setSelectedMergeTargetId}
-      />
+  const tabBar = (
+    <Box style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 20, borderBottom: "1px solid #fde6ef" }} role="tablist">
+      {TABS.map(({ key, label }) => (
+        <AppButton
+          key={key} variant="transparent" size="sm" role="tab"
+          aria-selected={activeTab === key}
+          onClick={() => setActiveTab(key)}
+          styles={{
+            root: {
+              minHeight: 40, padding: "0 18px", fontWeight: 900, fontSize: 14,
+              border: "none", borderRadius: 0, background: "transparent",
+              borderBottom: activeTab === key ? "2px solid var(--mantine-color-pink-5)" : "2px solid transparent",
+              color: activeTab === key ? "var(--mantine-color-pink-5)" : "#7a4d60",
+              transition: "color 160ms ease, border-color 160ms ease",
+              "&:hover": { background: "var(--mantine-color-pink-1)" },
+            },
+          }}
+        >
+          {label}
+        </AppButton>
+      ))}
     </Box>
   );
-}
 
-function MergeTargetModal({
-  candidates,
-  isMerging,
-  onClose,
-  onConfirm,
-  onSearchChange,
-  onSelect,
-  opened,
-  search,
-  selectedId,
-}: {
-  candidates: LibraryComicAdminRowRecord[];
-  isMerging: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  onSearchChange: (value: string) => void;
-  onSelect: (value: string) => void;
-  opened: boolean;
-  search: string;
-  selectedId: string | null;
-}) {
   return (
-    <DraggableModal opened={opened} onClose={onClose} title="选择合并目标漫画" size="xl" styles={{ title: { fontWeight: 800 }, header: { borderBottom: "1px solid var(--mantine-color-pink-1)" } }}>
-      <Stack gap="md">
-        <TextInput
-          placeholder="搜索标题、路径或元数据..."
-          leftSection={<Search size={15} />}
-          value={search}
-          onChange={(event) => onSearchChange(event.currentTarget.value)}
-        />
-        <Radio.Group value={selectedId} onChange={onSelect}>
-          <ScrollArea h={420} offsetScrollbars>
-            <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="sm">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th w={42} />
-                  <Table.Th>漫画</Table.Th>
-                  <Table.Th w={74}>页数</Table.Th>
-                  <Table.Th w={74}>章节</Table.Th>
-                  <Table.Th w={90}>状态</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
+    <Box>
+      {msg && (
+        <Box style={{
+          position: "fixed", top: 16, right: 16, zIndex: 9999, padding: "10px 18px", borderRadius: 10,
+          background: msg.tone === "success" ? "#087f5b" : "#d93a4e", color: "#fff",
+          fontSize: 13, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", maxWidth: 400, overflowWrap: "anywhere",
+        }}>{msg.text}</Box>
+      )}
+
+      <AppButton component={Link} href="/admin/comics" variant="transparent" leftSection={<ArrowLeft size={14} />} px={0} mb="md" size="xs">返回漫画管理</AppButton>
+
+      <Paper p="lg" mb="lg" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 14, background: "white" }}>
+        <Group align="flex-start" gap="lg" wrap="nowrap">
+          <Box style={{ width: 180, minHeight: 250, borderRadius: 12, overflow: "hidden", border: "1px solid var(--mantine-color-pink-1)", flexShrink: 0, background: "var(--mantine-color-pink-0)", position: "relative" }}>
+            <img src={`/api/comics/${currentComic.id}/cover?w=360&h=500&use=cover`} alt="cover" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          </Box>
+          <Box style={{ flex: 1, minWidth: 0 }}>
+            <Group gap="md" mb={4} wrap="wrap">
+              <Text size="xl" fw={700} style={{ lineHeight: 1.3 }}>{currentComic.displayTitle}</Text>
+              <Badge color={currentComic.isPrimaryFileMissing || editTargetIsMerged || currentComic.status !== "readable" ? "red" : "green"} variant="light" size="lg">
+                {currentComic.isPrimaryFileMissing ? "缺文件" : statusLabel(currentComic.status, editTargetIsMerged)}
+              </Badge>
+            </Group>
+            <Text size="sm" c="ink.5" mb="md" style={{ wordBreak: "break-all" }}>{currentComic.fileTitle}</Text>
+            <Group gap="md" mb="md" style={{ fontSize: 12, color: "var(--mantine-color-ink-5)" }}>
+              <span>章节: {currentComic.chapterCount}</span><span>页面: {currentComic.pageCount}</span><span>格式: {fmtKind(currentComic.localFileKind)}</span>
+              {currentComic.originalTitle && <span>原始: {currentComic.originalTitle}</span>}
+            </Group>
+            <Group gap="sm">
+              <AppButton component={Link} href={`/reader/${currentComic.id}`} leftSection={<BookOpen size={15} />} size="xs">打开阅读器</AppButton>
+              <AppButton size="xs" leftSection={<Save size={14} />} loading={pendingAction === "meta"} onClick={saveMeta}>保存更改</AppButton>
+              <AppButton variant="outline" size="xs" leftSection={<RotateCcw size={14} />} loading={pendingAction === "cover"} onClick={reloadCover}>重新生成封面</AppButton>
+            </Group>
+          </Box>
+        </Group>
+      </Paper>
+
+      {tabBar}
+
+      {activeTab === "basic" && (
+        <Paper p="lg" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+          <Stack gap="lg">
+            <Box>
+              <Text size="sm" fw={700} mb="sm">编辑基本信息</Text>
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                <AppInput label="展示标题" value={metadataDraft.displayTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, displayTitle: e.currentTarget.value }))} />
+                <AppInput label="排序标题" value={currentComic.fileTitle} readOnly />
+                <AppInput label="原始标题" value={metadataDraft.originalTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, originalTitle: e.currentTarget.value }))} />
+                <AppInput label="元数据查询标题" value={metadataDraft.metadataQueryTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, metadataQueryTitle: e.currentTarget.value }))} />
+              </SimpleGrid>
+            </Box>
+            <Box>
+              <Text size="sm" fw={700} mb="sm">文件信息</Text>
+              <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" mb="sm">
+                <MiniStat label="页数" value={String(currentComic.pageCount)} />
+                <MiniStat label="章节" value={String(currentComic.chapterCount)} />
+                <MiniStat label="格式" value={fmtKind(currentComic.localFileKind)} />
+                <MiniStat label="状态" value={statusLabel(currentComic.status, editTargetIsMerged)} />
+              </SimpleGrid>
+              <Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{currentComic.primaryLocalPath ?? "未关联主文件"}</Text>
+            </Box>
+            <Box>
+              <Text size="sm" fw={700} mb="sm">阅读统计</Text>
+              {isLoadingProgress ? <Text size="sm" c="ink.5">加载中...</Text> : progress ? (
+                <Group gap="md" wrap="wrap">
+                  <StatBox label="上次章节" value={progress.chapterTitle ?? "-"} />
+                  <StatBox label="上次页面" value={`${progress.pageNumber} / ${progress.chapterPageCount}`} />
+                  <StatBox label="进度" value={`${progress.progressPercent}%`} />
+                  <StatBox label="上次时间" value={fmtDate(progress.updatedAt)} />
+                </Group>
+              ) : <Text size="sm" c="ink.5">暂无阅读记录</Text>}
+            </Box>
+          </Stack>
+        </Paper>
+      )}
+
+      {activeTab === "chapters" && (
+        <>
+          <Paper p="md" mb="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+            <Group justify="space-between" mb="md">
+              <Text size="sm" fw={700}>章节列表 {isLoadingChapters ? "" : `(${chapterDrafts.length})`}</Text>
+              <Group gap="sm">
+                <AppButton size="xs" leftSection={<Save size={14} />} disabled={!canReorderChapters || !chapterOrderChanged} loading={pendingAction === "chapters"} onClick={saveChapterOrder}>保存顺序</AppButton>
+                <AppButton variant="outline" size="xs" leftSection={<GitMerge size={14} />} onClick={() => setMergeModalOpened(true)} disabled={editTargetIsMerged || currentComic.status !== "readable"}>合并漫画为章节</AppButton>
+              </Group>
+            </Group>
+            {isLoadingChapters ? <Text size="sm" c="ink.5" py="md">加载中...</Text> : chapterDrafts.length > 0 ? (
+              <Stack gap={4}>
+                {chapterDrafts.map((ch, i) => (
+                  <Box key={ch.id} draggable={canReorderChapters}
+                    onDragStart={(e) => e.dataTransfer.setData("text/plain", ch.id)}
+                    onDragOver={(e) => canReorderChapters && e.preventDefault()}
+                    onDrop={(e) => dropChapter(e, ch.id)}
+                    style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--mantine-color-pink-1)", background: chapterOrderChanged ? "var(--mantine-color-pink-0)" : "white", cursor: canReorderChapters ? "grab" : "default" }}
+                  >
+                    <Text size="sm" c="ink.4" style={{ width: 20, textAlign: "center", userSelect: "none" }}>⠿</Text>
+                    <Text size="sm" fw={600} c="ink.5" style={{ minWidth: 28 }}>#{i + 1}</Text>
+                    <Text size="sm" style={{ flex: 1 }}>{ch.title ?? `章节 ${i + 1}`}</Text>
+                    <Text size="xs" c="ink.4">{ch.pageCount} 页</Text>
+                    <Group gap={4} wrap="nowrap">
+                      <ActionIcon size="sm" variant="default" disabled={!canReorderChapters || i === 0} onClick={() => moveChapter(ch.id, -1)}>↑</ActionIcon>
+                      <ActionIcon size="sm" variant="default" disabled={!canReorderChapters || i === chapterDrafts.length - 1} onClick={() => moveChapter(ch.id, 1)}>↓</ActionIcon>
+                    </Group>
+                  </Box>
+                ))}
+              </Stack>
+            ) : <Text size="sm" c="ink.5" py="md">暂无章节</Text>}
+          </Paper>
+          {editTargetIsMerged && (
+            <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+              <Group justify="space-between" align="center">
+                <Text size="sm">已合并到: {parentComic?.displayTitle ?? currentComic.parentComicId}</Text>
+                <AppButton variant="outline" leftSection={<RotateCcw size={14} />} loading={pendingAction === "merge:restore"} onClick={restoreMerge} size="xs">恢复为独立漫画</AppButton>
+              </Group>
+            </Paper>
+          )}
+        </>
+      )}
+
+      {activeTab === "files" && (
+        <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+          <Text size="sm" fw={700} mb="md">本地文件 {isLoadingFiles ? "" : `(${localFileRecords.length})`}</Text>
+          {isLoadingFiles ? <Text size="sm" c="ink.5">加载中...</Text> : localFileRecords.length > 0 ? (
+            <Table striped highlightOnHover>
+              <Table.Thead><Table.Tr><Table.Th>路径</Table.Th><Table.Th w={80}>类型</Table.Th><Table.Th w={100}>大小</Table.Th><Table.Th w={80}>状态</Table.Th><Table.Th w={80}>主文件</Table.Th></Table.Tr></Table.Thead>
               <Table.Tbody>
-                {candidates.map((candidate) => (
-                  <Table.Tr key={candidate.id} onClick={() => onSelect(candidate.id)} style={{ cursor: "pointer" }}>
-                    <Table.Td>
-                      <Radio value={candidate.id} aria-label={`选择 ${candidate.displayTitle}`} />
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="sm" fw={800}>
-                        {candidate.displayTitle}
-                      </Text>
-                      <Text size="xs" c="ink.5">
-                        {candidate.fileTitle}
-                      </Text>
-                      <Text size="xs" c="ink.4" style={{ overflowWrap: "anywhere" }}>
-                        {candidate.primaryLocalPath ?? "未关联主文件"}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>{candidate.pageCount}</Table.Td>
-                    <Table.Td>{candidate.chapterCount}</Table.Td>
-                    <Table.Td>{statusLabel(candidate.status)}</Table.Td>
+                {localFileRecords.map((f) => (
+                  <Table.Tr key={f.id}>
+                    <Table.Td><Text size="sm" style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>{f.relativePath}</Text></Table.Td>
+                    <Table.Td>{f.kind.toUpperCase()}</Table.Td>
+                    <Table.Td>{f.sizeBytes ? fmtBytes(f.sizeBytes) : "-"}</Table.Td>
+                    <Table.Td><Badge color={f.isMissing ? "red" : "green"} variant="light" size="sm">{f.isMissing ? "缺失" : "正常"}</Badge></Table.Td>
+                    <Table.Td>{f.isPrimary ? <Badge color="pink" variant="filled" size="sm">主文件</Badge> : "-"}</Table.Td>
                   </Table.Tr>
                 ))}
-                {candidates.length === 0 && (
-                  <Table.Tr>
-                    <Table.Td colSpan={5}>
-                      <Text size="sm" c="ink.5" ta="center" py="md">
-                        没有可合并的目标漫画
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                )}
               </Table.Tbody>
             </Table>
-          </ScrollArea>
-        </Radio.Group>
-        <Group justify="flex-end">
-          <AppButton variant="outline" onClick={onClose}>
-            取消
-          </AppButton>
-          <AppButton leftSection={<GitMerge size={15} />} disabled={!selectedId} loading={isMerging} onClick={onConfirm}>
-            确认合并
-          </AppButton>
-        </Group>
-      </Stack>
-    </DraggableModal>
-  );
-}
+          ) : <Text size="sm" c="ink.5">暂无本地文件记录</Text>}
+        </Paper>
+      )}
 
-function Section({ children, mt, note, title }: { children: React.ReactNode; mt?: string; note?: string; title: string }) {
-  return (
-    <Box p="md" mt={mt} style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
-      <Box mb="sm">
-        <Text size="sm" fw={800} c="ink.8">
-          {title}
-        </Text>
-        {note && (
-          <Text size="xs" c="ink.5" mt={2}>
-            {note}
-          </Text>
-        )}
-      </Box>
-      {children}
+      {activeTab === "tags" && (
+        <TagManager
+          comicId={currentComic.id} tagGroups={tagGroups} tagRows={tagRows}
+          isLoading={isLoadingTags} pendingAction={pendingAction}
+          onTagsChange={setAssignedTags} onTagRowsChange={setTagRows}
+          onPendingAction={setPendingAction} onMessage={showMsg}
+        />
+      )}
+
+      {activeTab === "sources" && (
+        <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+          <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+            <Text size="sm" fw={700} mb="md">来源信息 {isLoadingSources ? "" : `(${sources.length})`}</Text>
+            {isLoadingSources ? <Text size="sm" c="ink.5">加载中...</Text> : sources.length > 0 ? (
+              <Stack gap="sm">{sources.map((src) => (
+                <Box key={src.id} p="sm" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 8 }}>
+                  <Badge size="sm" variant="light" color="pink" mb={4}>{src.site}</Badge>
+                  <Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{src.sourceUrl}</Text>
+                  <Text size="xs" c="ink.4">{src.sourceId ? `ID: ${src.sourceId}` : ""} · {fmtDate(src.createdAt)}</Text>
+                </Box>
+              ))}</Stack>
+            ) : <Text size="sm" c="ink.5">暂无来源信息</Text>}
+          </Paper>
+          <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+            <Text size="sm" fw={700} mb="md">下载资源 {isLoadingResources ? "" : `(${resources.length})`}</Text>
+            {isLoadingResources ? <Text size="sm" c="ink.5">加载中...</Text> : resources.length > 0 ? (
+              <Stack gap="sm">{resources.map((res) => (
+                <Box key={res.id} p="sm" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 8 }}>
+                  <Group gap="xs" mb={2}>
+                    <Badge size="sm" color={res.resourceType === "magnet" ? "violet" : "pink"} variant="filled">{res.resourceType.toUpperCase()}</Badge>
+                    <Text size="sm" fw={600}>{res.displayLabel || res.resourceType}</Text>
+                  </Group>
+                  {res.redactedResource && <Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{res.redactedResource}</Text>}
+                  <Text size="xs" c={res.taskStatus === "completed" ? "green" : res.taskStatus === "failed" ? "red" : "ink.4"} mt={2}>
+                    {res.taskId ? `任务: ${taskLabel(res.taskStatus)}` : "未创建下载任务"}{res.taskErrorMessage ? ` - ${res.taskErrorMessage}` : ""}
+                  </Text>
+                </Box>
+              ))}</Stack>
+            ) : <Text size="sm" c="ink.5">暂无下载资源</Text>}
+          </Paper>
+        </SimpleGrid>
+      )}
+
+      {activeTab === "logs" && (
+        <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+          <Text size="sm" fw={700} mb="md">操作日志 {isLoadingLogs ? "" : `(${logs.length})`}</Text>
+          {isLoadingLogs ? <Text size="sm" c="ink.5">加载中...</Text> : logs.length > 0 ? (
+            <Stack gap={4}>{logs.map((log) => (
+              <Box key={log.id} p="sm" style={{ borderBottom: "1px solid var(--mantine-color-pink-1)" }}>
+                <Group gap="sm" wrap="nowrap">
+                  <Text size="xs" c="ink.4" style={{ fontFamily: "monospace", whiteSpace: "nowrap", minWidth: 140 }}>{fmtDate(log.createdAt)}</Text>
+                  <Text size="xs"><Text component="span" fw={600}>{opLabel(log.operation)}</Text>{log.summary ? ` · ${log.summary}` : ""}</Text>
+                </Group>
+              </Box>
+            ))}</Stack>
+          ) : <Text size="sm" c="ink.5">暂无操作日志</Text>}
+        </Paper>
+      )}
+
+      {activeTab === "danger" && (
+        <Paper p="md" style={{ border: "1px solid rgba(217,58,78,0.3)", borderRadius: 10, background: "white" }}>
+          <Text size="sm" fw={700} c="red" mb="md">⚠️ 危险操作区</Text>
+          <Stack gap="sm">
+            <DangerItem title="隐藏漫画" desc="从前台列表中隐藏，后台仍可查看和管理。"
+              btn={currentComic.status === "hidden" || currentComic.status === "deleted"
+                ? <AppButton variant="outline" size="xs" leftSection={<RotateCcw size={14} />} loading={pendingAction === "restore"} onClick={() => changeStatus("restore")}>恢复记录</AppButton>
+                : <AppButton variant="outline" size="xs" leftSection={<EyeOff size={14} />} loading={pendingAction === "hide"} onClick={() => changeStatus("hide")}>隐藏</AppButton>} />
+            {!editTargetIsMerged && currentComic.status !== "deleted" && (
+              <DangerItem title="软删除记录" desc="标记为已删除，不删除本地文件。可在扫描结果中恢复。"
+                btn={<AppButton color="red" variant="outline" size="xs" leftSection={<Trash2 size={14} />} loading={pendingAction === "soft_delete"} onClick={() => changeStatus("soft_delete")}>软删除</AppButton>} />
+            )}
+            <DangerItem title="合并为章节" desc="将本漫画合并到另一本漫画作为其章节。操作可逆，不会移动物理文件。"
+              btn={<AppButton variant="outline" size="xs" leftSection={<GitMerge size={14} />} onClick={() => setMergeModalOpened(true)} disabled={currentComic.status !== "readable"}>合并...</AppButton>} />
+          </Stack>
+        </Paper>
+      )}
+
+      <DraggableModal opened={mergeModalOpened} onClose={() => setMergeModalOpened(false)} title="选择合并目标漫画" size="xl">
+        <Stack gap="md">
+          <TextInput placeholder="搜索标题、路径..." leftSection={<Search size={15} />} value={mergeSearch} onChange={(e) => setMergeSearch(e.currentTarget.value)} />
+          <Radio.Group value={selectedMergeTargetId} onChange={setSelectedMergeTargetId}>
+            <ScrollArea h={400} offsetScrollbars>
+              <Table striped highlightOnHover>
+                <Table.Thead><Table.Tr><Table.Th w={42} /><Table.Th>漫画</Table.Th><Table.Th w={74}>页数</Table.Th><Table.Th w={74}>章节</Table.Th><Table.Th w={90}>状态</Table.Th></Table.Tr></Table.Thead>
+                <Table.Tbody>
+                  {mergeCandidates.map((c) => (
+                    <Table.Tr key={c.id} onClick={() => setSelectedMergeTargetId(c.id)} style={{ cursor: "pointer" }}>
+                      <Table.Td><Radio value={c.id} /></Table.Td>
+                      <Table.Td><Text size="sm" fw={700}>{c.displayTitle}</Text><Text size="xs" c="ink.5">{c.fileTitle}</Text></Table.Td>
+                      <Table.Td>{c.pageCount}</Table.Td><Table.Td>{c.chapterCount}</Table.Td><Table.Td>{statusLabel(c.status)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                  {mergeCandidates.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text ta="center" py="md" c="ink.5">没有可合并的目标</Text></Table.Td></Table.Tr>}
+                </Table.Tbody>
+              </Table>
+            </ScrollArea>
+          </Radio.Group>
+          <Group justify="flex-end">
+            <AppButton variant="outline" onClick={() => setMergeModalOpened(false)}>取消</AppButton>
+            <AppButton leftSection={<GitMerge size={15} />} disabled={!selectedMergeTargetId} loading={pendingAction === "merge"} onClick={mergeComic}>确认合并</AppButton>
+          </Group>
+        </Stack>
+      </DraggableModal>
     </Box>
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <Box p="xs" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 8, background: "var(--mantine-color-pink-0)" }}>
-      <Text size="xs" c="ink.5">
-        {label}
-      </Text>
-      <Text size="sm" fw={900} c="ink.8">
-        {value}
-      </Text>
-    </Box>
-  );
-}
+const TABS = [
+  { key: "basic", label: "基本信息" }, { key: "chapters", label: "章节管理" },
+  { key: "files", label: "本地文件" }, { key: "tags", label: "标签" },
+  { key: "sources", label: "来源与资源" }, { key: "logs", label: "操作日志" },
+  { key: "danger", label: "危险操作" },
+] as const;
 
-function Message({ error, success }: { error?: string; success?: string }) {
-  if (!error && !success) {
-    return null;
+function TagManager({ comicId, tagGroups, tagRows, isLoading, pendingAction, onTagsChange, onTagRowsChange, onPendingAction, onMessage }: {
+  comicId: string; tagGroups: Map<string, ComicTagViewModel[]>; tagRows: TagRow[]; isLoading: boolean; pendingAction: string | null;
+  onTagsChange: (tags: ComicTagViewModel[]) => void; onTagRowsChange: React.Dispatch<React.SetStateAction<TagRow[]>>;
+  onPendingAction: (a: string | null) => void; onMessage: (t: string, tone: "success" | "error") => void;
+}) {
+  const [addingNs, setAddingNs] = useState<string | null>(null);
+  const [addName, setAddName] = useState("");
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  function hasCjk(text: string) { return /[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/.test(text); }
+
+  function startAdd(ns: string) { setAddingNs(ns); setAddName(""); requestAnimationFrame(() => nameRef.current?.focus()); }
+  function cancelAdd() { setAddingNs(null); setAddName(""); }
+
+  async function confirmAdd(ns: string) {
+    const raw = addName.trim();
+    if (!raw) return;
+    onPendingAction("tag:add");
+    try {
+      const isCjk = hasCjk(raw);
+      const tagName = isCjk ? raw : raw;
+      const displayZh = isCjk ? raw : null;
+
+      let tagId: string | null = null;
+      const existing = tagRows.find((t) => t.namespace === ns && t.name === tagName.toLowerCase());
+      if (existing) { tagId = existing.id; } else {
+        const res = await fetch("/api/tags", {
+          method: "POST",
+          body: JSON.stringify({ namespace: ns, name: tagName, displayNameZh: displayZh }),
+          headers: { "Content-Type": "application/json" },
+        });
+        const p = await res.json() as { tag?: CanonicalTag; error?: string };
+        if (!res.ok || !p.tag) throw new Error(p.error ?? "创建标签失败");
+        tagId = p.tag.id; onTagRowsChange((prev) => [...prev, { ...p.tag as CanonicalTag, comicCount: 0 }]);
+      }
+      const res2 = await fetch(`/api/comics/${comicId}/tags`, { method: "POST", body: JSON.stringify({ tagId }), headers: { "Content-Type": "application/json" } });
+      const p2 = await res2.json() as { tags?: ComicTagViewModel[]; error?: string };
+      if (!res2.ok || !p2.tags) throw new Error(p2.error ?? "绑定失败");
+      onTagsChange(p2.tags); setAddingNs(null); setAddName("");
+    } catch (err) { onMessage(err instanceof Error ? err.message : "添加失败", "error"); } finally { onPendingAction(null); }
+  }
+
+  function tagLabel(tag: ComicTagViewModel) {
+    return tag.displayNameZh || tag.name || tag.canonical;
+  }
+
+  async function removeTag(tagId: string) {
+    onPendingAction(`tag:rm:${tagId}`);
+    try {
+      const res = await fetch(`/api/comics/${comicId}/tags`, { method: "DELETE", body: JSON.stringify({ tagId }), headers: { "Content-Type": "application/json" } });
+      const p = await res.json() as { tags?: ComicTagViewModel[]; error?: string };
+      if (!res.ok || !p.tags) throw new Error(p.error ?? "移除失败");
+      onTagsChange(p.tags);
+    } catch (err) { onMessage(err instanceof Error ? err.message : "移除失败", "error"); } finally { onPendingAction(null); }
   }
 
   return (
-    <Text size="sm" c={error ? "red.7" : "green.7"} mt="xs">
-      {error || success}
-    </Text>
+    <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}>
+      <Text size="sm" fw={700} mb="md">标签管理</Text>
+      {isLoading ? <Text size="sm" c="ink.5" py="md">加载中...</Text> : (
+        <Stack gap={0}>
+          {Array.from(tagGroups.entries()).map(([ns, tags]) => (
+            <Box key={ns} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "10px 14px", minHeight: 50, borderBottom: "1px solid var(--mantine-color-pink-1)" }}>
+              <Text size="sm" fw={600} style={{ minWidth: 60, whiteSpace: "nowrap" }}>{namespaceLabel(ns)}</Text>
+              {tags.map((tag) => (
+                <Box key={tag.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "2px 8px", borderRadius: 6, border: "1px solid var(--mantine-color-pink-1)", fontSize: 12, fontWeight: 600, color: "var(--mantine-color-pink-6)" }}>
+                  {tagLabel(tag)}
+                  <Box component="span" style={{ cursor: "pointer", opacity: 0.4, lineHeight: 1, marginLeft: 2 }} onClick={() => removeTag(tag.id)}>✕</Box>
+                </Box>
+              ))}
+              {addingNs === ns ? (
+                <Group gap={4} wrap="nowrap">
+                  <TextInput ref={nameRef} size="xs" placeholder="输入标签 (中/英文均可)" value={addName}
+                    onChange={(e) => setAddName(e.currentTarget.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && addName.trim()) confirmAdd(ns); if (e.key === "Escape") cancelAdd(); }}
+                    style={{ width: 180 }}
+                  />
+                  <ActionIcon size="sm" color="green" variant="filled" onClick={() => { if (addName.trim()) confirmAdd(ns); }}>✓</ActionIcon>
+                  <ActionIcon size="sm" variant="default" onClick={cancelAdd}>✕</ActionIcon>
+                </Group>
+              ) : <ActionIcon size="sm" variant="outline" color="pink" onClick={() => startAdd(ns)}>+</ActionIcon>}
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Paper>
   );
 }
 
-function StatusBadge({ status, missing, merged }: { status: LibraryComicAdminRowRecord["status"]; missing: boolean; merged: boolean }) {
-  const problem = missing || merged || status !== "readable";
-
-  return (
-    <Box
-      component="span"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 26,
-        padding: "0 10px",
-        borderRadius: 7,
-        fontWeight: 900,
-        fontSize: 12,
-        background: problem ? "#ffe3e6" : "#e4f9ed",
-        color: problem ? "#d93a4e" : "#00894a",
-      }}
-    >
-      {missing ? "缺文件" : statusLabel(status, merged)}
-    </Box>
-  );
+function StatBox({ label, value }: { label: string; value: string }) {
+  return <Box p="sm" style={{ background: "var(--mantine-color-pink-0)", borderRadius: 10, minWidth: 100, textAlign: "center" }}>
+    <Text size="lg" fw={700} c="pink.6">{value}</Text><Text size="xs" c="ink.4">{label}</Text>
+  </Box>;
 }
 
-function statusLabel(status: LibraryComicAdminRowRecord["status"], merged = false) {
-  if (merged) {
-    return "已合并";
-  }
-
-  const labels: Record<LibraryComicAdminRowRecord["status"], string> = {
-    readable: "就绪",
-    missing_local_file: "缺文件",
-    remote_only: "远程记录",
-    hidden: "已隐藏",
-    deleted: "已删除",
-  };
-
-  return labels[status];
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return <Box p="xs" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 8, background: "var(--mantine-color-pink-0)", textAlign: "center" }}>
+    <Text size="xs" c="ink.5">{label}</Text><Text size="sm" fw={700} c="ink.8">{value}</Text>
+  </Box>;
 }
 
-function formatKind(kind: LibraryComicAdminRowRecord["localFileKind"]) {
-  if (kind === "directory") {
-    return "DIR";
-  }
-
-  return kind?.toUpperCase() ?? "LOCAL";
+function DangerItem({ title, desc, btn }: { title: string; desc: string; btn: React.ReactNode }) {
+  return <Group justify="space-between" p="sm" wrap="nowrap" style={{ borderBottom: "1px solid var(--mantine-color-pink-1)" }}>
+    <Box style={{ minWidth: 0 }}><Text size="sm" fw={600}>{title}</Text><Text size="xs" c="ink.5">{desc}</Text></Box>{btn}
+  </Group>;
 }
 
-function isMergedComic(comic: LibraryComicAdminRowRecord) {
-  return Boolean(comic.parentComicId || comic.mergedAsChapterId);
+function getTagGroups(tags: ComicTagViewModel[]) {
+  const STANDARD = ["parody", "character", "female", "male", "artist", "group", "language", "category", "other"];
+  const groups = new Map<string, ComicTagViewModel[]>();
+  for (const ns of STANDARD) groups.set(ns, []);
+  for (const tag of tags) { const ns = tag.namespace || "tag"; if (!groups.has(ns)) groups.set(ns, []); groups.get(ns)!.push(tag); }
+  return groups;
 }
+
+function statusLabel(s: string, merged = false) {
+  if (merged) return "已合并";
+  const m: Record<string, string> = { readable: "就绪", missing_local_file: "缺文件", remote_only: "远程记录", hidden: "已隐藏", deleted: "已删除" };
+  return m[s] ?? s;
+}
+
+function isMergedComic(c: { parentComicId: string | null; mergedAsChapterId: string | null }) { return Boolean(c.parentComicId || c.mergedAsChapterId); }
+
+function fmtKind(k: string | null) { return k === "directory" ? "DIR" : k?.toUpperCase() ?? "LOCAL"; }
+
+function taskLabel(s: string | null) { const m: Record<string, string> = { queued: "排队中", running: "下载中", completed: "已完成", failed: "失败", cancel_requested: "取消中", canceled: "已取消" }; return m[s ?? ""] ?? s ?? ""; }
+
+function opLabel(op: string) { const m: Record<string, string> = { hide: "隐藏", soft_delete: "软删除", restore: "恢复", path_repair: "路径修复", merge_chapter: "合并章节", switch_primary_file: "切换主文件", cache_cleanup: "缓存清理", download_task_create: "创建下载", download_task_cancel: "取消下载", download_task_retry: "重试下载", collection_create: "创建收藏", collection_update: "更新收藏", collection_delete: "删除收藏", collection_add_comic: "加入收藏", collection_remove_comic: "移出收藏" }; return m[op] ?? op; }
+
+function fmtDate(v: string) { try { return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(v)); } catch { return v; } }
+
+function fmtBytes(v: number) { if (v >= 1073741824) return `${(v / 1073741824).toFixed(1)} GB`; if (v >= 1048576) return `${(v / 1048576).toFixed(1)} MB`; if (v >= 1024) return `${(v / 1024).toFixed(1)} KB`; return `${v} B`; }
