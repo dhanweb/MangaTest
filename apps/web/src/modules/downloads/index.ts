@@ -786,6 +786,17 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
     };
   }
 
+  // Poll: check OpenList offline download task status
+  const pollResults = await pollOpenListDownloadStatus();
+  if (pollResults.length > 0) {
+    return {
+      executed: true, finalization: null,
+      reason: pollResults.join("；"),
+      plan: await planNextDownloadDispatch(),
+      transfer: null,
+    };
+  }
+
   // Loop: process all queued tasks (up to 20 per tick)
   let processed = 0;
   const reasons: string[] = [];
@@ -811,9 +822,10 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
       const now = new Date().toISOString();
 
       if (result.ok) {
-        markDownloadTaskFinished(plan.task.id, "completed", null, now);
+        // Save OL task ID as errorMessage and set status to running for status polling
+        getDb().update(downloadTasks).set({ status: "running", errorMessage: JSON.stringify({ olTaskId: result.taskId, olPath: savePath, comicTitle: plan.task.comicTitle }), updatedAt: now }).where(eq(downloadTasks.id, plan.task.id)).run();
         processed++;
-        reasons.push(`${plan.task.comicTitle}: 已推送到 OpenList`);
+        reasons.push(`${plan.task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`);
       } else {
         markDownloadTaskFinished(plan.task.id, "failed", result.message, now);
         processed++;
@@ -2445,4 +2457,50 @@ function toSafeDownloadErrorMessage(error: unknown) {
   }
 
   return message;
+}
+
+async function pollOpenListDownloadStatus(): Promise<string[]> {
+  const db = getDb();
+  const runningTasks = db.select({ id: downloadTasks.id, errorMessage: downloadTasks.errorMessage }).from(downloadTasks)
+    .where(and(eq(downloadTasks.status, "running"), eq(downloadTasks.provider, "openlist"))).all();
+  if (runningTasks.length === 0) return [];
+
+  const settings = await getRuntimeSettings();
+  if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim() || !settings.openlistToken.trim()) return [];
+  const baseUrl = settings.openlistBaseUrl.replace(/\/+$/, "");
+  const token = settings.openlistToken.trim();
+  if (!baseUrl) return [];
+
+  const now = new Date().toISOString();
+  const results: string[] = [];
+
+  for (const task of runningTasks) {
+    let info: { olTaskId?: string; olPath?: string; comicTitle?: string } = {};
+    try { info = JSON.parse(task.errorMessage ?? "{}"); } catch { continue; }
+    if (!info.olPath) continue;
+
+    try {
+      const res = await fetch(`${baseUrl}/api/fs/list`, {
+        method: "POST",
+        headers: { Authorization: token, "Content-Type": "application/json" },
+        body: JSON.stringify({ path: info.olPath, page: 1, per_page: 100, refresh: true }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const p = await res.json().catch(() => null);
+      if (p?.code !== 200 || !p?.data?.content) continue;
+
+      const files = p.data.content as Array<{ name: string; size: number; is_dir?: boolean }>;
+      const title = info.comicTitle ?? "";
+      const matched = files.find((f) => !f.is_dir && f.size > 0 && (f.name.includes(title) || title.includes(f.name)));
+
+      if (matched) {
+        markDownloadTaskFinished(task.id, "completed", null, now);
+        results.push(`${title}: OpenList 下载完成`);
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  return results;
 }
