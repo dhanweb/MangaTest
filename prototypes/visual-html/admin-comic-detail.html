@@ -1,0 +1,1552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>后台漫画详情 | MangaTest</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0e0e10;
+  --bg-sidebar: #111113;
+  --bg-card: #18181b;
+  --bg-card-hover: #1f1f23;
+  --bg-input: #1a1a1e;
+  --bg-tag: #1e1e24;
+  --border: #2a2a30;
+  --border-focus: #6366f1;
+  --text: #e4e4e7;
+  --text-muted: #7f7f8a;
+  --text-dim: #52525b;
+  --primary: #ec4899;
+  --primary-hover: #db2777;
+  --primary-bg: rgba(236,72,153,0.08);
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --green: #22c55e;
+  --green-bg: rgba(34,197,94,0.08);
+  --orange: #f59e0b;
+  --orange-bg: rgba(245,158,11,0.08);
+  --red: #ef4444;
+  --red-bg: rgba(239,68,68,0.08);
+  --shadow: 0 1px 3px rgba(0,0,0,0.4);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+}
+html { font-size: 14px; }
+body {
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  min-height: 100vh;
+  line-height: 1.5;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ===== Sidebar ===== */
+.sidebar {
+  width: 240px;
+  min-height: 100vh;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+.sidebar-header {
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--primary);
+  letter-spacing: -0.01em;
+}
+.sidebar-header span {
+  font-size: 11px;
+  color: var(--text-dim);
+  display: block;
+  margin-top: 2px;
+}
+.sidebar-nav { flex: 1; padding: 8px 10px; }
+.nav-section { margin-bottom: 20px; }
+.nav-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  padding: 8px 10px 6px;
+  font-weight: 600;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.nav-item:hover { background: var(--bg-card); color: var(--text); }
+.nav-item.active {
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.nav-item .icon { width: 18px; text-align: center; font-size: 15px; }
+.nav-item .badge {
+  margin-left: auto;
+  background: var(--bg-tag);
+  color: var(--text-muted);
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.sidebar-footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* ===== Main ===== */
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 32px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar-left { display: flex; align-items: center; gap: 12px; }
+.topbar-left .breadcrumb {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.topbar-left .breadcrumb a { color: var(--text-muted); }
+.topbar-left .breadcrumb a:hover { color: var(--text); }
+.topbar-left .breadcrumb .sep { margin: 0 6px; color: var(--text-dim); }
+.topbar-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Content */
+.content { padding: 28px 32px; max-width: 1200px; }
+
+/* ===== Buttons ===== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all 0.12s;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-xs { padding: 2px 8px; font-size: 11px; border-radius: 4px; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-hover); }
+.btn-accent { background: var(--accent); color: #fff; }
+.btn-accent:hover { background: var(--accent-hover); }
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--bg-card); color: var(--text); border-color: var(--text-dim); }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-danger:hover { opacity: 0.85; }
+.btn-green { background: var(--green); color: #fff; }
+.btn-green:hover { opacity: 0.85; }
+.btn-icon {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+}
+
+/* ===== Cards ===== */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.card-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.card-header .sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 8px;
+}
+.card-body { padding: 20px; }
+.card-body.compact { padding: 12px 20px; }
+.card + .card { margin-top: 20px; }
+
+/* ===== Status Badges ===== */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-ok { background: var(--green-bg); color: var(--green); }
+.status-ok .status-dot { background: var(--green); }
+.status-warn { background: var(--orange-bg); color: var(--orange); }
+.status-warn .status-dot { background: var(--orange); }
+.status-err { background: var(--red-bg); color: var(--red); }
+.status-err .status-dot { background: var(--red); }
+.status-info { background: var(--primary-bg); color: var(--primary); }
+.status-info .status-dot { background: var(--primary); }
+
+/* ===== Header Section ===== */
+.comic-header {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 28px;
+}
+.comic-cover {
+  width: 200px;
+  min-height: 280px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  flex-shrink: 0;
+  position: relative;
+}
+.comic-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.comic-cover .cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.comic-cover:hover .cover-overlay { opacity: 1; }
+.comic-cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: 40px;
+  min-height: 280px;
+}
+.comic-info { flex: 1; min-width: 0; }
+.comic-info .title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.comic-info .display-title {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.comic-info .file-title {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  word-break: break-all;
+}
+.comic-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 12px;
+}
+.comic-meta-item {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.comic-meta-item strong {
+  color: var(--text);
+  font-weight: 500;
+}
+.comic-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+/* ===== Tabs ===== */
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  gap: 0;
+  margin-bottom: 24px;
+}
+.tab {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.12s;
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+}
+.tab:hover { color: var(--text); background: var(--bg-card); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ===== Form ===== */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+}
+.form-group { }
+.form-group.full { grid-column: 1 / -1; }
+.form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.form-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s;
+}
+.form-input:focus { border-color: var(--border-focus); }
+.form-input::placeholder { color: var(--text-dim); }
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.form-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+.form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.form-row .form-group { flex: 1; }
+
+/* ===== Table ===== */
+.table-wrap { overflow-x: auto; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+table tr:hover td { background: var(--bg-card-hover); }
+table tr:last-child td { border-bottom: none; }
+
+/* ===== Tags ===== */
+.tag-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.tg-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 40px;
+  white-space: nowrap;
+}
+.tg-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg-tag);
+  color: var(--text-muted);
+}
+.tag-remove {
+  cursor: pointer;
+  opacity: 0.4;
+  font-size: 13px;
+  line-height: 1;
+  margin-left: 1px;
+}
+.tag-remove:hover { opacity: 1; color: var(--red); }
+.tg-add {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px dashed var(--text-dim);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+.tg-add:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+.tg-add.hide { display: none; }
+.tg-input {
+  display: none;
+  width: 130px;
+  padding: 3px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.tg-input:focus { border-color: var(--border-focus); }
+.tg-input.show { display: inline-block; }
+.tg-act {
+  display: none;
+  gap: 3px;
+  flex-shrink: 0;
+}
+.tg-act.show { display: inline-flex; }
+.tg-ok, .tg-no {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.12s;
+}
+.tg-ok { background: var(--green); color: #fff; }
+.tg-ok:hover { opacity: 0.8; }
+.tg-no { background: var(--bg-tag); color: var(--text-muted); }
+.tg-no:hover { background: var(--red); color: #fff; }
+
+/* ===== File List ===== */
+.file-path { font-family: "Cascadia Code", "Fira Code", monospace; font-size: 12px; color: var(--text-muted); word-break: break-all; }
+.file-size { white-space: nowrap; color: var(--text-muted); }
+
+/* ===== Chapters ===== */
+.chapter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+}
+.chapter-row:last-child { border-bottom: none; }
+.chapter-row:hover { background: var(--bg-card-hover); }
+.chapter-row .drag-handle {
+  color: var(--text-dim);
+  cursor: grab;
+  font-size: 16px;
+  user-select: none;
+  width: 20px;
+  text-align: center;
+}
+.chapter-row .num {
+  min-width: 28px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.chapter-row .title { flex: 1; }
+.chapter-row .pages { color: var(--text-dim); font-size: 12px; }
+.chapter-row .actions { display: flex; gap: 4px; }
+.chapter-row.dragging { opacity: 0.4; }
+.chapter-row.drag-over { border-top: 2px solid var(--accent); }
+
+/* ===== Source List ===== */
+.source-site {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--bg-tag);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ===== Danger Zone ===== */
+.danger-zone {
+  border: 1px solid rgba(239,68,68,0.3);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.danger-zone .card-header {
+  background: var(--red-bg);
+  border-bottom-color: rgba(239,68,68,0.2);
+}
+.danger-zone .card-header h2 { color: var(--red); }
+.danger-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.danger-item:last-child { border-bottom: none; }
+.danger-item .desc { }
+.danger-item .desc h4 { font-size: 13px; font-weight: 500; }
+.danger-item .desc p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* ===== Operation Log ===== */
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.log-entry:last-child { border-bottom: none; }
+.log-time {
+  color: var(--text-dim);
+  white-space: nowrap;
+  min-width: 140px;
+  font-family: monospace;
+  font-size: 11px;
+}
+.log-action {
+  flex: 1;
+  color: var(--text-muted);
+}
+.log-action strong { color: var(--text); font-weight: 500; }
+
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-header h3 { font-size: 15px; font-weight: 600; }
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.modal-close:hover { color: var(--text); }
+.modal-body { padding: 20px; }
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+/* ===== Toast ===== */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  font-size: 13px;
+  animation: slideIn 0.2s ease;
+  max-width: 360px;
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+.toast.info { border-left: 3px solid var(--accent); }
+@keyframes slideIn {
+  from { transform: translateY(12px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ===== Misc ===== */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+.mt-2 { margin-top: 8px; }
+.mt-4 { margin-top: 16px; }
+.mb-4 { margin-bottom: 16px; }
+.text-muted { color: var(--text-muted); }
+.text-dim { color: var(--text-dim); }
+.text-sm { font-size: 12px; }
+.text-xs { font-size: 11px; }
+.text-right { text-align: right; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-dim);
+}
+.empty-state .icon { font-size: 36px; margin-bottom: 8px; }
+.empty-state h4 { font-size: 14px; color: var(--text-muted); margin-bottom: 4px; }
+.empty-state p { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h1>MangaTest</h1>
+    <span>Admin Panel</span>
+  </div>
+  <nav class="sidebar-nav">
+    <div class="nav-section">
+      <div class="nav-label">Overview</div>
+      <div class="nav-item"><span class="icon">📊</span> Dashboard</div>
+      <div class="nav-item active"><span class="icon">📚</span> Comics <span class="badge">142</span></div>
+      <div class="nav-item"><span class="icon">🏷️</span> Tags <span class="badge">34</span></div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Maintenance</div>
+      <div class="nav-item"><span class="icon">📁</span> Files</div>
+      <div class="nav-item"><span class="icon">⚠️</span> Missing <span class="badge">3</span></div>
+      <div class="nav-item"><span class="icon">🔄</span> Duplicates <span class="badge">2</span></div>
+      <div class="nav-item"><span class="icon">📋</span> Scan Sessions</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">System</div>
+      <div class="nav-item"><span class="icon">⚙️</span> Settings</div>
+      <div class="nav-item"><span class="icon">📜</span> Operation Logs</div>
+      <div class="nav-item"><span class="icon">💾</span> Backup</div>
+    </div>
+  </nav>
+  <div class="sidebar-footer">v0.1.0 · SQLite</div>
+</aside>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="breadcrumb">
+        <a href="#">Admin</a><span class="sep">/</span>
+        <a href="#">Comics</a><span class="sep">/</span>
+        <span style="color:var(--text)">[MGA-142] 放学后的催眠笔记</span>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <a href="#" class="btn btn-ghost btn-sm">← 返回列表</a>
+      <button class="btn btn-ghost btn-sm" onclick="previewComic()">前台预览</button>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- Comic Header -->
+    <div class="comic-header">
+      <div class="comic-cover" id="comicCover">
+        <img src="https://picsum.photos/seed/manga01/400/560" alt="Cover">
+        <div class="cover-overlay">
+          <button class="btn btn-ghost btn-sm" onclick="uploadCover()">📷 更换</button>
+          <button class="btn btn-ghost btn-sm" onclick="regenerateCover()">🔄 重新生成</button>
+        </div>
+      </div>
+      <div class="comic-info">
+        <div class="title-row">
+          <span class="display-title">放学后的催眠笔记</span>
+          <span class="status status-ok"><span class="status-dot"></span>已发布</span>
+        </div>
+        <div class="file-title">📂 after_school_hypnosis_notes [C97]</div>
+        <div class="comic-meta">
+          <span class="comic-meta-item"><strong>ID</strong> MGA-142</span>
+          <span class="comic-meta-item"><strong>原始标题</strong> 放課後の催眠ノート</span>
+          <span class="comic-meta-item"><strong>元数据</strong> after school hypnosis notes</span>
+          <span class="comic-meta-item"><strong>排序标题</strong> fangkexue</span>
+          <span class="comic-meta-item"><strong>章节</strong> 6</span>
+          <span class="comic-meta-item"><strong>页面</strong> 184</span>
+          <span class="comic-meta-item"><strong>本地文件</strong> 2</span>
+          <span class="comic-meta-item"><strong>来源</strong> 2</span>
+          <span class="comic-meta-item"><strong>扫描时间</strong> 2026-07-10 14:32</span>
+        </div>
+        <div class="comic-actions">
+          <button class="btn btn-primary btn-sm" onclick="saveAll()">💾 保存更改</button>
+          <button class="btn btn-accent btn-sm" onclick="scanNow()">🔍 重新扫描</button>
+          <button class="btn btn-ghost btn-sm" onclick="showMergeModal()">🔗 合并章节</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="basic">基本信息</button>
+      <button class="tab" data-tab="chapters">章节管理</button>
+      <button class="tab" data-tab="files">本地文件</button>
+      <button class="tab" data-tab="tags">标签</button>
+      <button class="tab" data-tab="sources">来源</button>
+      <button class="tab" data-tab="logs">操作日志</button>
+      <button class="tab" data-tab="danger">危险操作</button>
+    </div>
+
+    <!-- Tab: Basic Info -->
+    <div class="tab-panel active" id="panel-basic">
+      <div class="card">
+        <div class="card-header">
+          <h2>编辑基本信息</h2>
+          <span class="text-dim text-sm">更改后点击上方「保存更改」生效</span>
+        </div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group">
+              <label class="form-label">展示标题 <span style="color:var(--primary)">*</span></label>
+              <input class="form-input" value="放学后的催眠笔记" placeholder="前台展示名称">
+              <span class="form-hint">插件导入时不会被覆盖</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">排序标题</label>
+              <input class="form-input" value="fangkexue" placeholder="拼音/罗马音排序用">
+            </div>
+            <div class="form-group">
+              <label class="form-label">原始标题</label>
+              <input class="form-input" value="放課後の催眠ノート" placeholder="日文/英文原标题">
+            </div>
+            <div class="form-group">
+              <label class="form-label">元数据查询标题</label>
+              <input class="form-input" value="after school hypnosis notes" placeholder="用于 metadata 搜索匹配">
+            </div>
+            <div class="form-group">
+              <label class="form-label">文件标题</label>
+              <input class="form-input" value="after_school_hypnosis_notes [C97]" disabled>
+              <span class="form-hint">只读，来源自扫描时的目录/文件名</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">状态</label>
+              <select class="form-input">
+                <option selected>已发布</option>
+                <option>草稿</option>
+                <option>隐藏</option>
+                <option>缺文件</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>阅读统计</h2>
+        </div>
+        <div class="card-body">
+          <div class="flex gap-4" style="flex-wrap:wrap">
+            <div style="padding:12px 20px;background:var(--bg-input);border-radius:var(--radius);min-width:120px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:var(--primary)">85</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">总阅读次数</div>
+            </div>
+            <div style="padding:12px 20px;background:var(--bg-input);border-radius:var(--radius);min-width:120px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:var(--text)">3 / 6</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">上次阅读章节</div>
+            </div>
+            <div style="padding:12px 20px;background:var(--bg-input);border-radius:var(--radius);min-width:120px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:var(--text)">47 / 184</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">上次阅读页面</div>
+            </div>
+            <div style="padding:12px 20px;background:var(--bg-input);border-radius:var(--radius);min-width:120px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:var(--green)">25.5%</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">阅读进度</div>
+            </div>
+            <div style="padding:12px 20px;background:var(--bg-input);border-radius:var(--radius);min-width:120px;text-align:center">
+              <div style="font-size:22px;font-weight:700;color:var(--text)">2026-07-10</div>
+              <div style="font-size:11px;color:var(--text-dim);margin-top:2px">上次阅读时间</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Chapters -->
+    <div class="tab-panel" id="panel-chapters">
+      <div class="card">
+        <div class="card-header">
+          <h2>章节列表 <span class="sub">拖拽排序 · 共 6 章</span></h2>
+          <div class="flex gap-2">
+            <button class="btn btn-accent btn-sm" onclick="saveChapterOrder()">💾 保存顺序</button>
+            <button class="btn btn-ghost btn-sm" onclick="showMergeModal()">🔗 合并漫画为章节</button>
+          </div>
+        </div>
+        <div class="card-body compact" style="padding:0">
+          <div id="chapterList">
+            <div class="chapter-row" draggable="true" data-index="1">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#1</span>
+              <span class="title">觉醒的午后</span>
+              <span class="pages">32 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs" onclick="unmergeChapter(1)">↩️</button>
+              </span>
+            </div>
+            <div class="chapter-row" draggable="true" data-index="2">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#2</span>
+              <span class="title">教室里的秘密</span>
+              <span class="pages">28 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs" onclick="unmergeChapter(2)">↩️</button>
+              </span>
+            </div>
+            <div class="chapter-row" draggable="true" data-index="3">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#3</span>
+              <span class="title">放学后的实验</span>
+              <span class="pages">30 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs">↩️</button>
+              </span>
+            </div>
+            <div class="chapter-row" draggable="true" data-index="4">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#4</span>
+              <span class="title">催眠的连锁</span>
+              <span class="pages">34 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs">↩️</button>
+              </span>
+            </div>
+            <div class="chapter-row" draggable="true" data-index="5">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#5</span>
+              <span class="title">无法抗拒的命令</span>
+              <span class="pages">36 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs">↩️</button>
+              </span>
+            </div>
+            <div class="chapter-row" draggable="true" data-index="6">
+              <span class="drag-handle">⠿</span>
+              <span class="num">#6</span>
+              <span class="title">(无标题)</span>
+              <span class="pages">24 页</span>
+              <span class="actions">
+                <button class="btn btn-ghost btn-xs">✏️</button>
+                <button class="btn btn-ghost btn-xs">📖</button>
+                <button class="btn btn-ghost btn-xs">↩️</button>
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="card-body" style="border-top:1px solid var(--border);padding:14px 20px">
+          <div class="flex gap-2">
+            <input class="form-input" placeholder="新章节标题（可选）" style="max-width:260px">
+            <button class="btn btn-accent btn-sm">＋ 添加章节</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Merged comics info -->
+      <div class="card">
+        <div class="card-header">
+          <h2>已合并的漫画记录</h2>
+        </div>
+        <div class="card-body compact" style="padding:0">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>原标题</th>
+                  <th>合并为章节</th>
+                  <th>原始路径</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--text-dim)">MGA-089</td>
+                  <td>催眠番外篇</td>
+                  <td>#6 (无标题)</td>
+                  <td class="file-path">D:/manga/hypnosis_extra</td>
+                  <td><button class="btn btn-ghost btn-xs" onclick="unmergeComic('MGA-089')">↩️ 恢复</button></td>
+                </tr>
+              </tbody>
+              <tbody id="mergedEmpty" style="display:none">
+                <tr><td colspan="5"><div class="empty-state"><p>暂无合并记录</p></div></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Local Files -->
+    <div class="tab-panel" id="panel-files">
+      <div class="card">
+        <div class="card-header">
+          <h2>本地文件 <span class="sub">共 2 个</span></h2>
+          <button class="btn btn-ghost btn-sm" onclick="checkAllFiles()">🔍 检查文件状态</button>
+        </div>
+        <div class="card-body compact" style="padding:0">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width:32px"></th>
+                  <th>路径</th>
+                  <th>类型</th>
+                  <th>大小</th>
+                  <th>修改时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="status-dot" style="background:var(--green)"></span></td>
+                  <td>
+                    <span class="file-path">D:/manga/library/C97/after_school_hypnosis_notes/</span>
+                  </td>
+                  <td>📁 目录</td>
+                  <td class="file-size">1.2 GB</td>
+                  <td class="text-dim">2026-06-28 19:45</td>
+                  <td><span class="status status-ok"><span class="status-dot"></span>正常</span></td>
+                  <td>
+                    <button class="btn btn-ghost btn-xs">⭐ 主文件</button>
+                    <button class="btn btn-ghost btn-xs" onclick="recalcHash('file1')">🔒 计算Hash</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="status-dot" style="background:var(--green)"></span></td>
+                  <td>
+                    <span class="file-path">D:/manga/archive/after_school_hypnosis_notes.cbz</span>
+                  </td>
+                  <td>📦 CBZ</td>
+                  <td class="file-size">847 MB</td>
+                  <td class="text-dim">2026-07-01 08:12</td>
+                  <td><span class="status status-warn"><span class="status-dot"></span>非主文件</span></td>
+                  <td>
+                    <button class="btn btn-ghost btn-xs" onclick="setPrimary('file2')">⭐ 设为主文件</button>
+                    <button class="btn btn-ghost btn-xs">🔒 Hash</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Tags -->
+    <div class="tab-panel" id="panel-tags">
+      <div class="card">
+        <div class="card-header">
+          <h2>标签管理</h2>
+        </div>
+        <div class="card-body" style="padding:0">
+          <!-- parody -->
+          <div class="tag-group">
+            <span class="tg-label">原作</span>
+            <div class="tg-tags" data-ns="parody">
+              <span class="tag">original<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+              <span class="tag">comic market<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+            </div>
+            <button class="tg-add" onclick="toggleInput(this)">＋</button>
+            <input class="tg-input" placeholder="输入标签" onkeydown="if(event.key==='Enter')confirmAdd(this)">
+            <div class="tg-act">
+              <button class="tg-ok" onclick="confirmAdd(this)">✓</button>
+              <button class="tg-no" onclick="cancelAdd(this)">✕</button>
+            </div>
+          </div>
+          <!-- female -->
+          <div class="tag-group">
+            <span class="tg-label">女性</span>
+            <div class="tg-tags" data-ns="female">
+              <span class="tag">schoolgirl<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+              <span class="tag">glasses<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+              <span class="tag">ponytail<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+              <span class="tag">uniform<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+            </div>
+            <button class="tg-add" onclick="toggleInput(this)">＋</button>
+            <input class="tg-input" placeholder="输入标签" onkeydown="if(event.key==='Enter')confirmAdd(this)">
+            <div class="tg-act">
+              <button class="tg-ok" onclick="confirmAdd(this)">✓</button>
+              <button class="tg-no" onclick="cancelAdd(this)">✕</button>
+            </div>
+          </div>
+          <!-- male -->
+          <div class="tag-group">
+            <span class="tg-label">男性</span>
+            <div class="tg-tags" data-ns="male">
+              <span class="tag">teacher<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+            </div>
+            <button class="tg-add" onclick="toggleInput(this)">＋</button>
+            <input class="tg-input" placeholder="输入标签" onkeydown="if(event.key==='Enter')confirmAdd(this)">
+            <div class="tg-act">
+              <button class="tg-ok" onclick="confirmAdd(this)">✓</button>
+              <button class="tg-no" onclick="cancelAdd(this)">✕</button>
+            </div>
+          </div>
+          <!-- artist -->
+          <div class="tag-group">
+            <span class="tg-label">作者</span>
+            <div class="tg-tags" data-ns="artist">
+              <span class="tag">tanaka_sensei<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+            </div>
+            <button class="tg-add" onclick="toggleInput(this)">＋</button>
+            <input class="tg-input" placeholder="输入标签" onkeydown="if(event.key==='Enter')confirmAdd(this)">
+            <div class="tg-act">
+              <button class="tg-ok" onclick="confirmAdd(this)">✓</button>
+              <button class="tg-no" onclick="cancelAdd(this)">✕</button>
+            </div>
+          </div>
+          <!-- group -->
+          <div class="tag-group" style="border-bottom:none">
+            <span class="tg-label">社团</span>
+            <div class="tg-tags" data-ns="group">
+              <span class="tag">circle_hypno<span class="tag-remove" onclick="removeTag(this)">✕</span></span>
+            </div>
+            <button class="tg-add" onclick="toggleInput(this)">＋</button>
+            <input class="tg-input" placeholder="输入标签" onkeydown="if(event.key==='Enter')confirmAdd(this)">
+            <div class="tg-act">
+              <button class="tg-ok" onclick="confirmAdd(this)">✓</button>
+              <button class="tg-no" onclick="cancelAdd(this)">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Sources -->
+    <div class="tab-panel" id="panel-sources">
+      <div class="card">
+        <div class="card-header">
+          <h2>来源信息 <span class="sub">浏览器插件提交的元数据来源</span></h2>
+        </div>
+        <div class="card-body compact" style="padding:0">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>站点</th>
+                  <th>来源 ID</th>
+                  <th>标题</th>
+                  <th>URL</th>
+                  <th>导入时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="source-site">🌐 E-Hentai</span></td>
+                  <td style="font-family:monospace;font-size:12px">1897423</td>
+                  <td>放課後の催眠ノート</td>
+                  <td><a href="#" onclick="return false">e-hentai.org/g/1897423</a></td>
+                  <td class="text-dim">2026-07-08 22:15</td>
+                  <td><button class="btn btn-ghost btn-xs">🔄 刷新</button></td>
+                </tr>
+                <tr>
+                  <td><span class="source-site">🌐 ExHentai</span></td>
+                  <td style="font-family:monospace;font-size:12px">1897424</td>
+                  <td>After School Hypnosis Notes</td>
+                  <td><a href="#" onclick="return false">exhentai.org/g/1897424</a></td>
+                  <td class="text-dim">2026-07-08 22:16</td>
+                  <td><button class="btn btn-ghost btn-xs">🔄 刷新</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>可下载资源</h2>
+        </div>
+        <div class="card-body compact" style="padding:0">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>类型</th>
+                  <th>大小</th>
+                  <th>来源</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>📥 Torrent</td>
+                  <td class="file-size">1.4 GB</td>
+                  <td>ExHentai</td>
+                  <td><button class="btn btn-accent btn-xs" onclick="showDownloadModal()">⬇️ 下载</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Logs -->
+    <div class="tab-panel" id="panel-logs">
+      <div class="card">
+        <div class="card-header">
+          <h2>操作日志 <span class="sub">最近 20 条</span></h2>
+        </div>
+        <div class="card-body" style="padding:12px 20px">
+          <div class="log-entry">
+            <span class="log-time">2026-07-10 14:32:15</span>
+            <span class="log-action"><strong>扫描完成</strong> · 发现 2 个新页面，0 个变更</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-10 09:18:42</span>
+            <span class="log-action"><strong>标签编辑</strong> · 添加 <code>female:schoolgirl</code>，移除 <code>female:student</code></span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-09 22:05:30</span>
+            <span class="log-action"><strong>章节排序</strong> · #4 催眠的连锁 移至 #3 位置</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-09 20:00:12</span>
+            <span class="log-action"><strong>合并漫画</strong> · <strong>MGA-089</strong> 催眠番外篇 合并为章节 #6</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-08 22:16:22</span>
+            <span class="log-action"><strong>元数据导入</strong> · 来自 ExHentai (1897424)，更新标题和标签</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-08 22:15:10</span>
+            <span class="log-action"><strong>元数据导入</strong> · 来自 E-Hentai (1897423)，首次创建来源记录</span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-07-01 08:12:05</span>
+            <span class="log-action"><strong>主文件切换</strong> · 从 <code>目录</code> 切换为 <code>CBZ</code>，后切换回 <code>目录</code></span>
+          </div>
+          <div class="log-entry">
+            <span class="log-time">2026-06-28 19:45:00</span>
+            <span class="log-action"><strong>初始扫描</strong> · 创建漫画，6 个章节，184 个页面</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Danger Zone -->
+    <div class="tab-panel" id="panel-danger">
+      <div class="danger-zone">
+        <div class="card-header">
+          <h2>⚠️ 危险操作区</h2>
+        </div>
+        <div class="danger-item">
+          <div class="desc">
+            <h4>隐藏漫画</h4>
+            <p>从前台列表中隐藏，后台仍可查看和管理。重新扫描时保持隐藏状态。</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="toggleHide()">👁️ 隐藏</button>
+        </div>
+        <div class="danger-item">
+          <div class="desc">
+            <h4>软删除记录</h4>
+            <p>标记为已删除，不删除本地文件。可在扫描结果中恢复。</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="showSoftDeleteConfirm()">🗑️ 软删除</button>
+        </div>
+        <div class="danger-item">
+          <div class="desc">
+            <h4>合并为章节</h4>
+            <p>将本漫画合并到另一本漫画作为其章节。操作可逆，不会移动物理文件。</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="showMergeModal()">🔗 合并...</button>
+        </div>
+        <div class="danger-item">
+          <div class="desc">
+            <h4>物理删除文件</h4>
+            <p>⚠️ 不可逆操作！将永久删除磁盘上的实际漫画文件。操作前请确认绝对路径。</p>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="showDeleteFilesConfirm()">🗑️ 删除文件</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.content -->
+</div><!-- /.main -->
+
+<!-- Merge Modal -->
+<div class="modal-overlay" id="mergeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>合并漫画为章节</h3>
+      <button class="modal-close" onclick="closeModal('mergeModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group full">
+        <label class="form-label">选择目标漫画</label>
+        <select class="form-input">
+          <option>放学后的催眠笔记 (当前漫画)</option>
+          <option>MGA-088 - 催眠学园</option>
+          <option>MGA-090 - 催眠治疗室</option>
+          <option>MGA-091 - 暑假的催眠回忆</option>
+        </select>
+        <span class="form-hint">将当前漫画「放学后的催眠笔记」合并为选中漫画的一个章节</span>
+      </div>
+      <div class="form-group full" style="margin-top:12px">
+        <label class="form-label">章节标题（可选）</label>
+        <input class="form-input" placeholder="留空则使用原漫画展示标题">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('mergeModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmMerge()">确认合并</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Modal -->
+<div class="modal-overlay" id="confirmModal">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-header">
+      <h3 id="confirmTitle">确认操作</h3>
+      <button class="modal-close" onclick="closeModal('confirmModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirmMessage" style="font-size:13px;color:var(--text-muted)"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('confirmModal')">取消</button>
+      <button class="btn btn-danger" id="confirmBtn" onclick="closeModal('confirmModal')">确认</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// Tab switching
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// Drag & drop for chapters
+const chapterList = document.getElementById('chapterList');
+let dragSrcEl = null;
+chapterList.addEventListener('dragstart', (e) => {
+  dragSrcEl = e.target.closest('.chapter-row');
+  if (dragSrcEl) dragSrcEl.classList.add('dragging');
+});
+chapterList.addEventListener('dragend', (e) => {
+  const row = e.target.closest('.chapter-row');
+  if (row) row.classList.remove('dragging');
+  document.querySelectorAll('.chapter-row').forEach(r => r.classList.remove('drag-over'));
+});
+chapterList.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  const target = e.target.closest('.chapter-row');
+  if (target && target !== dragSrcEl) {
+    document.querySelectorAll('.chapter-row').forEach(r => r.classList.remove('drag-over'));
+    target.classList.add('drag-over');
+  }
+});
+chapterList.addEventListener('dragleave', (e) => {
+  const target = e.target.closest('.chapter-row');
+  if (target) target.classList.remove('drag-over');
+});
+chapterList.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const target = e.target.closest('.chapter-row');
+  if (target && dragSrcEl && target !== dragSrcEl) {
+    const parent = chapterList;
+    const afterTarget = target.nextSibling === dragSrcEl || target.nextSibling === null;
+    parent.insertBefore(dragSrcEl, afterTarget ? target.nextSibling : target);
+    // Re-number
+    renumberChapters();
+    toast('章节顺序已更新，点击「保存顺序」生效', 'info');
+  }
+  document.querySelectorAll('.chapter-row').forEach(r => r.classList.remove('drag-over'));
+});
+
+function renumberChapters() {
+  document.querySelectorAll('#chapterList .chapter-row').forEach((row, i) => {
+    row.dataset.index = i + 1;
+    row.querySelector('.num').textContent = '#' + (i + 1);
+  });
+}
+
+function saveChapterOrder() {
+  const order = [];
+  document.querySelectorAll('#chapterList .chapter-row').forEach(row => {
+    order.push(row.dataset.index);
+  });
+  toast('章节顺序已保存: ' + order.join(' → '), 'success');
+}
+
+// Tag management
+function toggleInput(btn) {
+  const group = btn.parentElement;
+  const input = group.querySelector('.tg-input');
+  const act = group.querySelector('.tg-act');
+  btn.classList.add('hide');
+  input.classList.add('show');
+  act.classList.add('show');
+  input.focus();
+}
+
+function resetInput(group) {
+  const btn = group.querySelector('.tg-add');
+  const input = group.querySelector('.tg-input');
+  const act = group.querySelector('.tg-act');
+  btn.classList.remove('hide');
+  input.classList.remove('show');
+  input.value = '';
+  act.classList.remove('show');
+}
+
+function confirmAdd(el) {
+  const group = el.closest('.tag-group');
+  const input = group.querySelector('.tg-input');
+  const val = input.value.trim();
+  if (!val) { resetInput(group); return; }
+  const tags = group.querySelector('.tg-tags');
+  const span = document.createElement('span');
+  span.className = 'tag';
+  span.innerHTML = val + '<span class="tag-remove" onclick="removeTag(this)">✕</span>';
+  tags.appendChild(span);
+  toast('已添加标签: ' + tags.dataset.ns + ':' + val, 'success');
+  resetInput(group);
+}
+
+function cancelAdd(el) {
+  const group = el.closest('.tag-group');
+  resetInput(group);
+}
+
+function removeTag(el) {
+  el.parentElement.remove();
+  toast('已移除标签', 'info');
+}
+
+// Toast system
+function toast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = 'toast ' + type;
+  const icons = { success: '✅', error: '❌', info: 'ℹ️' };
+  t.innerHTML = '<span>' + (icons[type] || 'ℹ️') + '</span><span>' + message + '</span>';
+  container.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+// Modals
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function showMergeModal() { openModal('mergeModal'); }
+function confirmMerge() {
+  closeModal('mergeModal');
+  toast('已提交合并请求', 'success');
+}
+
+function showSoftDeleteConfirm() {
+  document.getElementById('confirmTitle').textContent = '确认软删除';
+  document.getElementById('confirmMessage').textContent = '将标记「放学后的催眠笔记」为已删除状态。本地文件不会被删除，可从扫描结果中恢复。';
+  document.getElementById('confirmBtn').className = 'btn btn-danger';
+  document.getElementById('confirmBtn').textContent = '确认软删除';
+  openModal('confirmModal');
+}
+
+function showDeleteFilesConfirm() {
+  document.getElementById('confirmTitle').textContent = '⚠️ 确认物理删除文件';
+  document.getElementById('confirmMessage').innerHTML = '将永久删除以下文件：<br><br><code style="display:block;padding:8px;background:var(--bg-input);border-radius:4px;margin-top:4px">D:/manga/library/C97/after_school_hypnosis_notes/</code><br><strong style="color:var(--red)">此操作不可逆！</strong>';
+  document.getElementById('confirmBtn').className = 'btn btn-danger';
+  document.getElementById('confirmBtn').textContent = '确认永久删除';
+  openModal('confirmModal');
+}
+
+function unmergeChapter(idx) {
+  document.getElementById('confirmTitle').textContent = '恢复章节为独立漫画';
+  document.getElementById('confirmMessage').textContent = '将 #' + idx + ' 「' + document.querySelectorAll('#chapterList .chapter-row')[idx-1].querySelector('.title').textContent.trim() + '」从本章节中分离，恢复为独立漫画记录。';
+  document.getElementById('confirmBtn').className = 'btn btn-primary';
+  document.getElementById('confirmBtn').textContent = '确认恢复';
+  openModal('confirmModal');
+}
+
+function unmergeComic(id) {
+  toast('正在恢复 ' + id + ' 为独立漫画...', 'info');
+  setTimeout(() => toast(id + ' 已恢复为独立漫画', 'success'), 1000);
+}
+
+function saveAll() { toast('所有更改已保存', 'success'); }
+function previewComic() { toast('在新标签页中打开前台预览', 'info'); }
+function scanNow() { toast('扫描任务已加入队列', 'info'); }
+function uploadCover() { toast('打开文件选择器上传封面', 'info'); }
+function regenerateCover() { toast('封面重新生成任务已提交', 'info'); }
+function checkAllFiles() { toast('正在检查所有文件状态...', 'info'); setTimeout(() => toast('文件检查完成：0 个缺失', 'success'), 1500); }
+function setPrimary(id) { toast('已设为主文件: ' + id, 'success'); }
+function recalcHash(id) { toast('正在计算 ' + id + ' 的哈希值...', 'info'); setTimeout(() => toast('哈希计算完成', 'success'), 1200); }
+function toggleHide() {
+  document.getElementById('confirmTitle').textContent = '隐藏/显示漫画';
+  document.getElementById('confirmMessage').textContent = '切换「放学后的催眠笔记」的可见状态。隐藏后前台不再展示，后台保留可管理。';
+  document.getElementById('confirmBtn').className = 'btn btn-ghost';
+  document.getElementById('confirmBtn').textContent = '确认切换';
+  openModal('confirmModal');
+}
+function showDownloadModal() { toast('下载任务已添加到队列', 'success'); }
+
+// Close modals on overlay click
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.classList.remove('open');
+  });
+});
+
+// Keyboard shortcut: Escape to close modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+  }
+});
+</script>
+
+</body>
+</html>
