@@ -95,6 +95,27 @@ export function closeAdminTab(cache: AdminTabCache, tabId: string, now = Date.no
   };
 }
 
+export function closeOtherTabs(cache: AdminTabCache, tabId: string, now = Date.now()): AdminTabCache {
+  const tab = cache.tabs.find((t) => t.id === tabId);
+  if (!tab) return cache;
+  const keepIds = new Set([DEFAULT_ADMIN_TAB_ID, tabId]);
+  const activeTabId = cache.activeTabId === tabId ? tabId : cache.activeTabId;
+  return {
+    ...cache,
+    activeTabId,
+    tabs: cache.tabs.filter((t) => keepIds.has(t.id) || !t.closeable).map((t) => (t.id === activeTabId ? { ...t, lastActiveAt: now } : t)),
+  };
+}
+
+export function closeTabsToRight(cache: AdminTabCache, tabId: string, now = Date.now()): AdminTabCache {
+  const idx = cache.tabs.findIndex((t) => t.id === tabId);
+  if (idx < 0) return cache;
+  return {
+    ...cache,
+    tabs: cache.tabs.filter((t, i) => i <= idx || !t.closeable || t.id === DEFAULT_ADMIN_TAB_ID).map((t) => (t.id === cache.activeTabId ? { ...t, lastActiveAt: now } : t)),
+  };
+}
+
 export function renameAdminTab(cache: AdminTabCache, tabId: string, title: string): AdminTabCache {
   const trimmed = title.trim();
 

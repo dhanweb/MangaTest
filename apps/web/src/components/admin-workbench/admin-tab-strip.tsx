@@ -2,12 +2,37 @@
 
 import { ActionIcon, Box, Group, ScrollArea, Text, Tooltip } from "@mantine/core";
 import { RefreshCw, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAdminTabs } from "./admin-tab-provider";
 import { DEFAULT_ADMIN_TAB_ID } from "./admin-tab-types";
 
 export function AdminTabStrip() {
-  const { activeTabId, tabs, activateTab, closeTab, refreshActiveTab } = useAdminTabs();
+  const { activeTabId, tabs, activateTab, closeTab, closeOtherTabs, closeTabsToRight, refreshActiveTab } = useAdminTabs();
+  const [ctxTabId, setCtxTabId] = useState<string | null>(null);
+  const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const openCtx = useCallback((tabId: string, x: number, y: number) => {
+    setCtxTabId(tabId);
+    setCtxPos({ x, y });
+  }, []);
+
+  const closeCtx = useCallback(() => {
+    setCtxTabId(null);
+    setCtxPos(null);
+  }, []);
+
+  useEffect(() => {
+    if (!ctxPos) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        closeCtx();
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ctxPos, closeCtx]);
 
   return (
     <Box
@@ -31,6 +56,10 @@ export function AdminTabStrip() {
                 component="button"
                 type="button"
                 onClick={() => activateTab(tab.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  openCtx(tab.id, e.clientX, e.clientY);
+                }}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -53,18 +82,29 @@ export function AdminTabStrip() {
                   {tab.title}
                 </Text>
                 {canClose ? (
-                  <ActionIcon
+                  <Box
+                    component="span"
                     aria-label={`关闭 ${tab.title}`}
-                    color="pink"
-                    size="xs"
-                    variant="subtle"
                     onClick={(event) => {
                       event.stopPropagation();
                       closeTab(tab.id);
                     }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 22,
+                      height: 22,
+                      borderRadius: 4,
+                      cursor: "pointer",
+                      color: "var(--mantine-color-pink-5)",
+                      fontSize: 13,
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
                   >
                     <X size={13} />
-                  </ActionIcon>
+                  </Box>
                 ) : null}
               </Box>
             );
@@ -84,6 +124,63 @@ export function AdminTabStrip() {
           <RefreshCw size={16} />
         </ActionIcon>
       </Tooltip>
+
+      {/* Context Menu */}
+      {ctxPos && ctxTabId && (
+        <Box
+          ref={menuRef}
+          style={{
+            position: "fixed",
+            top: ctxPos.y,
+            left: ctxPos.x,
+            zIndex: 9999,
+            minWidth: 160,
+            background: "white",
+            border: "1px solid var(--mantine-color-pink-1)",
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+            padding: "4px 0",
+          }}
+        >
+          <CtxItem onClick={() => { closeTab(ctxTabId); closeCtx(); }}>
+            关闭此页签
+          </CtxItem>
+          <CtxItem onClick={() => { closeOtherTabs(ctxTabId); closeCtx(); }}>
+            关闭其他页签
+          </CtxItem>
+          <CtxItem onClick={() => { closeTabsToRight(ctxTabId); closeCtx(); }}>
+            关闭右侧页签
+          </CtxItem>
+          <CtxItem onClick={() => { closeCtx(); }}>
+            取消
+          </CtxItem>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function CtxItem({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <Box
+      component="button"
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "8px 16px",
+        border: "none",
+        background: "transparent",
+        color: "var(--mantine-color-ink-7)",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: "pointer",
+        fontFamily: "inherit",
+      }}
+    >
+      <Text size="sm" fw={600}>{children}</Text>
     </Box>
   );
 }

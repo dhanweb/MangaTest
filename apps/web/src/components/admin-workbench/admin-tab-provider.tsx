@@ -18,6 +18,8 @@ import { loadAdminTabCache, saveAdminTabCache } from "./admin-tab-storage";
 import {
   activateAdminTab,
   closeAdminTab,
+  closeOtherTabs,
+  closeTabsToRight,
   createInitialAdminTabCache,
   openAdminTab,
   renameAdminTab,
@@ -30,6 +32,8 @@ interface AdminTabContextValue {
   openTab(href: string, title?: string): void;
   activateTab(tabId: string): void;
   closeTab(tabId: string): void;
+  closeOtherTabs(tabId: string): void;
+  closeTabsToRight(tabId: string): void;
   refreshActiveTab(): void;
   setCurrentTabTitle(title: string): void;
   setTabTitle(tabId: string, title: string): void;
@@ -124,6 +128,28 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
     [router],
   );
 
+  const handleCloseOtherTabs = useCallback((tabId: string) => {
+    setCache((current) => {
+      const next = closeOtherTabs(current, tabId);
+      if (next.activeTabId !== current.activeTabId) {
+        const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
+        if (nextTab) startTransition(() => router.push(nextTab.href));
+      }
+      return next;
+    });
+  }, [router]);
+
+  const handleCloseTabsToRight = useCallback((tabId: string) => {
+    setCache((current) => {
+      const next = closeTabsToRight(current, tabId);
+      if (next.activeTabId !== current.activeTabId) {
+        const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
+        if (nextTab) startTransition(() => router.push(nextTab.href));
+      }
+      return next;
+    });
+  }, [router]);
+
   const refreshActiveTab = useCallback(() => {
     router.refresh();
   }, [router]);
@@ -143,11 +169,13 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
       openTab,
       activateTab,
       closeTab,
+      closeOtherTabs: handleCloseOtherTabs,
+      closeTabsToRight: handleCloseTabsToRight,
       refreshActiveTab,
       setCurrentTabTitle,
       setTabTitle,
     }),
-    [activateTab, cache.activeTabId, cache.tabs, closeTab, openTab, refreshActiveTab, setCurrentTabTitle, setTabTitle],
+    [activateTab, cache.activeTabId, cache.tabs, closeTab, handleCloseOtherTabs, handleCloseTabsToRight, openTab, refreshActiveTab, setCurrentTabTitle, setTabTitle],
   );
 
   return <AdminTabContext.Provider value={value}>{children}</AdminTabContext.Provider>;

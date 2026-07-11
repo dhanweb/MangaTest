@@ -454,9 +454,21 @@ export interface OpenListOfflineDownloadResult {
   apiCheck: OpenListEndpointCheck | null;
 }
 
+export type OpenListOfflineTaskState = number; // 0=queued, 1=downloading, 2=done, 3=error
+
+export interface OpenListOfflineTaskItem {
+  id: string;
+  name: string;
+  state: OpenListOfflineTaskState;
+  status: string;
+  progress: number;
+  error: string;
+}
+
 export async function submitOpenListOfflineDownload(
   url: string,
   savePath: string,
+  tool = "115 Open",
   options: { fetchImpl?: typeof fetch; settings?: RuntimeSettings } = {},
 ): Promise<OpenListOfflineDownloadResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
@@ -481,8 +493,8 @@ export async function submitOpenListOfflineDownload(
     const response = await fetchImpl(apiEndpoint, {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ url, path: savePath || "/" }),
-      signal: AbortSignal.timeout(10000),
+      body: JSON.stringify({ path: savePath || "/", urls: [url], tool, delete_policy: "delete_on_upload_succeed" }),
+      signal: AbortSignal.timeout(15000),
     });
     const payload = await response.json().catch(() => null);
     const payloadCode = typeof payload?.code === "number" ? payload.code : null;
@@ -497,11 +509,29 @@ export async function submitOpenListOfflineDownload(
       return { ok: false, status: "invalid_response", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载提交失败。", taskId: null, apiCheck };
     }
 
-    const taskId = typeof payload?.data?.id === "string" ? payload.data.id : typeof payload?.data?.task?.id === "string" ? payload.data.task.id : null;
+    const tasks: OpenListOfflineTaskItem[] = Array.isArray(payload?.data?.tasks) ? payload.data.tasks : [];
+    const taskId = tasks[0]?.id ?? null;
     return { ok: true, status: "submitted", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载已提交到 OpenList。", taskId, apiCheck };
   } catch (error) {
     return { ok: false, status: "unreachable", checkedAt, baseUrl, tokenConfigured, message: error instanceof Error ? error.message : "OpenList 请求失败。", taskId: null, apiCheck: { endpoint, ok: false, status: null, code: null, message: null } };
   }
+}
+
+export async function listOpenListOfflineTasks(kind: "undone" | "done"): Promise<OpenListOfflineTaskItem[]> {
+  const settings = await getRuntimeSettings();
+  const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
+  const token = settings.openlistToken.trim();
+  if (!baseUrl || !token) return [];
+  try {
+    const res = await fetch(buildOpenListUrl(baseUrl, `api/task/offline_download/${kind}`), {
+      method: "POST", headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(5000),
+    });
+    const payload = await res.json().catch(() => null);
+    if (payload?.code === 200 && Array.isArray(payload?.data)) return payload.data;
+    return [];
+  } catch { return []; }
 }
 
 export async function resolveOpenListDownloadLink(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListDownloadLinkResult> {

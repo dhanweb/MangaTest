@@ -778,90 +778,71 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
   if (pendingFinalization) {
     const finalization = await finalizeDownloadedTask(pendingFinalization.task, pendingFinalization.transfer);
     const updatedTask = getDownloadTaskById(pendingFinalization.task.id);
-
     return {
-      executed: finalization.status === "completed",
-      finalization,
-      reason:
-        finalization.status === "completed"
-          ? "下载临时文件已移动到入库目录，并已触发漫画库扫描。"
-          : finalization.errorMessage ?? "下载临时文件入库失败。",
-      plan: createDownloadDispatchPlan({
-        status: finalization.status === "completed" ? "ready" : "blocked",
-        reason: finalization.status === "completed" ? "下载临时文件已入库并扫描。" : finalization.errorMessage ?? "下载临时文件入库失败。",
-        provider: pendingFinalization.task.provider,
-        task: updatedTask ?? pendingFinalization.task,
-        resource: pendingFinalization.resource,
-      }),
+      executed: finalization.status === "completed", finalization,
+      reason: finalization.status === "completed" ? "下载临时文件已移动到入库目录，并已触发漫画库扫描。" : finalization.errorMessage ?? "下载临时文件入库失败。",
+      plan: createDownloadDispatchPlan({ status: finalization.status === "completed" ? "ready" : "blocked", reason: finalization.status === "completed" ? "下载临时文件已入库并扫描。" : finalization.errorMessage ?? "下载临时文件入库失败。", provider: pendingFinalization.task.provider, task: updatedTask ?? pendingFinalization.task, resource: pendingFinalization.resource }),
       transfer: pendingFinalization.transfer,
     };
   }
 
-  const plan = await planNextDownloadDispatch();
-  const preparation = persistDownloadTaskPreparationFromPlan(plan);
-  const preparedPlan =
-    preparation && plan.task
-      ? {
-          ...plan,
-          task: {
-            ...plan.task,
-            preparation,
-          },
-        }
-      : plan;
+  // Loop: process all queued tasks (up to 20 per tick)
+  let processed = 0;
+  const reasons: string[] = [];
+  for (let i = 0; i < 20; i++) {
+    const plan = await planNextDownloadDispatch();
+    if (plan.status !== "ready" || !plan.task) break;
 
-  // OpenList file download: download raw_url to local temp
-  if (preparation?.status === "ready" && preparedPlan.task?.provider === "openlist" && preparedPlan.task?.resourceType === "openlist") {
-    const transfer = await downloadPreparedOpenListTask(preparedPlan.task, preparation);
-    const updatedTask = getDownloadTaskById(preparedPlan.task.id);
-    const transferPlan = updatedTask ? { ...preparedPlan, task: updatedTask } : preparedPlan;
-    return {
-      executed: transfer.status === "completed", finalization: null,
-      reason: transfer.status === "completed" ? "OpenList 文件已下载到本地临时文件，等待下一次 worker 入库扫描。" : transfer.errorMessage ?? "OpenList 临时文件下载失败。",
-      plan: transferPlan, transfer,
-    };
-  }
+    const preparation = persistDownloadTaskPreparationFromPlan(plan);
 
-  // Magnet + OpenList: push to OpenList offline download
-  if (plan.status === "ready" && plan.task?.provider === "openlist" && plan.task?.resourceType === "magnet") {
-    const fullMagnetUrl = plan.task.comicResourceId
-      ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
-      : "";
-    const savePath = `/${plan.task.comicTitle || "download"}`;
-    const result = await submitOpenListOfflineDownload(fullMagnetUrl, savePath);
-    const now = new Date().toISOString();
-
-    if (result.ok) {
-      markDownloadTaskFinished(plan.task.id, "completed", null, now);
-      const updatedTask = getDownloadTaskById(plan.task.id);
-      return {
-        executed: true, finalization: null,
-        reason: `磁链已推送到 OpenList 离线下载 (任务 ID: ${result.taskId ?? "unknown"})。`,
-        plan: updatedTask ? { ...plan, task: updatedTask } : plan, transfer: null,
-      };
+    if (preparation?.status === "ready" && plan.task.provider === "openlist" && plan.task.resourceType === "openlist") {
+      const transfer = await downloadPreparedOpenListTask(plan.task, preparation);
+      processed++;
+      reasons.push(transfer.status === "completed" ? `${plan.task.comicTitle}: 已下载` : `${plan.task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`);
+      continue;
     }
 
-    markDownloadTaskFinished(plan.task.id, "failed", result.message, now);
+    if (plan.status === "ready" && plan.task.provider === "openlist" && plan.task.resourceType === "magnet") {
+      const fullMagnetUrl = plan.task.comicResourceId
+        ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
+        : "";
+      const savePath = "/115Open/Temp";
+      const result = await submitOpenListOfflineDownload(fullMagnetUrl, savePath, "115 Open");
+      const now = new Date().toISOString();
+
+      if (result.ok) {
+        markDownloadTaskFinished(plan.task.id, "completed", null, now);
+        processed++;
+        reasons.push(`${plan.task.comicTitle}: 已推送到 OpenList`);
+      } else {
+        markDownloadTaskFinished(plan.task.id, "failed", result.message, now);
+        processed++;
+        reasons.push(`${plan.task.comicTitle}: ${result.message}`);
+      }
+      continue;
+    }
+
+    // Not a supported dispatch path
+    reasons.push(`${plan.task.comicTitle}: ${plan.reason}`);
+    break;
+  }
+
+  if (processed > 0) {
+    const plan = await planNextDownloadDispatch();
     return {
-      executed: false, finalization: null,
-      reason: `推送到 OpenList 失败: ${result.message}`,
-      plan: { ...plan, task: getDownloadTaskById(plan.task.id) ?? plan.task }, transfer: null,
+      executed: true, finalization: null,
+      reason: `处理了 ${processed} 个任务：${reasons.join("；")}`,
+      plan: plan ?? createDownloadDispatchPlan({ status: "idle", reason: "所有任务已处理" }),
+      transfer: null,
     };
   }
 
+  const plan = await planNextDownloadDispatch();
   return {
-    executed: false,
-    finalization: preparedPlan.task?.finalization ?? null,
-    reason:
-      preparation?.status === "ready"
-        ? plan.task?.resourceType === "magnet"
-          ? "磁链资源准备就绪，等待 worker 推送到 OpenList。"
-          : "OpenList 下载链接准备已记录，真实下载执行尚未接入。"
-        : plan.status === "ready"
-          ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
-          : plan.reason,
-    plan: preparedPlan,
-    transfer: preparedPlan.task?.transfer ?? null,
+    executed: false, finalization: null,
+    reason: plan.status === "idle" ? "没有排队中的任务" : plan.reason,
+    plan,
+    transfer: null,
   };
 }
 
