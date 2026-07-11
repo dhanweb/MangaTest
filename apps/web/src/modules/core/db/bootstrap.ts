@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import path from "node:path";
+
 import { getSqlite } from "./client";
 
 let bootstrapped = false;
@@ -23,6 +27,7 @@ export function bootstrapDatabase() {
       absolute_path TEXT NOT NULL,
       display_name TEXT,
       scan_mode TEXT NOT NULL DEFAULT 'children_as_comics',
+      kind TEXT NOT NULL DEFAULT 'user',
       is_enabled INTEGER NOT NULL DEFAULT 1,
       last_scan_session_id TEXT,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -487,6 +492,18 @@ export function bootstrapDatabase() {
 
   ensureColumn("local_files", "is_ignored", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("local_files", "ignored_at", "TEXT");
+  ensureColumn("manga_roots", "kind", "TEXT NOT NULL DEFAULT 'user'");
+
+  // Auto-create system manga root if it doesn't exist
+  const systemRootPath = path.resolve(process.cwd(), "manga_store");
+  const systemRootExists = sqlite.prepare("SELECT id FROM manga_roots WHERE kind = 'system'").get();
+  if (!systemRootExists) {
+    mkdirSync(systemRootPath, { recursive: true });
+    const now = new Date().toISOString();
+    sqlite.prepare(
+      "INSERT OR IGNORE INTO manga_roots (id, absolute_path, display_name, scan_mode, kind, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(randomUUID(), systemRootPath, "系统默认目录", "children_as_comics", "system", 1, now, now);
+  }
 
   bootstrapped = true;
 }

@@ -112,7 +112,12 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                   </Text>
                 </Table.Td>
                 <Table.Td>
-                  <Text size="sm">{root.displayName || "本地漫画库"}</Text>
+                  <Group gap={4} wrap="nowrap">
+                    {root.kind === "system" && (
+                      <Text component="span" size="sm" title="系统目录，不可删除">🔒</Text>
+                    )}
+                    <Text size="sm">{root.displayName || "本地漫画库"}</Text>
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   <StatusBadge enabled={root.isEnabled} />
@@ -147,13 +152,13 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                       }}
                     >
                       <input name="mangaRootId" type="hidden" value={root.id} />
-                      <Tooltip label={root.comicCount > 0 ? "已有入库漫画，不能删除；可先停用路径" : "删除路径记录"} withArrow>
+                      <Tooltip label={root.kind === "system" ? "系统目录不可删除" : root.comicCount > 0 ? "已有入库漫画，不能删除；可先停用路径" : "删除路径记录"} withArrow>
                         <ActionIcon
                           variant="subtle"
                           color="red"
                           size="md"
                           type="submit"
-                          disabled={root.comicCount > 0}
+                          disabled={root.kind === "system" || root.comicCount > 0}
                           aria-label={`删除 ${root.absolutePath}`}
                         >
                           <Trash2 size={15} />

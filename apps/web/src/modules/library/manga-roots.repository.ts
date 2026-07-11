@@ -31,6 +31,7 @@ export function createMangaRootRepository(): MangaRootRepository {
         absolutePath: row.absolutePath,
         displayName: row.displayName,
         scanMode: row.scanMode,
+        kind: row.kind,
         isEnabled: row.isEnabled,
       }));
     },
@@ -44,6 +45,7 @@ export function createMangaRootRepository(): MangaRootRepository {
           absolutePath: mangaRoots.absolutePath,
           displayName: mangaRoots.displayName,
           scanMode: mangaRoots.scanMode,
+          kind: mangaRoots.kind,
           isEnabled: mangaRoots.isEnabled,
           lastScanSessionId: mangaRoots.lastScanSessionId,
           comicCount: sql<number>`count(distinct ${localFiles.comicId})`,
@@ -60,6 +62,7 @@ export function createMangaRootRepository(): MangaRootRepository {
         absolutePath: row.absolutePath,
         displayName: row.displayName,
         scanMode: row.scanMode,
+        kind: row.kind,
         isEnabled: row.isEnabled,
         lastScanSessionId: row.lastScanSessionId,
         comicCount: Number(row.comicCount),
@@ -76,7 +79,16 @@ export function createMangaRootRepository(): MangaRootRepository {
         throw new Error("这个漫画根目录已经存在。");
       }
 
-      db.insert(mangaRoots).values(record).run();
+      db.insert(mangaRoots).values({
+        id: record.id,
+        absolutePath: record.absolutePath,
+        displayName: record.displayName,
+        scanMode: record.scanMode,
+        kind: record.kind,
+        isEnabled: record.isEnabled,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }).run();
 
       return record;
     },
@@ -105,6 +117,7 @@ export function createMangaRootRepository(): MangaRootRepository {
         absolutePath: existing.absolutePath,
         displayName: input.displayName?.trim() || null,
         scanMode: existing.scanMode,
+        kind: existing.kind,
         isEnabled: input.isEnabled,
       };
     },
@@ -116,6 +129,10 @@ export function createMangaRootRepository(): MangaRootRepository {
 
       if (!existing) {
         throw new Error("漫画根目录不存在。");
+      }
+
+      if (existing.kind === "system") {
+        throw new Error("系统根目录不可删除。");
       }
 
       const usage = db

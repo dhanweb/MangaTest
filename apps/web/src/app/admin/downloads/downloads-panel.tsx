@@ -44,9 +44,7 @@ type ApiData = {
 };
 
 export function DownloadsPanel({
-  dispatchPlan,
-  resources,
-  tasks,
+  dispatchPlan, resources, tasks,
 }: {
   dispatchPlan: DownloadDispatchPlan;
   resources: DownloadableResourceRecord[];
@@ -254,16 +252,23 @@ export function DownloadsPanel({
             </Table.Thead>
             <Table.Tbody>
               {taskItems.map((task) => (
-                <Table.Tr key={task.id}>
-                  <Table.Td>
-                    <Text size="sm" fw={600}>{task.comicTitle}</Text>
-                    <Text size="xs" c="ink.5">{task.resourceLabel}</Text>
-                  </Table.Td>
-                  <Table.Td>{PROVIDER_LABELS[task.provider] || task.provider}</Table.Td>
-                  <Table.Td>{TYPE_LABELS[task.resourceType ?? ""] || task.resourceType}</Table.Td>
-                  <Table.Td>
-                    <StatusBadge status={task.status} />
-                  </Table.Td>
+                  <Table.Tr key={task.id}>
+                    <Table.Td>
+                      <Text size="sm" fw={600}>{task.comicTitle}</Text>
+                      <Text size="xs" c="ink.5">{task.resourceLabel}</Text>
+                    </Table.Td>
+                    <Table.Td>{PROVIDER_LABELS[task.provider] || task.provider}</Table.Td>
+                    <Table.Td>{TYPE_LABELS[task.resourceType ?? ""] || task.resourceType}</Table.Td>
+                    <Table.Td>
+                      <Stack gap={2}>
+                        <StatusBadge status={task.status} />
+                        {task.status === "failed" && task.errorMessage && !task.errorMessage.startsWith("{") && (
+                          <Text size="10px" c="red" style={{ maxWidth: 200, wordBreak: "break-all", lineHeight: 1.3 }}>
+                            {task.errorMessage}
+                          </Text>
+                        )}
+                      </Stack>
+                    </Table.Td>
                   <Table.Td>
                     <Group gap={4} wrap="nowrap">
                       {(task.status === "queued" || task.status === "running") && (

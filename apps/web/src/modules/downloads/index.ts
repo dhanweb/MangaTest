@@ -2511,8 +2511,31 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
     if (matchedOlTask) {
       // state: 0=queued, 1=downloading, 2=done, 3=error, 7=error(duplicate)
       if (matchedOlTask.state === 2) {
+        // File completed on OpenList, now download it to local manga root
+        try {
+          const fullTask = getDownloadTaskById(task.id);
+          if (fullTask) {
+            const transfer = await downloadOpenListCompletedFile(fullTask, info, baseUrl, token);
+            if (transfer) {
+              // Temp file downloaded, finalize (move to manga root + scan)
+              const finalResult = await finalizeDownloadedTask(fullTask, transfer);
+              if (finalResult.status === "completed") {
+                results.push(`${info.comicTitle || "任务"}: 已下载到 ${finalResult.finalPath}`);
+              } else {
+                markDownloadTaskFinished(task.id, "failed", finalResult.errorMessage ?? "入库失败", now);
+                results.push(`${info.comicTitle || "任务"}: 入库失败`);
+              }
+              continue;
+            }
+          }
+        } catch (e) {
+          markDownloadTaskFinished(task.id, "failed", e instanceof Error ? e.message : "下载失败", now);
+          results.push(`${info.comicTitle || "任务"}: ${e instanceof Error ? e.message : "下载失败"}`);
+          continue;
+        }
+        // Fallback: just mark completed if download failed
         markDownloadTaskFinished(task.id, "completed", null, now);
-        results.push(`${info.comicTitle || "任务"}: OpenList 下载完成`);
+        results.push(`${info.comicTitle || "任务"}: OpenList 下载完成（未拉回本地）`);
         continue;
       }
       if (matchedOlTask.state === 3 || matchedOlTask.state === 7 || matchedOlTask.error) {
@@ -2557,4 +2580,48 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
   }
 
   return results;
+}
+
+async function downloadOpenListCompletedFile(
+  task: DownloadTaskRecord,
+  info: { olTaskId?: string; olPath?: string; comicTitle?: string },
+  baseUrl: string,
+  token: string,
+): Promise<DownloadTaskTransferRecord | null> {
+  // Find the completed file in the OpenList directory
+  const title = info.comicTitle ?? task.comicTitle;
+  const listRes = await fetch(`${baseUrl}/api/fs/list`, {
+    method: "POST",
+    headers: { Authorization: token, "Content-Type": "application/json" },
+    body: JSON.stringify({ path: info.olPath || "/115Open/Temp", page: 1, per_page: 100, refresh: true }),
+    signal: AbortSignal.timeout(5000),
+  });
+  const listData = await listRes.json().catch(() => null);
+  if (listData?.code !== 200 || !listData?.data?.content) return null;
+
+  const files = listData.data.content as Array<{ name: string; size: number; is_dir?: boolean }>;
+  const matchedFile = files.find((f) => !f.is_dir && f.size > 0 && (f.name.includes(title) || title.includes(f.name)));
+  if (!matchedFile) return null;
+
+  const remotePath = `${(info.olPath || "/115Open/Temp").replace(/\/$/, "")}/${matchedFile.name}`;
+
+  // Create a fake preparation record with the remote path
+  const prep: DownloadTaskPreparationRecord = {
+    id: randomUUID(),
+    downloadTaskId: task.id,
+    comicResourceId: task.comicResourceId || null,
+    provider: task.provider,
+    status: "ready",
+    remotePath,
+    remoteName: matchedFile.name,
+    sizeBytes: matchedFile.size,
+    remoteProvider: null,
+    rawUrlAvailable: true,
+    errorMessage: null,
+    preparedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  return downloadPreparedOpenListTask(task, prep);
 }

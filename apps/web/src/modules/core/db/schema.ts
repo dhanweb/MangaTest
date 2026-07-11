@@ -40,6 +40,8 @@ export const settings = sqliteTable("settings", {
   ...timestamps,
 });
 
+export const mangaRootKinds = ["user", "system"] as const;
+
 export const mangaRoots = sqliteTable(
   "manga_roots",
   {
@@ -47,6 +49,7 @@ export const mangaRoots = sqliteTable(
     absolutePath: text("absolute_path").notNull(),
     displayName: text("display_name"),
     scanMode: text("scan_mode", { enum: mangaRootScanModes }).notNull().default("children_as_comics"),
+    kind: text("kind", { enum: mangaRootKinds }).notNull().default("user"),
     isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
     lastScanSessionId: text("last_scan_session_id"),
     ...timestamps,
