@@ -190,6 +190,13 @@
     console.log("[MangaTest] 种子页按钮已注入", { 数量: count });
   }
 
+  function extractTorrentUrl(anchor) {
+    // Extract torrent URL from the clicked anchor element
+    const onclick = anchor.getAttribute("onclick") || "";
+    const m = /document\.location\s*=\s*['"]([^'"]+\.torrent[^'"]*)['"]/i.exec(onclick);
+    return m?.[1] || anchor.getAttribute("href") || anchor.href || "";
+  }
+
   async function handleTorrentSubmit(settings, anchor, btn) {
     console.log("[MangaTest] 点击了种子提交按钮");
     const originalText = btn.textContent;
@@ -197,46 +204,41 @@
     btn.style.pointerEvents = "none";
 
     try {
+      // Get clicked torrent URL
+      const clickedUrl = extractTorrentUrl(anchor);
+      if (!clickedUrl) throw new Error("无法获取种子链接");
+
+      // Collect page metadata (for site/sourceId/title info)
       const raw = COLLECTOR.collectPageMetadata();
       let metadata = COLLECTOR.normalizeMetadata(raw);
       if (!metadata) throw new Error("采集失败");
-      console.log("[MangaTest] 种子页元数据", { 标题: metadata.title, 资源数: metadata.resources?.length });
 
+      // Merge with stored gallery metadata if available
       const stored = await chrome.storage.local.get({ lastExhentaiMetadata: null });
       if (stored.lastExhentaiMetadata && stored.lastExhentaiMetadata.sourceId === metadata.sourceId) {
-        console.log("[MangaTest] 合并已存储的画廊元数据", { 来源ID: metadata.sourceId });
-        metadata = {
-          ...stored.lastExhentaiMetadata,
-          adapterId: metadata.adapterId,
-          resources: metadata.resources || [],
-        };
-        console.log("[MangaTest] 合并后的元数据", { 标题: metadata.title, 标签数: metadata.tags?.length, 资源数: metadata.resources?.length });
+        metadata = { ...stored.lastExhentaiMetadata, adapterId: metadata.adapterId };
       }
 
-      const torrentResources = (metadata.resources || []).filter((r) => r.type === "torrent");
-      console.log("[MangaTest] 发现种子资源", { 数量: torrentResources.length });
+      // Only keep the clicked torrent resource
+      metadata.resources = [{ type: "torrent", url: clickedUrl, label: (anchor.textContent || "").trim() || "Torrent" }];
 
-      if (torrentResources.length > 0) {
-        console.log("[MangaTest] 发送种子到后台转为磁链");
-        const resp = await chrome.runtime.sendMessage({
-          type: "MANGATEST_RESOLVE_TORRENTS",
-          resources: torrentResources,
-        });
-        console.log("[MangaTest] 转换结果", resp);
-        if (resp?.ok) {
-          metadata.resources = [
-            ...(metadata.resources || []).filter((r) => r.type !== "torrent"),
-            ...resp.resources,
-          ];
-          console.log("[MangaTest] 转换后的资源列表", { 数量: metadata.resources?.length });
-        }
+      console.log("[MangaTest] 只提交点击的种子", { url: clickedUrl.slice(0, 80) });
+
+      // Convert to magnet and submit
+      const resp = await chrome.runtime.sendMessage({
+        type: "MANGATEST_RESOLVE_TORRENTS",
+        resources: metadata.resources,
+      });
+      console.log("[MangaTest] 转换结果", resp);
+      if (resp?.ok) {
+        metadata.resources = resp.resources;
       }
 
-      console.log("[MangaTest] 通过后台线程提交元数据和磁链");
+      console.log("[MangaTest] 通过后台线程提交元数据和磁链（直发 OpenList）");
       const res = await chrome.runtime.sendMessage({
         type: "MANGATEST_API_CALL",
         method: "POST",
-        endpoint: "/api/metadata/import",
+        endpoint: "/api/metadata/import-with-magnet",
         body: metadata,
       });
       console.log("[MangaTest] 提交结果", res);
