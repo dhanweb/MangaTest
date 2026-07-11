@@ -2461,7 +2461,8 @@ function toSafeDownloadErrorMessage(error: unknown) {
 
 async function pollOpenListDownloadStatus(): Promise<string[]> {
   const db = getDb();
-  const runningTasks = db.select({ id: downloadTasks.id, errorMessage: downloadTasks.errorMessage }).from(downloadTasks)
+  const MAX_POLL_RETRIES = 15;
+  const runningTasks = db.select({ id: downloadTasks.id, errorMessage: downloadTasks.errorMessage, retryCount: downloadTasks.retryCount }).from(downloadTasks)
     .where(and(eq(downloadTasks.status, "running"), eq(downloadTasks.provider, "openlist"))).all();
   if (runningTasks.length === 0) return [];
 
@@ -2478,6 +2479,13 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
     let info: { olTaskId?: string; olPath?: string; comicTitle?: string } = {};
     try { info = JSON.parse(task.errorMessage ?? "{}"); } catch { continue; }
     if (!info.olPath) continue;
+
+    // Mark as failed if exceeded retry limit
+    if ((task.retryCount ?? 0) >= MAX_POLL_RETRIES) {
+      markDownloadTaskFinished(task.id, "failed", "OpenList 下载超时或失败", now);
+      results.push(`${info.comicTitle || "任务"}: 轮询超时，已标记为失败`);
+      continue;
+    }
 
     try {
       const res = await fetch(`${baseUrl}/api/fs/list`, {
@@ -2496,9 +2504,12 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
       if (matched) {
         markDownloadTaskFinished(task.id, "completed", null, now);
         results.push(`${title}: OpenList 下载完成`);
+      } else {
+        // Increment retry count
+        db.update(downloadTasks).set({ retryCount: (task.retryCount ?? 0) + 1, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
       }
     } catch {
-      // skip
+      // Connection error, skip
     }
   }
 
