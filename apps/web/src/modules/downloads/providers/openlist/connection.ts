@@ -524,8 +524,8 @@ export async function listOpenListOfflineTasks(kind: "undone" | "done"): Promise
   if (!baseUrl || !token) return [];
   try {
     const res = await fetch(buildOpenListUrl(baseUrl, `api/task/offline_download/${kind}`), {
-      method: "POST", headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      method: "GET",
+      headers: { Authorization: token },
       signal: AbortSignal.timeout(5000),
     });
     const payload = await res.json().catch(() => null);

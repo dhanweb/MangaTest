@@ -2472,7 +2472,8 @@ function toSafeDownloadErrorMessage(error: unknown) {
 
 async function pollOpenListDownloadStatus(): Promise<string[]> {
   const db = getDb();
-  const MAX_POLL_RETRIES = 15;
+  const MAX_POLL_RETRIES = 30;
+  const now = new Date().toISOString();
   const runningTasks = db.select({ id: downloadTasks.id, errorMessage: downloadTasks.errorMessage, retryCount: downloadTasks.retryCount }).from(downloadTasks)
     .where(and(eq(downloadTasks.status, "running"), eq(downloadTasks.provider, "openlist"))).all();
   if (runningTasks.length === 0) return [];
@@ -2483,7 +2484,20 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
   const token = settings.openlistToken.trim();
   if (!baseUrl) return [];
 
-  const now = new Date().toISOString();
+  // Fetch task statuses from OpenList
+  let olTasks: Array<{ id: string; name: string; state: number; error: string }> = [];
+  try {
+    for (const kind of ["undone", "done"]) {
+      const res = await fetch(`${baseUrl}/api/task/offline_download/${kind}`, {
+        method: "GET",
+        headers: { Authorization: token },
+        signal: AbortSignal.timeout(5000),
+      });
+      const p = await res.json().catch(() => null);
+      if (p?.code === 200 && Array.isArray(p?.data)) olTasks.push(...p.data);
+    }
+  } catch { /* skip */ }
+
   const results: string[] = [];
 
   for (const task of runningTasks) {
@@ -2491,13 +2505,28 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
     try { info = JSON.parse(task.errorMessage ?? "{}"); } catch { continue; }
     if (!info.olPath) continue;
 
-    // Mark as failed if exceeded retry limit
-    if ((task.retryCount ?? 0) >= MAX_POLL_RETRIES) {
-      markDownloadTaskFinished(task.id, "failed", "OpenList 下载超时或失败", now);
-      results.push(`${info.comicTitle || "任务"}: 轮询超时，已标记为失败`);
+    // Check OpenList task status
+    const matchedOlTask = info.olTaskId ? olTasks.find((t) => t.id === info.olTaskId) : null;
+
+    if (matchedOlTask) {
+      // state: 0=queued, 1=downloading, 2=done, 3=error, 7=error(duplicate)
+      if (matchedOlTask.state === 2) {
+        markDownloadTaskFinished(task.id, "completed", null, now);
+        results.push(`${info.comicTitle || "任务"}: OpenList 下载完成`);
+        continue;
+      }
+      if (matchedOlTask.state === 3 || matchedOlTask.state === 7 || matchedOlTask.error) {
+        const errMsg = matchedOlTask.error || "OpenList 下载失败";
+        markDownloadTaskFinished(task.id, "failed", errMsg, now);
+        results.push(`${info.comicTitle || "任务"}: ${errMsg}`);
+        continue;
+      }
+      // Still downloading (state 0 or 1)
+      db.update(downloadTasks).set({ retryCount: (task.retryCount ?? 0) + 1, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
       continue;
     }
 
+    // Fallback: check target directory for completed file
     try {
       const res = await fetch(`${baseUrl}/api/fs/list`, {
         method: "POST",
@@ -2506,21 +2535,24 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
         signal: AbortSignal.timeout(5000),
       });
       const p = await res.json().catch(() => null);
-      if (p?.code !== 200 || !p?.data?.content) continue;
-
-      const files = p.data.content as Array<{ name: string; size: number; is_dir?: boolean }>;
-      const title = info.comicTitle ?? "";
-      const matched = files.find((f) => !f.is_dir && f.size > 0 && (f.name.includes(title) || title.includes(f.name)));
-
-      if (matched) {
-        markDownloadTaskFinished(task.id, "completed", null, now);
-        results.push(`${title}: OpenList 下载完成`);
-      } else {
-        // Increment retry count
-        db.update(downloadTasks).set({ retryCount: (task.retryCount ?? 0) + 1, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+      if (p?.code === 200 && p?.data?.content) {
+        const files = p.data.content as Array<{ name: string; size: number; is_dir?: boolean }>;
+        const title = info.comicTitle ?? "";
+        const matched = files.find((f) => !f.is_dir && f.size > 0 && (f.name.includes(title) || title.includes(f.name)));
+        if (matched) {
+          markDownloadTaskFinished(task.id, "completed", null, now);
+          results.push(`${title}: OpenList 下载完成`);
+          continue;
+        }
       }
-    } catch {
-      // Connection error, skip
+    } catch { /* skip */ }
+
+    // Mark as failed if exceeded retry limit
+    if ((task.retryCount ?? 0) >= MAX_POLL_RETRIES) {
+      markDownloadTaskFinished(task.id, "failed", "OpenList 下载超时", now);
+      results.push(`${info.comicTitle || "任务"}: 轮询超时，已标记为失败`);
+    } else {
+      db.update(downloadTasks).set({ retryCount: (task.retryCount ?? 0) + 1, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
     }
   }
 
