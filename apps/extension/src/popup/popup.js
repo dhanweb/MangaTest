@@ -1,14 +1,12 @@
 const elements = {
   serverUrl: document.querySelector("#server-url"),
   importToken: document.querySelector("#import-token"),
-  devMode: document.querySelector("#dev-mode"),
   status: document.querySelector("#status"),
 };
 
 document.addEventListener("DOMContentLoaded", initializePopup);
 elements.serverUrl.addEventListener("input", autoSave);
 elements.importToken.addEventListener("input", autoSave);
-elements.devMode.addEventListener("change", autoSave);
 
 let saveTimer = null;
 
@@ -16,11 +14,9 @@ async function initializePopup() {
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
-    devMode: true,
   });
   elements.serverUrl.value = settings.serverUrl || "http://127.0.0.1:4317";
   elements.importToken.value = settings.importToken || "";
-  elements.devMode.checked = settings.devMode !== false;
 }
 
 async function autoSave() {
@@ -29,13 +25,8 @@ async function autoSave() {
     try {
       const serverUrl = normalizeServerUrl(elements.serverUrl.value);
       const importToken = elements.importToken.value.trim();
-      const devMode = elements.devMode.checked;
-      if (!devMode && !importToken) {
-        setStatus("请输入导入令牌，或开启开发模式", "error");
-        return;
-      }
-      await chrome.storage.local.set({ serverUrl, importToken, devMode });
-      setStatus("✅ 已保存，刷新页面后生效", "success");
+      await chrome.storage.local.set({ serverUrl, importToken });
+      setStatus("✅ 已保存", "success");
     } catch (err) {
       setStatus("❌ " + (err instanceof Error ? err.message : "保存失败"), "error");
     }

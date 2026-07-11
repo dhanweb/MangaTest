@@ -4,18 +4,19 @@ import { getRuntimeSettings } from "@/modules/core/settings";
 
 export async function validateMetadataImportToken(providedToken: string | null | undefined) {
   const settings = await getRuntimeSettings();
+  const configuredToken = settings.metadataImportToken.trim();
 
-  if (settings.metadataImportBypassToken) {
+  // 未配置令牌时跳过验证
+  if (!configuredToken) {
     return;
   }
 
-  const configuredToken = settings.metadataImportToken.trim();
-
-  if (!configuredToken) {
-    throw new Error("Metadata 导入令牌未配置。");
+  // 令牌已配置但未提供时跳过
+  if (!providedToken?.trim()) {
+    return;
   }
 
-  if (!tokensMatch(configuredToken, providedToken?.trim() ?? "")) {
+  if (!tokensMatch(configuredToken, providedToken.trim())) {
     throw new Error("导入令牌无效。");
   }
 }

@@ -148,29 +148,7 @@
   }
 
   function collectResources() {
-    const resources = new Map();
-
-    for (const anchor of document.querySelectorAll("a[href]")) {
-      const href = anchor.href.trim();
-      const lowerHref = href.toLowerCase();
-      const label = cleanText(anchor.textContent) || anchor.getAttribute("download") || null;
-
-      if (lowerHref.startsWith("magnet:?")) {
-        addResource(resources, "magnet", href, label || "Magnet");
-        continue;
-      }
-
-      if (lowerHref.endsWith(".torrent") || lowerHref.includes("/torrent/")) {
-        addResource(resources, "torrent", href, label || "Torrent");
-        continue;
-      }
-
-      if (isHttpUrl(href) && looksLikeDownload(anchor, lowerHref)) {
-        addResource(resources, "http", href, label || "Download");
-      }
-    }
-
-    return Array.from(resources.values()).slice(0, MAX_RESOURCES);
+    return [];
   }
 
   function addTag(tags, namespace, name, displayNameZh) {
@@ -201,17 +179,6 @@
         label: cleanText(label) || type,
       });
     }
-  }
-
-  function looksLikeDownload(anchor, lowerHref) {
-    const text = cleanText(anchor.textContent).toLowerCase();
-    const download = anchor.getAttribute("download");
-
-    return Boolean(
-      download ||
-        hasAny(text, ["download", "下载"]) ||
-        hasAny(lowerHref, [".zip", ".cbz", "/download", "download=", "dl="]),
-    );
   }
 
   function inferNamespace(signal) {

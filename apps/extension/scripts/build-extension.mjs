@@ -25,19 +25,13 @@ const files = [
   "src/content/injector.js",
 ];
 
-// Copy to temp dir, patching devMode to false for production
+// Copy files to temp dir
 const tmpDir = fs.mkdtempSync(path.join(root, ".tmp-build-"));
 for (const file of files) {
   const src = path.join(root, file);
   const dest = path.join(tmpDir, file);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-
-  let content = fs.readFileSync(src, "utf8");
-  // Patch devMode defaults to false for production build
-  content = content.replace(/"devMode":\s*true\s*,/g, '"devMode": false,');
-  content = content.replace(/devMode:\s*true,/g, "devMode: false,");
-
-  fs.writeFileSync(dest, content, "utf8");
+  fs.copyFileSync(src, dest);
 }
 
 // Zip
@@ -50,4 +44,4 @@ fs.rmSync(tmpDir, { recursive: true, force: true });
 
 console.log(`✅ 生产构建完成: ${zipPath}`);
 console.log(`   版本: v${version}`);
-console.log(`   开发模式: 已禁用`);
+console.log(`   令牌验证: 默认跳过（留空即可）`);

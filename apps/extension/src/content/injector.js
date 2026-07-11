@@ -10,9 +10,8 @@
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
-    devMode: true,
   });
-  console.log("[MangaTest] 设置", { 服务地址: settings.serverUrl, 有令牌: Boolean(settings.importToken), 开发模式: Boolean(settings.devMode) });
+  console.log("[MangaTest] 设置", { 服务地址: settings.serverUrl, 有令牌: Boolean(settings.importToken) });
 
   const adapter = (window.MangaTestSiteAdapters || []).find((a) => {
     try { return a.matches(); } catch { return false; }
@@ -130,7 +129,10 @@
       const metadata = COLLECTOR.normalizeMetadata(raw);
       if (!metadata) throw new Error("采集失败");
 
-      console.log("[MangaTest] 规范化后的元数据", { 站点: metadata.site, 来源ID: metadata.sourceId, 标题: metadata.title });
+      // 详情页只提交元数据（标题/标签/封面），不提交资源链接
+      metadata.resources = [];
+
+      console.log("[MangaTest] 规范化后的元数据", { 站点: metadata.site, 来源ID: metadata.sourceId, 标题: metadata.title, 标签数: metadata.tags?.length });
       console.log("[MangaTest] 通过后台线程提交");
 
       const resp = await chrome.runtime.sendMessage({

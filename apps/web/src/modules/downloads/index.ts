@@ -25,7 +25,7 @@ import {
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
 
-import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink } from "./providers/openlist/connection";
+import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink, submitOpenListOfflineDownload } from "./providers/openlist/connection";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
 
@@ -274,7 +274,7 @@ interface DownloadTaskEventDetail {
 }
 
 const COMPATIBLE_PROVIDERS: Record<ComicResourceType, DownloadProvider[]> = {
-  magnet: ["aria2"],
+  magnet: ["openlist", "aria2"],
   torrent: ["aria2"],
   http: ["builtin-http"],
   openlist: ["openlist"],
@@ -810,25 +810,42 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
         }
       : plan;
 
-  if (preparation?.status === "ready" && preparedPlan.task?.provider === "openlist") {
+  // OpenList file download: download raw_url to local temp
+  if (preparation?.status === "ready" && preparedPlan.task?.provider === "openlist" && preparedPlan.task?.resourceType === "openlist") {
     const transfer = await downloadPreparedOpenListTask(preparedPlan.task, preparation);
     const updatedTask = getDownloadTaskById(preparedPlan.task.id);
-    const transferPlan = updatedTask
-      ? {
-          ...preparedPlan,
-          task: updatedTask,
-        }
-      : preparedPlan;
-
+    const transferPlan = updatedTask ? { ...preparedPlan, task: updatedTask } : preparedPlan;
     return {
-      executed: transfer.status === "completed",
-      finalization: null,
-      reason:
-        transfer.status === "completed"
-          ? "OpenList 文件已下载到本地临时文件，等待下一次 worker 入库扫描。"
-          : transfer.errorMessage ?? "OpenList 临时文件下载失败。",
-      plan: transferPlan,
-      transfer,
+      executed: transfer.status === "completed", finalization: null,
+      reason: transfer.status === "completed" ? "OpenList 文件已下载到本地临时文件，等待下一次 worker 入库扫描。" : transfer.errorMessage ?? "OpenList 临时文件下载失败。",
+      plan: transferPlan, transfer,
+    };
+  }
+
+  // Magnet + OpenList: push to OpenList offline download
+  if (plan.status === "ready" && plan.task?.provider === "openlist" && plan.task?.resourceType === "magnet") {
+    const fullMagnetUrl = plan.task.comicResourceId
+      ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
+      : "";
+    const savePath = `/${plan.task.comicTitle || "download"}`;
+    const result = await submitOpenListOfflineDownload(fullMagnetUrl, savePath);
+    const now = new Date().toISOString();
+
+    if (result.ok) {
+      markDownloadTaskFinished(plan.task.id, "completed", null, now);
+      const updatedTask = getDownloadTaskById(plan.task.id);
+      return {
+        executed: true, finalization: null,
+        reason: `磁链已推送到 OpenList 离线下载 (任务 ID: ${result.taskId ?? "unknown"})。`,
+        plan: updatedTask ? { ...plan, task: updatedTask } : plan, transfer: null,
+      };
+    }
+
+    markDownloadTaskFinished(plan.task.id, "failed", result.message, now);
+    return {
+      executed: false, finalization: null,
+      reason: `推送到 OpenList 失败: ${result.message}`,
+      plan: { ...plan, task: getDownloadTaskById(plan.task.id) ?? plan.task }, transfer: null,
     };
   }
 
@@ -837,7 +854,9 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
     finalization: preparedPlan.task?.finalization ?? null,
     reason:
       preparation?.status === "ready"
-        ? "OpenList 下载链接准备已记录，真实下载执行尚未接入。"
+        ? plan.task?.resourceType === "magnet"
+          ? "磁链资源准备就绪，等待 worker 推送到 OpenList。"
+          : "OpenList 下载链接准备已记录，真实下载执行尚未接入。"
         : plan.status === "ready"
           ? "下载 worker 已完成预检，但真实 provider 执行尚未接入。"
           : plan.reason,

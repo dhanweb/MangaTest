@@ -42,7 +42,7 @@ checkFixture({
     sourceId: "example.test/gallery/123",
     title: "Generic Sample Comic",
     tagCount: 2,
-    resourceCount: 1,
+    resourceCount: 0,
   },
 });
 
@@ -89,7 +89,7 @@ checkFixture({
     sourceUrl: "https://exhentai.org/g/3242017/",
     title: "[sample] The Single Hunter Meets Girl [English]",
     tagCount: 0,
-    resourceCount: 2,
+    resourceCount: 1,
     firstResourceUrl: "https://exhentai.org/torrent/3242017/mock-download-token/mockhash1.torrent",
   },
 });

@@ -9,27 +9,19 @@ chrome.runtime.onInstalled.addListener(async () => {
   const defaults = {
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
-    devMode: true,
   };
   const current = await chrome.storage.local.get(defaults);
   await chrome.storage.local.set({ ...defaults, ...current });
-  log("设置已加载", { 服务地址: current.serverUrl || defaults.serverUrl, 有令牌: Boolean(current.importToken), 开发模式: Boolean(current.devMode) });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  log("收到消息", { 类型: message?.type, 来源: sender.tab ? `标签页:${sender.tab.id}` : "扩展自身" });
+  log("收到消息", { 类型: message?.type });
 
   if (message?.type === "MANGATEST_RESOLVE_TORRENTS") {
     log("开始转换种子为磁链", { 数量: message.resources?.length });
     resolveTorrentResources(message.resources)
-      .then((resources) => {
-        log("种子转换完成", { 数量: resources.length });
-        sendResponse({ ok: true, resources });
-      })
-      .catch((error) => {
-        log("种子转换失败", { 错误: error instanceof Error ? error.message : String(error) });
-        sendResponse({ ok: false, error: error instanceof Error ? error.message : "种子转换失败。" });
-      });
+      .then((resources) => { log("种子转换完成", { 数量: resources.length }); sendResponse({ ok: true, resources }); })
+      .catch((error) => { log("种子转换失败", { 错误: error instanceof Error ? error.message : String(error) }); sendResponse({ ok: false, error: error instanceof Error ? error.message : "种子转换失败。" }); });
     return true;
   }
 
@@ -44,14 +36,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "MANGATEST_API_CALL") {
     log("API 请求", { 方法: message.method, 接口: message.endpoint });
     handleApiCall(message)
-      .then((result) => {
-        log("API 请求成功", { 接口: message.endpoint, 状态码: result.status });
-        sendResponse(result);
-      })
-      .catch((error) => {
-        log("API 请求失败", { 接口: message.endpoint, 错误: error instanceof Error ? error.message : String(error) });
-        sendResponse({ ok: false, error: error instanceof Error ? error.message : "请求失败。" });
-      });
+      .then((result) => { log("API 请求成功", { 接口: message.endpoint, 状态码: result.status }); sendResponse(result); })
+      .catch((error) => { log("API 请求失败", { 接口: message.endpoint, 错误: error instanceof Error ? error.message : String(error) }); sendResponse({ ok: false, error: error instanceof Error ? error.message : "请求失败。" }); });
     return true;
   }
 
@@ -59,22 +45,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function handleApiCall(message) {
-  const settings = await chrome.storage.local.get({
-    serverUrl: "http://127.0.0.1:4317",
-    importToken: "",
-    devMode: true,
-  });
+  const settings = await chrome.storage.local.get({ serverUrl: "http://127.0.0.1:4317", importToken: "" });
   const url = `${settings.serverUrl}${message.endpoint}`;
   log("正在请求", { 地址: url, 方法: message.method || "GET" });
 
-  const headers = {
-    "Content-Type": "application/json",
-  };
-
-  if (!settings.devMode) {
+  const headers = { "Content-Type": "application/json" };
+  if (settings.importToken) {
     headers.Authorization = `Bearer ${settings.importToken}`;
-  } else {
-    log("开发模式，跳过令牌验证");
   }
 
   const res = await fetch(url, {
@@ -96,22 +73,13 @@ async function handleApiCall(message) {
 async function resolveTorrentResources(resources) {
   const input = Array.isArray(resources) ? resources : [];
   const resolved = [];
-
   for (const resource of input) {
-    if (!resource || resource.type !== "torrent" || typeof resource.url !== "string") {
-      log("跳过非种子资源", { 资源: resource });
-      continue;
-    }
-
+    if (!resource || resource.type !== "torrent" || typeof resource.url !== "string") continue;
     log("正在转换种子", { 地址: resource.url?.slice(0, 80) });
     try {
       const magnet = await self.MangaTestTorrentMagnet.fetchTorrentAsMagnet(resource.url);
-      log("种子转换成功", { 磁链: magnet?.slice(0, 80) });
       resolved.push({ type: "magnet", url: magnet, label: resource.label || "Magnet" });
-    } catch (err) {
-      log("种子转换失败", { 地址: resource.url?.slice(0, 80), 错误: err instanceof Error ? err.message : String(err) });
-    }
+    } catch (err) { log("种子转换失败", { 错误: err instanceof Error ? err.message : String(err) }); }
   }
-
   return resolved;
 }

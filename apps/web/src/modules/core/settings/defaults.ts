@@ -13,7 +13,6 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   readerImmersiveDefault: false,
   themeMode: "light",
   metadataImportToken: "",
-  metadataImportBypassToken: false,
   downloadDefaultTargetDirectory: "",
   openlistEnabled: false,
   openlistBaseUrl: "",
@@ -90,13 +89,6 @@ export const settingDefinitions = [
     description: "浏览器插件提交详情页 metadata 时必须携带的本地写入令牌。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.metadataImportToken,
-  },
-  {
-    key: "metadataImportBypassToken",
-    label: "开发模式（跳过令牌验证）",
-    description: "启用后本地服务不验证导入令牌，开发阶段方便调试。生产环境请关闭。",
-    valueType: "boolean",
-    defaultValue: defaultRuntimeSettings.metadataImportBypassToken,
   },
   {
     key: "downloadDefaultTargetDirectory",

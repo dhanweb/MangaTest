@@ -435,6 +435,75 @@ export async function inspectOpenListResource(resourceUrl: string | null | undef
   };
 }
 
+export type OpenListOfflineDownloadStatus =
+  | "disabled"
+  | "missing_settings"
+  | "submitted"
+  | "unauthorized"
+  | "unreachable"
+  | "invalid_response";
+
+export interface OpenListOfflineDownloadResult {
+  ok: boolean;
+  status: OpenListOfflineDownloadStatus;
+  checkedAt: string;
+  baseUrl: string | null;
+  tokenConfigured: boolean;
+  message: string;
+  taskId: string | null;
+  apiCheck: OpenListEndpointCheck | null;
+}
+
+export async function submitOpenListOfflineDownload(
+  url: string,
+  savePath: string,
+  options: { fetchImpl?: typeof fetch; settings?: RuntimeSettings } = {},
+): Promise<OpenListOfflineDownloadResult> {
+  const settings = options.settings ?? (await getRuntimeSettings());
+  const checkedAt = new Date().toISOString();
+  const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
+  const token = settings.openlistToken.trim();
+  const tokenConfigured = token.length > 0;
+
+  if (!settings.openlistEnabled) {
+    return { ok: false, status: "disabled", checkedAt, baseUrl, tokenConfigured, message: "OpenList provider 尚未启用。", taskId: null, apiCheck: null };
+  }
+
+  if (!baseUrl || !tokenConfigured) {
+    return { ok: false, status: "missing_settings", checkedAt, baseUrl, tokenConfigured, message: "OpenList needs base URL and token.", taskId: null, apiCheck: null };
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const apiEndpoint = buildOpenListUrl(baseUrl, "api/fs/add_offline_download");
+  const endpoint = redactOpenListEndpoint(apiEndpoint);
+
+  try {
+    const response = await fetchImpl(apiEndpoint, {
+      method: "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ url, path: savePath || "/" }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => null);
+    const payloadCode = typeof payload?.code === "number" ? payload.code : null;
+    const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
+
+    const apiCheck: OpenListEndpointCheck = { endpoint, ok: response.ok && (payloadCode == null || payloadCode === 200), status: response.status, code: payloadCode, message: payloadMessage };
+
+    if (response.status === 401 || response.status === 403) {
+      return { ok: false, status: "unauthorized", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "OpenList token 未通过认证。", taskId: null, apiCheck };
+    }
+    if (!response.ok || (payloadCode != null && payloadCode !== 200)) {
+      return { ok: false, status: "invalid_response", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载提交失败。", taskId: null, apiCheck };
+    }
+
+    const taskId = typeof payload?.data?.id === "string" ? payload.data.id : typeof payload?.data?.task?.id === "string" ? payload.data.task.id : null;
+    return { ok: true, status: "submitted", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载已提交到 OpenList。", taskId, apiCheck };
+  } catch (error) {
+    return { ok: false, status: "unreachable", checkedAt, baseUrl, tokenConfigured, message: error instanceof Error ? error.message : "OpenList 请求失败。", taskId: null, apiCheck: { endpoint, ok: false, status: null, code: null, message: null } };
+  }
+}
+
 export async function resolveOpenListDownloadLink(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListDownloadLinkResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
