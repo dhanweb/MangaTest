@@ -1026,6 +1026,17 @@ export async function cancelDownloadTask(taskId: string): Promise<UpdateDownload
   };
 }
 
+export async function deleteDownloadTask(taskId: string): Promise<void> {
+  bootstrapDatabase();
+  const id = normalizeRequiredText(taskId, "任务 ID");
+  const db = getDb();
+  db.delete(downloadTaskFinalizations).where(eq(downloadTaskFinalizations.downloadTaskId, id)).run();
+  db.delete(downloadTaskTransfers).where(eq(downloadTaskTransfers.downloadTaskId, id)).run();
+  db.delete(downloadTaskPreparations).where(eq(downloadTaskPreparations.downloadTaskId, id)).run();
+  db.delete(downloadTasks).where(eq(downloadTasks.id, id)).run();
+  db.delete(operationLogs).where(and(eq(operationLogs.targetType, "download_task"), eq(operationLogs.targetId, id))).run();
+}
+
 export function getDefaultProviderForResourceType(resourceType: ComicResourceType): DownloadProvider {
   return COMPATIBLE_PROVIDERS[resourceType][0];
 }

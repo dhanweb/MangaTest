@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, Box, Group, Paper, Select, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { CloudDownload, Play, Plus, RotateCcw, X } from "lucide-react";
+import { CloudDownload, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
@@ -148,6 +148,13 @@ export function DownloadsPanel({
     setPendingAction(null);
   }
 
+  async function deleteTask(taskId: string) {
+    setPendingAction(`delete:${taskId}`);
+    await fetchApi(`/api/downloads/${taskId}/delete`, { method: "POST" });
+    await refresh();
+    setPendingAction(null);
+  }
+
   async function refresh() {
     const d = await fetchApi("/api/downloads");
     if (d) {
@@ -276,6 +283,13 @@ export function DownloadsPanel({
                           >重试</AppButton>
                         </Tooltip>
                       )}
+                      <Tooltip label="删除任务" withArrow>
+                        <AppButton size="xs" variant="outline" color="red"
+                          leftSection={<Trash2 size={12} />}
+                          loading={pendingAction === `delete:${task.id}`}
+                          onClick={() => deleteTask(task.id)}
+                        >删除</AppButton>
+                      </Tooltip>
                     </Group>
                   </Table.Td>
                 </Table.Tr>
