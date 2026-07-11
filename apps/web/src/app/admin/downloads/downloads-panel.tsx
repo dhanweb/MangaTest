@@ -2,7 +2,7 @@
 
 import { Badge, Box, Group, Paper, Select, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { CloudDownload, Play, Plus, RotateCcw, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput } from "@/components/ui/app-components";
@@ -72,6 +72,27 @@ export function DownloadsPanel({
     () => resourceItems.map((r) => ({ value: r.id, label: `${r.comicTitle} · ${TYPE_LABELS[r.resourceType]} · ${r.displayLabel}` })),
     [resourceItems],
   );
+
+  const tickingRef = useRef(false);
+
+  // Auto-run worker every 30 seconds
+  useEffect(() => {
+    const run = async () => {
+      if (tickingRef.current) return;
+      tickingRef.current = true;
+      try {
+        const res = await fetch("/api/downloads/worker/tick", { method: "POST" });
+        const d = await res.json() as ApiData;
+        if (d.plan) setPlanItem(d.plan);
+        await refresh();
+      } catch { /* ignore */ }
+      tickingRef.current = false;
+    };
+    run(); // immediate first run
+    const id = setInterval(run, 30000);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function showMsg(text: string, tone: "success" | "error") { setMsg({ text, tone }); setTimeout(() => setMsg(null), 4000); }
 
