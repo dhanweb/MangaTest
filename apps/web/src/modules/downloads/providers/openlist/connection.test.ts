@@ -461,6 +461,9 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     readerThumbnailSidebarDefault: true,
     readerThumbnailTtlDays: 30,
     themeMode: "light",
+    aria2Enabled: false,
+    aria2RpcUrl: "",
+    aria2RpcToken: "",
     ...overrides,
   };
 }

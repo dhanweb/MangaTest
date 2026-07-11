@@ -23,4 +23,7 @@ export interface RuntimeSettings {
   openlistEnabled: boolean;
   openlistBaseUrl: string;
   openlistToken: string;
+  aria2Enabled: boolean;
+  aria2RpcUrl: string;
+  aria2RpcToken: string;
 }

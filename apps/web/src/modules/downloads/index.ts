@@ -26,6 +26,7 @@ import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/setting
 import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
 
 import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink, submitOpenListOfflineDownload } from "./providers/openlist/connection";
+import { cancelAria2Download, cleanupAria2TempDir, downloadWithAria2 } from "./providers/aria2/client";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
 
@@ -834,6 +835,26 @@ export async function runDownloadWorkerTick(): Promise<DownloadWorkerTickResult>
       continue;
     }
 
+    // aria2 direct download (magnet / torrent)
+    if (plan.status === "ready" && plan.task.provider === "aria2") {
+      const settings = await getRuntimeSettings();
+      const uri = plan.task.comicResourceId
+        ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
+        : "";
+
+      if (!uri) {
+        markDownloadTaskFinished(plan.task.id, "failed", "缺少资源下载地址。", new Date().toISOString());
+        processed++;
+        reasons.push(`${plan.task.comicTitle}: 缺少资源下载地址`);
+        continue;
+      }
+
+      const transfer = await downloadAria2Task(plan.task, uri, settings);
+      processed++;
+      reasons.push(transfer.status === "completed" ? `${plan.task.comicTitle}: 已下载` : `${plan.task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`);
+      continue;
+    }
+
     // Not a supported dispatch path
     reasons.push(`${plan.task.comicTitle}: ${plan.reason}`);
     break;
@@ -1010,6 +1031,18 @@ export async function cancelDownloadTask(taskId: string): Promise<UpdateDownload
     })
     .where(eq(downloadTasks.id, id))
     .run();
+
+  // Cancel aria2 download via RPC and clean up temp files
+  if (task.provider === "aria2" && task.status === "running") {
+    try {
+      const settings = await getRuntimeSettings();
+      await cancelAria2Download(id, settings.aria2RpcUrl?.trim() || undefined, settings.aria2RpcToken?.trim() || undefined);
+      const tempDirectory = resolveDownloadTaskTempDirectory(settings, id);
+      await cleanupAria2TempDir(tempDirectory);
+    } catch {
+      // ignore cleanup errors during cancel
+    }
+  }
 
   const updatedTask = getDownloadTaskById(id);
   if (!updatedTask) {
@@ -1299,6 +1332,48 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
     await mkdir(tempDirectory, { recursive: true });
     await rm(finalPartialFilePath, { force: true });
 
+    // Use aria2 if configured, fall back to fetch
+    const aria2RpcUrl = settings.aria2RpcUrl?.trim();
+    if (aria2RpcUrl && settings.aria2Enabled) {
+      const result = await downloadWithAria2({
+        rpcUrl: aria2RpcUrl,
+        rpcToken: settings.aria2RpcToken?.trim() || undefined,
+        uri: downloadUrl,
+        dir: tempDirectory,
+        out: fileName,
+        taskId: task.id,
+      });
+
+      if (!result.success) {
+        throw new Error(`aria2 下载失败：${result.errorMessage}`);
+      }
+
+      if (!result.files || result.files.length === 0) {
+        throw new Error("aria2 下载完成后未返回文件路径。");
+      }
+
+      const aria2FilePath = result.files[0];
+      const fileStat = await stat(aria2FilePath);
+      const finishedAt = new Date().toISOString();
+      transfer = upsertDownloadTaskTransfer({
+        bytesWritten: fileStat.size,
+        comicResourceId: task.comicResourceId || null,
+        contentType: null,
+        downloadTaskId: task.id,
+        errorMessage: null,
+        fileName,
+        finishedAt,
+        provider: task.provider,
+        sizeBytes: link.resource.sizeBytes ?? fileStat.size,
+        startedAt,
+        status: "completed",
+        tempFilePath: aria2FilePath,
+      });
+      markDownloadTaskFinished(task.id, "completed", null, finishedAt);
+
+      return transfer;
+    }
+
     const response = await fetch(downloadUrl, {
       cache: "no-store",
       signal: AbortSignal.timeout(30000),
@@ -1350,6 +1425,156 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
     });
     markDownloadTaskFinished(task.id, "failed", message, finishedAt);
 
+    return transfer;
+  }
+}
+
+async function downloadAria2Task(
+  task: DownloadTaskRecord,
+  uri: string,
+  settings: RuntimeSettings,
+): Promise<DownloadTaskTransferRecord> {
+  const startedAt = new Date().toISOString();
+  const tempDirectory = resolveDownloadTaskTempDirectory(settings, task.id);
+  const rpcUrl = settings.aria2RpcUrl?.trim();
+
+  if (!rpcUrl) {
+    const finishedAt = new Date().toISOString();
+    const message = "aria2 RPC 地址未配置。";
+    markDownloadTaskFinished(task.id, "failed", message, finishedAt);
+    return upsertDownloadTaskTransfer({
+      bytesWritten: 0,
+      comicResourceId: task.comicResourceId || null,
+      contentType: null,
+      downloadTaskId: task.id,
+      errorMessage: message,
+      fileName: task.resourceLabel,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: null,
+      startedAt,
+      status: "failed",
+      tempFilePath: null,
+    });
+  }
+
+  if (!settings.aria2Enabled) {
+    const finishedAt = new Date().toISOString();
+    const message = "aria2 provider 未启用。";
+    markDownloadTaskFinished(task.id, "failed", message, finishedAt);
+    return upsertDownloadTaskTransfer({
+      bytesWritten: 0,
+      comicResourceId: task.comicResourceId || null,
+      contentType: null,
+      downloadTaskId: task.id,
+      errorMessage: message,
+      fileName: task.resourceLabel,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: null,
+      startedAt,
+      status: "failed",
+      tempFilePath: null,
+    });
+  }
+
+  markDownloadTaskRunning(task.id, startedAt);
+
+  let transfer = upsertDownloadTaskTransfer({
+    bytesWritten: 0,
+    comicResourceId: task.comicResourceId || null,
+    contentType: null,
+    downloadTaskId: task.id,
+    errorMessage: null,
+    fileName: task.resourceLabel,
+    finishedAt: null,
+    provider: task.provider,
+    sizeBytes: null,
+    startedAt,
+    status: "running",
+    tempFilePath: null,
+  });
+
+  try {
+    await mkdir(tempDirectory, { recursive: true });
+
+    const result = await downloadWithAria2({
+      rpcUrl,
+      rpcToken: settings.aria2RpcToken?.trim() || undefined,
+      uri,
+      dir: tempDirectory,
+      taskId: task.id,
+    });
+
+    if (!result.success) {
+      throw new Error(`aria2 下载失败：${result.errorMessage}`);
+    }
+
+    if (!result.files || result.files.length === 0) {
+      throw new Error("aria2 下载完成后未返回文件路径。");
+    }
+
+    const aria2FilePath = result.files[0];
+    const fileName = sanitizeDownloadFileName(aria2FilePath.split(/[/\\]/).pop() || task.resourceLabel);
+
+    const fileStat = await stat(aria2FilePath);
+    const finishedAt = new Date().toISOString();
+
+    transfer = upsertDownloadTaskTransfer({
+      bytesWritten: fileStat.size,
+      comicResourceId: task.comicResourceId || null,
+      contentType: null,
+      downloadTaskId: task.id,
+      errorMessage: null,
+      fileName,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: fileStat.size,
+      startedAt,
+      status: "completed",
+      tempFilePath: aria2FilePath,
+    });
+
+    markDownloadTaskFinished(task.id, "completed", null, finishedAt);
+    return transfer;
+  } catch (error) {
+    const currentTask = getDownloadTaskById(task.id);
+    if (currentTask && currentTask.status !== "running") {
+      return upsertDownloadTaskTransfer({
+        bytesWritten: 0,
+        comicResourceId: task.comicResourceId || null,
+        contentType: null,
+        downloadTaskId: task.id,
+        errorMessage: "任务已被取消。",
+        fileName: task.resourceLabel,
+        finishedAt: new Date().toISOString(),
+        provider: task.provider,
+        sizeBytes: null,
+        startedAt,
+        status: "failed",
+        tempFilePath: null,
+      });
+    }
+
+    const finishedAt = new Date().toISOString();
+    const message = toSafeDownloadErrorMessage(error);
+
+    transfer = upsertDownloadTaskTransfer({
+      bytesWritten: 0,
+      comicResourceId: task.comicResourceId || null,
+      contentType: null,
+      downloadTaskId: task.id,
+      errorMessage: message,
+      fileName: task.resourceLabel,
+      finishedAt,
+      provider: task.provider,
+      sizeBytes: null,
+      startedAt,
+      status: "failed",
+      tempFilePath: null,
+    });
+
+    markDownloadTaskFinished(task.id, "failed", message, finishedAt);
     return transfer;
   }
 }

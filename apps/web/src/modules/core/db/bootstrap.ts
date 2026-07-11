@@ -495,7 +495,10 @@ export function bootstrapDatabase() {
   ensureColumn("manga_roots", "kind", "TEXT NOT NULL DEFAULT 'user'");
 
   // Auto-create system manga root if it doesn't exist
-  const systemRootPath = path.resolve(process.cwd(), "manga_store");
+  // Resolve to project root: process.cwd() is apps/web when run via workspace
+  const isInAppsWeb = process.cwd().replace(/\\/g, "/").endsWith("/apps/web");
+  const projectRoot = isInAppsWeb ? path.resolve(process.cwd(), "..") : process.cwd();
+  const systemRootPath = path.resolve(projectRoot, "manga_store");
   const systemRootExists = sqlite.prepare("SELECT id FROM manga_roots WHERE kind = 'system'").get();
   if (!systemRootExists) {
     mkdirSync(systemRootPath, { recursive: true });

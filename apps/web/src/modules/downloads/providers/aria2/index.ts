@@ -4,7 +4,24 @@ export const aria2ProviderAdapter: DownloadProviderAdapter = {
   provider: "aria2",
   label: "aria2",
   supportedResourceTypes: ["magnet", "torrent"],
-  async prepare({ resource }) {
+  async prepare({ resource, settings }) {
+    if (!settings.aria2Enabled) {
+      return {
+        canDispatch: false,
+        code: "provider_disabled",
+        reason: "aria2 provider 尚未在设置中启用。",
+      };
+    }
+
+    if (!settings.aria2RpcUrl) {
+      return {
+        canDispatch: false,
+        code: "missing_settings",
+        missingSettings: ["aria2RpcUrl"],
+        reason: "aria2 provider 缺少 RPC 地址配置。",
+      };
+    }
+
     if (!resource.resourceUrl) {
       return {
         canDispatch: false,
@@ -14,9 +31,12 @@ export const aria2ProviderAdapter: DownloadProviderAdapter = {
     }
 
     return {
-      canDispatch: false,
-      code: "provider_not_implemented",
-      reason: "aria2 provider 执行尚未接入；当前 worker 只进行调度预检。",
+      canDispatch: true,
+      code: "ready",
+      reason: "aria2 RPC 已配置。",
+      details: {
+        aria2RpcUrl: settings.aria2RpcUrl,
+      },
     };
   },
 };

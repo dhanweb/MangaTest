@@ -83,6 +83,22 @@ export async function PATCH(request: Request) {
     input.openlistToken = payload.openlistToken.trim();
   }
 
+  if (typeof payload.aria2Enabled === "boolean") {
+    input.aria2Enabled = payload.aria2Enabled;
+  }
+
+  if (typeof payload.aria2RpcUrl === "string") {
+    const normalized = normalizeOptionalHttpUrl(payload.aria2RpcUrl);
+    if (normalized.error) {
+      return Response.json({ error: normalized.error }, { status: 400 });
+    }
+    input.aria2RpcUrl = normalized.value;
+  }
+
+  if (typeof payload.aria2RpcToken === "string") {
+    input.aria2RpcToken = payload.aria2RpcToken.trim();
+  }
+
   try {
     return Response.json({ settings: await saveRuntimeSettings(input) });
   } catch (error) {

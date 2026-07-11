@@ -17,6 +17,9 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   openlistEnabled: false,
   openlistBaseUrl: "",
   openlistToken: "",
+  aria2Enabled: false,
+  aria2RpcUrl: "",
+  aria2RpcToken: "",
 };
 
 export const settingDefinitions = [
@@ -117,5 +120,26 @@ export const settingDefinitions = [
     description: "OpenList provider 使用的本地访问令牌。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.openlistToken,
+  },
+  {
+    key: "aria2Enabled",
+    label: "启用 aria2",
+    description: "启用 aria2 provider 用于磁链和 torrent 资源下载。",
+    valueType: "boolean",
+    defaultValue: defaultRuntimeSettings.aria2Enabled,
+  },
+  {
+    key: "aria2RpcUrl",
+    label: "aria2 RPC 地址",
+    description: "aria2 JSON-RPC 端点地址，例如 http://127.0.0.1:6800/jsonrpc。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.aria2RpcUrl,
+  },
+  {
+    key: "aria2RpcToken",
+    label: "aria2 RPC 密钥",
+    description: "aria2 RPC secret token（--rpc-secret），留空表示无密钥。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.aria2RpcToken,
   },
 ] satisfies Array<SettingDefinition<RuntimeSettings[keyof RuntimeSettings]>>;

@@ -46,6 +46,8 @@ export default function SettingsPage() {
   const [isLoggingInOpenList, setIsLoggingInOpenList] = useState(false);
   const [openListCheckResult, setOpenListCheckResult] = useState<OpenListConnectionCheckResult | null>(null);
   const [openListLoginResult, setOpenListLoginResult] = useState<PublicOpenListLoginResult | null>(null);
+  const [aria2CheckResult, setAria2CheckResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [isCheckingAria2, setIsCheckingAria2] = useState(false);
   const [openListLoginUsername, setOpenListLoginUsername] = useState("");
   const [openListLoginPassword, setOpenListLoginPassword] = useState("");
   const [openListLoginOtp, setOpenListLoginOtp] = useState("");
@@ -207,6 +209,36 @@ export default function SettingsPage() {
     }
   }
 
+  async function checkAria2Connection() {
+    setIsCheckingAria2(true);
+    setAria2CheckResult(null);
+
+    try {
+      const response = await fetch("/api/settings/aria2/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rpcUrl: runtimeSettings.aria2RpcUrl,
+          rpcToken: runtimeSettings.aria2RpcToken,
+        }),
+      });
+      const payload = (await response.json()) as { result?: { ok: boolean; message: string }; error?: string };
+
+      if (!response.ok || !payload.result) {
+        throw new Error(payload.error ?? "aria2 连接校验失败。");
+      }
+
+      setAria2CheckResult(payload.result);
+    } catch (error) {
+      setAria2CheckResult({
+        ok: false,
+        message: error instanceof Error ? error.message : "aria2 连接校验失败。",
+      });
+    } finally {
+      setIsCheckingAria2(false);
+    }
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Box style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18 }}>
@@ -275,7 +307,9 @@ export default function SettingsPage() {
         {activeTab === "扫描设置" && <ScanSettings />}
         {activeTab === "下载设置" && (
           <DownloadSettings
+            aria2CheckResult={aria2CheckResult}
             checkResult={openListCheckResult}
+            isCheckingAria2={isCheckingAria2}
             isCheckingOpenList={isCheckingOpenList}
             isLoggingInOpenList={isLoggingInOpenList}
             isSaving={isSaving}
@@ -283,6 +317,7 @@ export default function SettingsPage() {
             loginPassword={openListLoginPassword}
             loginResult={openListLoginResult}
             loginUsername={openListLoginUsername}
+            onCheckAria2={checkAria2Connection}
             onCheckOpenList={checkOpenListConnection}
             onLoginOpenList={loginOpenList}
             onSave={saveSettings}
@@ -588,7 +623,9 @@ function ReaderSettings({
 }
 
 function DownloadSettings({
+  aria2CheckResult,
   checkResult,
+  isCheckingAria2,
   isCheckingOpenList,
   isLoggingInOpenList,
   isSaving,
@@ -596,6 +633,7 @@ function DownloadSettings({
   loginPassword,
   loginResult,
   loginUsername,
+  onCheckAria2,
   onCheckOpenList,
   onLoginOpenList,
   onSave,
@@ -607,7 +645,9 @@ function DownloadSettings({
   savedMessage,
   settings,
 }: {
+  aria2CheckResult: { ok: boolean; message: string } | null;
   checkResult: OpenListConnectionCheckResult | null;
+  isCheckingAria2: boolean;
   isCheckingOpenList: boolean;
   isLoggingInOpenList: boolean;
   isSaving: boolean;
@@ -615,6 +655,7 @@ function DownloadSettings({
   loginPassword: string;
   loginResult: PublicOpenListLoginResult | null;
   loginUsername: string;
+  onCheckAria2: () => void;
   onCheckOpenList: () => void;
   onLoginOpenList: () => void;
   onSave: () => void;
@@ -689,14 +730,38 @@ function DownloadSettings({
       {loginResult && <OpenListLoginResultPanel result={loginResult} />}
       {checkResult && <OpenListConnectionResult result={checkResult} />}
 
-      <SettingsGroup title="Provider">
-        <SettingsRow label="aria2" note="后续用于磁链和 torrent 任务。">
-          <ReadonlyValue value="未启用" tone="off" />
+      <SettingsGroup title="aria2">
+        <SettingsRow label="启用 aria2" note="启用 aria2 provider 用于磁链和 torrent 资源下载。">
+          <AppSwitch
+            checked={settings.aria2Enabled}
+            onChange={(event) => onSettingsChange({ ...settings, aria2Enabled: event.currentTarget.checked })}
+            aria-label="启用 aria2"
+          />
         </SettingsRow>
-        <SettingsRow label="内置 HTTP" note="后续用于直链下载任务。">
-          <ReadonlyValue value="未启用" tone="off" />
+        <SettingsRow label="aria2 RPC 地址" note="aria2 JSON-RPC 端点，例如 http://127.0.0.1:6800/jsonrpc。">
+          <AppInput
+            value={settings.aria2RpcUrl}
+            onChange={(event) => onSettingsChange({ ...settings, aria2RpcUrl: event.currentTarget.value })}
+            placeholder="http://127.0.0.1:6800/jsonrpc"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+        <SettingsRow label="aria2 RPC 密钥" note="--rpc-secret 设置的密钥，留空表示无密钥。">
+          <AppInput
+            value={settings.aria2RpcToken}
+            onChange={(event) => onSettingsChange({ ...settings, aria2RpcToken: event.currentTarget.value })}
+            placeholder="未配置"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+        <SettingsRow label="连接校验" note="通过 RPC 接口检查 aria2 连通性。">
+          <AppButton loading={isCheckingAria2} onClick={onCheckAria2}>
+            校验连接
+          </AppButton>
         </SettingsRow>
       </SettingsGroup>
+
+      {aria2CheckResult && <Aria2ConnectionResult result={aria2CheckResult} />}
 
       <Group justify="flex-end" mt="md">
         {saveError && (
@@ -767,6 +832,23 @@ function OpenListConnectionResult({ result }: { result: OpenListConnectionCheckR
         <OpenListCheckMetric label="Token" value={result.tokenConfigured ? "已配置" : "未配置"} />
         <OpenListCheckMetric label="Public API" value={formatEndpointCheck(result.publicApi)} />
         <OpenListCheckMetric label="账号 API" value={formatEndpointCheck(result.accountApi)} />
+      </Group>
+    </Box>
+  );
+}
+
+function Aria2ConnectionResult({ result }: { result: { ok: boolean; message: string } }) {
+  return (
+    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
+      <Group justify="space-between" align="flex-start" gap="md">
+        <Box style={{ minWidth: 0 }}>
+          <Text fw={900} c={result.ok ? "#00894a" : "#d93a4e"}>
+            {result.ok ? "连接正常" : "连接失败"}
+          </Text>
+          <Text size="sm" c="ink.6" mt={4}>
+            {result.message}
+          </Text>
+        </Box>
       </Group>
     </Box>
   );
