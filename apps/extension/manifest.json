@@ -1,14 +1,27 @@
 {
   "manifest_version": 3,
   "name": "MangaTest Metadata Collector",
-  "description": "Collect metadata from the current manga detail page and submit it to the local MangaTest service.",
-  "version": "0.1.0",
+  "description": "一键采集漫画信息并提交到 MangaTest。在详情页注入浮动按钮，在种子页克隆下载元素。",
+  "version": "0.2.0",
   "action": {
-    "default_popup": "src/popup/popup.html"
+    "default_popup": "src/popup/popup.html",
+    "default_title": "MangaTest 设置"
   },
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://exhentai.org/*", "https://e-hentai.org/*"],
   "background": {
     "service_worker": "src/background/service-worker.js"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*"],
+      "js": [
+        "src/content/site-adapters.js",
+        "src/content/metadata-contract.js",
+        "src/content/collect-page-metadata.js",
+        "src/content/injector.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
 }

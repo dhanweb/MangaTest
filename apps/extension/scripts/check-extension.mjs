@@ -20,17 +20,18 @@ const referencedFiles = [
   "src/content/site-adapters.js",
   "src/content/metadata-contract.js",
   "src/content/collect-page-metadata.js",
+  "src/content/injector.js",
   "src/background/torrent-magnet.js",
   "src/popup/popup.css",
   "src/popup/popup.js",
+  ...(manifest.content_scripts || []).flatMap((cs) => cs.js || []),
 ].filter(Boolean);
 
-for (const file of referencedFiles) {
+for (const file of [...new Set(referencedFiles)]) {
   assert(fs.existsSync(path.join(root, file)), `${file} is missing`);
 }
 
-const popupScript = fs.readFileSync(path.join(root, "src/popup/popup.js"), "utf8");
-assert(popupScript.includes("src/content/metadata-contract.js"), "popup must inject metadata-contract.js before the collector");
+assert(Array.isArray(manifest.content_scripts), "content_scripts must be an array");
 
 checkFixture({
   file: "test-fixtures/generic-gallery.html",

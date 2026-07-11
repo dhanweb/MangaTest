@@ -1,310 +1,55 @@
-const DEFAULT_SETTINGS = {
-  serverUrl: "http://127.0.0.1:4317",
-  importToken: "",
-  lastExhentaiMetadata: null,
-  siteName: "",
-};
-
 const elements = {
-  collectButton: document.querySelector("#collect-button"),
-  importToken: document.querySelector("#import-token"),
-  pageHost: document.querySelector("#page-host"),
-  preview: document.querySelector("#preview"),
-  previewAdapter: document.querySelector("#preview-adapter"),
-  previewImportStatus: document.querySelector("#preview-import-status"),
-  previewResources: document.querySelector("#preview-resources"),
-  previewTags: document.querySelector("#preview-tags"),
-  previewTitle: document.querySelector("#preview-title"),
-  matchTarget: document.querySelector("#match-target"),
-  matchTargetLabel: document.querySelector("#match-target-label"),
   serverUrl: document.querySelector("#server-url"),
-  siteName: document.querySelector("#site-name"),
+  importToken: document.querySelector("#import-token"),
+  devMode: document.querySelector("#dev-mode"),
   status: document.querySelector("#status"),
-  submitButton: document.querySelector("#submit-button"),
-  useLocalMatch: document.querySelector("#use-local-match"),
 };
-
-let activeTab = null;
-let collectedMetadata = null;
-let latestMetadataStatus = null;
 
 document.addEventListener("DOMContentLoaded", initializePopup);
-elements.collectButton.addEventListener("click", collectFromCurrentTab);
-elements.submitButton.addEventListener("click", submitMetadata);
+elements.serverUrl.addEventListener("input", autoSave);
+elements.importToken.addEventListener("input", autoSave);
+elements.devMode.addEventListener("change", autoSave);
+
+let saveTimer = null;
 
 async function initializePopup() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  activeTab = tab ?? null;
-
-  const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
-  elements.serverUrl.value = settings.serverUrl || DEFAULT_SETTINGS.serverUrl;
+  const settings = await chrome.storage.local.get({
+    serverUrl: "http://127.0.0.1:4317",
+    importToken: "",
+    devMode: true,
+  });
+  elements.serverUrl.value = settings.serverUrl || "http://127.0.0.1:4317";
   elements.importToken.value = settings.importToken || "";
-  elements.siteName.value = settings.siteName || inferSiteName(activeTab?.url ?? "");
-  elements.pageHost.textContent = activeTab?.url ? new URL(activeTab.url).hostname : "没有可采集的页面";
-
-  setStatus("准备采集当前详情页。");
+  elements.devMode.checked = settings.devMode !== false;
 }
 
-async function collectFromCurrentTab() {
-  if (!activeTab?.id || !isInjectableUrl(activeTab.url)) {
-    setStatus("当前页面不能采集，请打开一个 http/https 漫画详情页。", "error");
-    return;
-  }
-
-  setBusy(true);
-  setStatus("正在采集页面 metadata...");
-
-  try {
-    await persistSettings();
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: activeTab.id },
-      files: ["src/content/site-adapters.js", "src/content/metadata-contract.js", "src/content/collect-page-metadata.js"],
-    });
-
-    collectedMetadata = await prepareCollectedMetadata(withPopupFields(result?.result));
-    renderPreview(collectedMetadata);
-    await refreshMetadataStatus(collectedMetadata);
-    setStatus("已采集预览，可以提交入库。", "success");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : "采集失败。", "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function submitMetadata() {
-  if (!collectedMetadata) {
-    await collectFromCurrentTab();
-  }
-
-  if (!collectedMetadata) {
-    return;
-  }
-
-  setBusy(true);
-  setStatus("正在提交到 MangaTest...");
-
-  try {
-    await persistSettings();
-
-    setStatus("正在解析种子资源...");
-    const metadataWithMagnets = await resolveTorrentResources(collectedMetadata);
-    const payload = {
-      ...metadataWithMagnets,
-      comicId:
-        elements.useLocalMatch.checked && latestMetadataStatus?.localMatchComicId ? latestMetadataStatus.localMatchComicId : undefined,
-    };
-    setStatus("正在提交到 MangaTest...");
-    const response = await fetch(`${normalizeServerUrl(elements.serverUrl.value)}/api/metadata/import`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      headers: {
-        Authorization: `Bearer ${elements.importToken.value.trim()}`,
-        "Content-Type": "application/json",
-      },
-    });
-    const responsePayload = await response.json().catch(() => ({}));
-
-    if (!response.ok) {
-      throw new Error(responsePayload.error || "提交失败。");
+async function autoSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try {
+      const serverUrl = normalizeServerUrl(elements.serverUrl.value);
+      const importToken = elements.importToken.value.trim();
+      const devMode = elements.devMode.checked;
+      if (!devMode && !importToken) {
+        setStatus("请输入导入令牌，或开启开发模式", "error");
+        return;
+      }
+      await chrome.storage.local.set({ serverUrl, importToken, devMode });
+      setStatus("✅ 已保存，刷新页面后生效", "success");
+    } catch (err) {
+      setStatus("❌ " + (err instanceof Error ? err.message : "保存失败"), "error");
     }
-
-    const result = responsePayload.result;
-    const status = result.createdComic ? "已创建远程记录" : result.matchedBy === "local_title" ? "已匹配本地漫画" : "已更新漫画 metadata";
-
-    latestMetadataStatus = {
-      imported: true,
-      comicId: result.comicId,
-      comicStatus: result.comicStatus,
-      localReadable: result.localReadable,
-      resourceCount: result.resourceCount,
-    };
-    renderImportStatus(latestMetadataStatus);
-    setStatus(`${status}：${result.comicId}`, "success");
-  } catch (error) {
-    setStatus(error instanceof Error ? error.message : "提交失败。", "error");
-  } finally {
-    setBusy(false);
-  }
-}
-
-function withPopupFields(metadata) {
-  if (!metadata || typeof metadata !== "object") {
-    throw new Error("页面没有返回可用 metadata。");
-  }
-
-  return {
-    ...metadata,
-    site: elements.siteName.value.trim() || metadata.site || inferSiteName(activeTab?.url ?? ""),
-  };
-}
-
-async function prepareCollectedMetadata(metadata) {
-  if (metadata.adapterId === "ehentai-torrents") {
-    return mergeStoredExhentaiMetadata(metadata);
-  }
-
-  if (metadata.adapterId === "ehentai-gallery") {
-    await chrome.storage.local.set({ lastExhentaiMetadata: metadata });
-  }
-
-  return metadata;
-}
-
-async function mergeStoredExhentaiMetadata(metadata) {
-  const settings = await chrome.storage.local.get(DEFAULT_SETTINGS);
-  const stored = settings.lastExhentaiMetadata;
-
-  if (!stored || stored.sourceId !== metadata.sourceId) {
-    return metadata;
-  }
-
-  return {
-    ...stored,
-    adapterId: metadata.adapterId,
-    resources: metadata.resources || [],
-  };
-}
-
-async function resolveTorrentResources(metadata) {
-  const resources = Array.isArray(metadata.resources) ? metadata.resources : [];
-  const torrentResources = resources.filter((resource) => resource?.type === "torrent");
-
-  if (torrentResources.length === 0) {
-    return metadata;
-  }
-
-  const response = await chrome.runtime.sendMessage({
-    type: "MANGATEST_RESOLVE_TORRENTS",
-    resources: torrentResources,
-  });
-
-  if (!response?.ok) {
-    throw new Error(response?.error || "种子转换磁链失败。");
-  }
-
-  return {
-    ...metadata,
-    resources: [...resources.filter((resource) => resource?.type !== "torrent"), ...response.resources],
-  };
-}
-
-function renderPreview(metadata) {
-  elements.preview.hidden = false;
-  elements.matchTarget.hidden = true;
-  elements.useLocalMatch.checked = false;
-  elements.previewTitle.textContent = metadata.title || "未识别标题";
-  elements.previewTags.textContent = String(metadata.tags?.length ?? 0);
-  elements.previewResources.textContent = String(metadata.resources?.length ?? 0);
-  elements.previewAdapter.textContent = metadata.adapterId || "generic";
-  elements.previewImportStatus.textContent = "查询中";
-}
-
-async function refreshMetadataStatus(metadata) {
-  try {
-    latestMetadataStatus = await fetchMetadataStatus(metadata);
-    renderImportStatus(latestMetadataStatus);
-  } catch (error) {
-    latestMetadataStatus = null;
-    elements.previewImportStatus.textContent = error instanceof Error ? `未查询：${error.message}` : "未查询";
-  }
-}
-
-async function fetchMetadataStatus(metadata) {
-  const response = await fetch(`${normalizeServerUrl(elements.serverUrl.value)}/api/metadata/status`, {
-    method: "POST",
-    body: JSON.stringify({
-      site: metadata.site,
-      sourceId: metadata.sourceId,
-      sourceUrl: metadata.sourceUrl,
-      title: metadata.title,
-      originalTitle: metadata.originalTitle,
-    }),
-    headers: {
-      Authorization: `Bearer ${elements.importToken.value.trim()}`,
-      "Content-Type": "application/json",
-    },
-  });
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok || !payload.result) {
-    throw new Error(payload.error || "状态查询失败");
-  }
-
-  return payload.result;
-}
-
-function renderImportStatus(status) {
-  elements.matchTarget.hidden = true;
-  elements.useLocalMatch.checked = false;
-
-  if (!status?.imported) {
-    if (status?.localMatchComicId) {
-      elements.matchTarget.hidden = false;
-      elements.matchTargetLabel.textContent = `提交到本地漫画：${status.localMatchDisplayTitle || status.localMatchComicId}`;
-      elements.previewImportStatus.textContent = status.localMatchReadable ? "可匹配本地" : "可匹配缺失记录";
-      return;
-    }
-
-    if (status?.localMatchCandidateCount > 1) {
-      elements.previewImportStatus.textContent = "多个本地候选";
-      return;
-    }
-
-    elements.previewImportStatus.textContent = "未入库";
-    return;
-  }
-
-  if (status.localReadable) {
-    elements.previewImportStatus.textContent = "本地可读";
-    return;
-  }
-
-  if (status.hasLocalFile && status.isPrimaryFileMissing) {
-    elements.previewImportStatus.textContent = "文件缺失";
-    return;
-  }
-
-  elements.previewImportStatus.textContent = status.comicStatus === "remote_only" ? "远程记录" : "已入库";
-}
-
-async function persistSettings() {
-  await chrome.storage.local.set({
-    serverUrl: normalizeServerUrl(elements.serverUrl.value),
-    importToken: elements.importToken.value.trim(),
-    siteName: elements.siteName.value.trim(),
-  });
+  }, 400);
 }
 
 function normalizeServerUrl(value) {
-  const trimmed = value.trim() || DEFAULT_SETTINGS.serverUrl;
+  const trimmed = value.trim() || "http://127.0.0.1:4317";
   const url = new URL(trimmed);
-
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("本地服务地址必须是 http 或 https。");
-  }
-
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("地址必须是 http 或 https");
   return url.origin;
 }
 
-function inferSiteName(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function isInjectableUrl(url) {
-  return typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"));
-}
-
-function setBusy(isBusy) {
-  elements.collectButton.disabled = isBusy;
-  elements.submitButton.disabled = isBusy;
-}
-
-function setStatus(message, tone = "") {
+function setStatus(message, tone) {
   elements.status.textContent = message;
-  elements.status.dataset.tone = tone;
+  elements.status.dataset.tone = tone || "";
 }

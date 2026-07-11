@@ -4,6 +4,11 @@ import { getRuntimeSettings } from "@/modules/core/settings";
 
 export async function validateMetadataImportToken(providedToken: string | null | undefined) {
   const settings = await getRuntimeSettings();
+
+  if (settings.metadataImportBypassToken) {
+    return;
+  }
+
   const configuredToken = settings.metadataImportToken.trim();
 
   if (!configuredToken) {

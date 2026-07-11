@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MangaTest</title>
+    <title>MangaTest 设置</title>
     <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
     <main>
       <header>
         <h1>MangaTest</h1>
-        <p id="page-host">当前页面</p>
+        <p id="page-host">配置后，在详情页使用浮动按钮一键提交</p>
       </header>
 
       <label>
@@ -23,43 +23,17 @@
         <input id="import-token" autocomplete="off" type="password" placeholder="在 MangaTest 安全设置中配置" />
       </label>
 
-      <label>
-        <span>来源站点</span>
-        <input id="site-name" autocomplete="off" placeholder="自动从域名推断" />
+      <label class="checkbox-label">
+        <input id="dev-mode" type="checkbox" />
+        <span>开发模式（跳过令牌验证）</span>
       </label>
 
-      <section id="preview" hidden>
-        <strong id="preview-title"></strong>
-        <dl>
-          <div>
-            <dt>标签</dt>
-            <dd id="preview-tags">0</dd>
-          </div>
-          <div>
-            <dt>资源</dt>
-            <dd id="preview-resources">0</dd>
-          </div>
-          <div>
-            <dt>适配器</dt>
-            <dd id="preview-adapter">generic</dd>
-          </div>
-          <div>
-            <dt>状态</dt>
-            <dd id="preview-import-status">未查询</dd>
-          </div>
-        </dl>
-        <label id="match-target" hidden>
-          <input id="use-local-match" type="checkbox" />
-          <span id="match-target-label">提交到本地漫画</span>
-        </label>
-      </section>
+      <p id="status" role="status" data-tone="info">🔄 修改后自动保存</p>
 
-      <div class="actions">
-        <button id="collect-button" type="button">采集预览</button>
-        <button id="submit-button" type="button">提交入库</button>
-      </div>
-
-      <p id="status" role="status"></p>
+      <footer>
+        <p>详情页底部自动出现 📥 按钮，一键提交</p>
+        <p>种子页下载链接旁自动出现 📥 MT 按钮，提交磁链+信息</p>
+      </footer>
     </main>
 
     <script src="./popup.js" defer></script>

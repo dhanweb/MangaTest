@@ -307,6 +307,20 @@
     return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   }
 
-  const metadata = collectPageMetadata();
-  return window.MangaTestMetadataContract ? window.MangaTestMetadataContract.normalizeMetadataPayload(metadata) : metadata;
+  window.__mangatest = {
+    collectPageMetadata,
+    collectWithSiteAdapter,
+    mergeMetadata,
+    normalizeMetadata: (m) => window.MangaTestMetadataContract?.normalizeMetadataPayload(m) ?? m,
+  };
+
+  try {
+    const metadata = collectPageMetadata();
+    const normalized = window.MangaTestMetadataContract ? window.MangaTestMetadataContract.normalizeMetadataPayload(metadata) : metadata;
+    console.log("[MangaTest:采集] 采集完成", { 适配器: normalized.adapterId, 站点: normalized.site, 标题: normalized.title, 标签数: normalized.tags?.length, 资源数: normalized.resources?.length });
+    return normalized;
+  } catch (err) {
+    console.error("[MangaTest:采集] 采集失败", err);
+    throw err;
+  }
 })();

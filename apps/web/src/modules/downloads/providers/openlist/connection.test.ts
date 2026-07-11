@@ -452,6 +452,7 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     downloadDefaultTargetDirectory: "",
     listenHost: "127.0.0.1",
     metadataImportToken: "",
+    metadataImportBypassToken: false,
     openlistBaseUrl: "",
     openlistEnabled: false,
     openlistToken: "",
