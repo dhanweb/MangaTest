@@ -126,7 +126,15 @@ export default function SettingsPage() {
     setOpenListCheckResult(null);
 
     try {
-      const response = await fetch("/api/settings/openlist/check", { method: "POST" });
+      const response = await fetch("/api/settings/openlist/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: runtimeSettings.openlistBaseUrl,
+          token: runtimeSettings.openlistToken,
+          enabled: runtimeSettings.openlistEnabled,
+        }),
+      });
       const payload = (await response.json()) as { result?: OpenListConnectionCheckResult; error?: string };
 
       if (!response.ok || !payload.result) {
@@ -134,6 +142,7 @@ export default function SettingsPage() {
       }
 
       setOpenListCheckResult(payload.result);
+      if (payload.result.ok) await saveSettings();
     } catch (error) {
       setOpenListCheckResult({
         ok: false,
@@ -220,6 +229,7 @@ export default function SettingsPage() {
       }
 
       setAria2CheckResult(payload.result);
+      if (payload.result.ok) await saveSettings();
     } catch (error) {
       setAria2CheckResult({
         ok: false,
