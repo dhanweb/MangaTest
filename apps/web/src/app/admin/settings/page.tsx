@@ -43,6 +43,13 @@ export default function SettingsPage() {
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
+  const [savedBaselineJson, setSavedBaselineJson] = useState("");
+
+  function updateDirtyBaseline(settings: RuntimeSettings) {
+    setSavedBaselineJson(JSON.stringify(settings));
+  }
+
+  const isDirty = savedBaselineJson.length > 0 && savedBaselineJson !== JSON.stringify(runtimeSettings);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,7 +58,7 @@ export default function SettingsPage() {
       .then((response) => response.json())
       .then((payload: { settings?: RuntimeSettings }) => {
         if (isMounted && payload.settings) {
-      setRuntimeSettings({
+      const loaded: RuntimeSettings = {
         ...payload.settings,
         openlistBaseUrl: payload.settings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(payload.settings.openlistBaseUrl.trim())
           ? `http://${payload.settings.openlistBaseUrl.trim()}`
@@ -59,7 +66,9 @@ export default function SettingsPage() {
         aria2RpcUrl: payload.settings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(payload.settings.aria2RpcUrl.trim())
           ? `http://${payload.settings.aria2RpcUrl.trim()}`
           : payload.settings.aria2RpcUrl.trim(),
-      });
+      };
+      setRuntimeSettings(loaded);
+      updateDirtyBaseline(loaded);
         }
       })
       .catch(() => undefined);
@@ -78,6 +87,15 @@ export default function SettingsPage() {
   useEffect(() => {
     localStorage.setItem("openlist_login_otp", openListLoginOtp);
   }, [openListLoginOtp]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
 
   async function saveSettings() {
     setIsSaving(true);
@@ -105,7 +123,17 @@ export default function SettingsPage() {
         throw new Error(payload.error ?? "设置保存失败。");
       }
 
-      setRuntimeSettings(payload.settings);
+      const saved: RuntimeSettings = {
+        ...payload.settings,
+        openlistBaseUrl: payload.settings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(payload.settings.openlistBaseUrl.trim())
+          ? `http://${payload.settings.openlistBaseUrl.trim()}`
+          : payload.settings.openlistBaseUrl.trim(),
+        aria2RpcUrl: payload.settings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(payload.settings.aria2RpcUrl.trim())
+          ? `http://${payload.settings.aria2RpcUrl.trim()}`
+          : payload.settings.aria2RpcUrl.trim(),
+      };
+      setRuntimeSettings(saved);
+      updateDirtyBaseline(saved);
       setSavedMessage("设置已保存");
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "设置保存失败。");
@@ -196,7 +224,7 @@ export default function SettingsPage() {
 
         if (loginPayload.settings) {
           const s = loginPayload.settings;
-          setRuntimeSettings({
+          const loginUpdated: RuntimeSettings = {
             ...s,
             openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
               ? `http://${s.openlistBaseUrl.trim()}`
@@ -204,7 +232,9 @@ export default function SettingsPage() {
             aria2RpcUrl: s.aria2RpcUrl.trim() && !/^https?:\/\//i.test(s.aria2RpcUrl.trim())
               ? `http://${s.aria2RpcUrl.trim()}`
               : s.aria2RpcUrl.trim(),
-          });
+          };
+          setRuntimeSettings(loginUpdated);
+          updateDirtyBaseline(loginUpdated);
           token = s.openlistToken ?? "";
         }
       }
@@ -296,7 +326,10 @@ export default function SettingsPage() {
             size="sm"
             role="tab"
             aria-selected={activeTab === tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => {
+              if (isDirty && !window.confirm("有未保存的更改，离开后将丢失。确定要切换吗？")) return;
+              setActiveTab(tab);
+            }}
             styles={{
               root: {
                 minHeight: 40,
@@ -376,6 +409,22 @@ export default function SettingsPage() {
           />
         )}
       </Box>
+
+      {isDirty && (
+        <Box style={{
+          position: "fixed", bottom: 32, right: 32, zIndex: 999,
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "12px 20px",
+          borderRadius: 12,
+          background: "#fff",
+          boxShadow: "0 4px 20px rgba(239,59,145,0.15), 0 0 0 1px var(--mantine-color-pink-2)",
+        }}>
+          <Text size="xs" c="pink.6" fw={600}>有未保存的更改</Text>
+          <AppButton loading={isSaving} onClick={saveSettings} size="xs">
+            保存设置
+          </AppButton>
+        </Box>
+      )}
     </Box>
   );
 }
