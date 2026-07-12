@@ -51,7 +51,15 @@ export default function SettingsPage() {
       .then((response) => response.json())
       .then((payload: { settings?: RuntimeSettings }) => {
         if (isMounted && payload.settings) {
-          setRuntimeSettings(payload.settings);
+      setRuntimeSettings({
+        ...payload.settings,
+        openlistBaseUrl: payload.settings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(payload.settings.openlistBaseUrl.trim())
+          ? `http://${payload.settings.openlistBaseUrl.trim()}`
+          : payload.settings.openlistBaseUrl.trim(),
+        aria2RpcUrl: payload.settings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(payload.settings.aria2RpcUrl.trim())
+          ? `http://${payload.settings.aria2RpcUrl.trim()}`
+          : payload.settings.aria2RpcUrl.trim(),
+      });
         }
       })
       .catch(() => undefined);
@@ -67,9 +75,18 @@ export default function SettingsPage() {
     setSaveError("");
 
     try {
+      const settingsToSave = {
+        ...runtimeSettings,
+        openlistBaseUrl: runtimeSettings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(runtimeSettings.openlistBaseUrl.trim())
+          ? `http://${runtimeSettings.openlistBaseUrl.trim()}`
+          : runtimeSettings.openlistBaseUrl.trim(),
+        aria2RpcUrl: runtimeSettings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(runtimeSettings.aria2RpcUrl.trim())
+          ? `http://${runtimeSettings.aria2RpcUrl.trim()}`
+          : runtimeSettings.aria2RpcUrl.trim(),
+      };
       const response = await fetch("/api/settings", {
         method: "PATCH",
-        body: JSON.stringify(runtimeSettings),
+        body: JSON.stringify(settingsToSave),
         headers: { "Content-Type": "application/json" },
       });
       const payload = (await response.json()) as { settings?: RuntimeSettings; error?: string };
@@ -124,7 +141,8 @@ export default function SettingsPage() {
     setOpenListCheckResult(null);
 
     try {
-      const baseUrl = runtimeSettings.openlistBaseUrl.trim();
+      const rawUrl = runtimeSettings.openlistBaseUrl.trim();
+      const baseUrl = rawUrl && !/^https?:\/\//i.test(rawUrl) ? `http://${rawUrl}` : rawUrl;
       const hasLogin = openListLoginUsername.trim() && openListLoginPassword.trim();
 
       if (!baseUrl) {
@@ -167,10 +185,17 @@ export default function SettingsPage() {
         }
 
         if (loginPayload.settings) {
-          setRuntimeSettings(loginPayload.settings);
-          token = loginPayload.settings.openlistToken ?? "";
-          setOpenListLoginPassword("");
-          setOpenListLoginOtp("");
+          const s = loginPayload.settings;
+          setRuntimeSettings({
+            ...s,
+            openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
+              ? `http://${s.openlistBaseUrl.trim()}`
+              : s.openlistBaseUrl.trim(),
+            aria2RpcUrl: s.aria2RpcUrl.trim() && !/^https?:\/\//i.test(s.aria2RpcUrl.trim())
+              ? `http://${s.aria2RpcUrl.trim()}`
+              : s.aria2RpcUrl.trim(),
+          });
+          token = s.openlistToken ?? "";
         }
       }
 
@@ -217,7 +242,7 @@ export default function SettingsPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          rpcUrl: runtimeSettings.aria2RpcUrl,
+          rpcUrl: runtimeSettings.aria2RpcUrl && !/^https?:\/\//i.test(runtimeSettings.aria2RpcUrl) ? `http://${runtimeSettings.aria2RpcUrl}` : runtimeSettings.aria2RpcUrl,
           rpcToken: runtimeSettings.aria2RpcToken,
         }),
       });
