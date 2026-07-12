@@ -12,7 +12,6 @@ import type {
   OpenListConnectionCheckResult,
   OpenListConnectionStatus,
   OpenListLoginResult,
-  OpenListLoginStatus,
 } from "@/modules/downloads/providers/openlist";
 
 type SettingsTab = (typeof TABS)[number];
@@ -25,14 +24,6 @@ const OPENLIST_STATUS_CONFIG: Record<OpenListConnectionStatus, { label: string; 
   invalid_response: { label: "响应异常", color: "#b86b00" },
   missing_settings: { label: "缺少配置", color: "#b86b00" },
   reachable: { label: "连接正常", color: "#00894a" },
-  unauthorized: { label: "认证失败", color: "#d93a4e" },
-  unreachable: { label: "不可达", color: "#d93a4e" },
-};
-
-const OPENLIST_LOGIN_STATUS_CONFIG: Record<OpenListLoginStatus, { label: string; color: string }> = {
-  invalid_response: { label: "响应异常", color: "#b86b00" },
-  missing_settings: { label: "缺少信息", color: "#b86b00" },
-  success: { label: "登录成功", color: "#00894a" },
   unauthorized: { label: "认证失败", color: "#d93a4e" },
   unreachable: { label: "不可达", color: "#d93a4e" },
 };
@@ -667,6 +658,11 @@ function DownloadSettings({
   savedMessage: string;
   settings: RuntimeSettings;
 }) {
+  const openListStatus = checkResult?.status;
+  const openListDotColor = openListStatus
+    ? OPENLIST_STATUS_CONFIG[openListStatus]?.color ?? "#53606c"
+    : undefined;
+
   return (
     <>
       <SettingsGroup title="下载入库">
@@ -689,12 +685,19 @@ function DownloadSettings({
           />
         </SettingsRow>
         <SettingsRow label="服务地址" note="OpenList API 的 http 或 https 地址。">
-          <AppInput
-            value={settings.openlistBaseUrl}
-            onChange={(event) => onSettingsChange({ ...settings, openlistBaseUrl: event.currentTarget.value })}
-            placeholder="http://127.0.0.1:5244"
-            style={{ width: 320 }}
-          />
+          <Group gap="xs" wrap="nowrap" align="center">
+            {isCheckingOpenList ? (
+              <Text size="xs" c="blue">校验中…</Text>
+            ) : checkResult ? (
+              <Box component="span" style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", flexShrink: 0, backgroundColor: openListDotColor ?? "#53606c" }} />
+            ) : null}
+            <AppInput
+              value={settings.openlistBaseUrl}
+              onChange={(event) => onSettingsChange({ ...settings, openlistBaseUrl: event.currentTarget.value })}
+              placeholder="http://127.0.0.1:5244"
+              style={{ width: 280 }}
+            />
+          </Group>
         </SettingsRow>
         <SettingsRow label="访问 token" note="仅保存在本地 SQLite 设置表。">
           <AppInput
@@ -705,30 +708,36 @@ function DownloadSettings({
             style={{ width: 320 }}
           />
         </SettingsRow>
-        <SettingsRow label="连接校验" note="只读请求 OpenList public API 和账号 API，不创建下载任务。">
-          <AppButton loading={isCheckingOpenList} onClick={onCheckOpenList}>
-            校验连接
-          </AppButton>
+        <SettingsRow label="连接校验" note="只读请求 OpenList public API 和账号 API。">
+          <Stack gap={4}>
+            <AppButton loading={isCheckingOpenList} onClick={onCheckOpenList}>
+              校验连接
+            </AppButton>
+            {checkResult && (
+              <InlineCheckResult ok={checkResult.ok} message={checkResult.message} checkedAt={checkResult.checkedAt} dotColor={openListDotColor ?? "#53606c"} />
+            )}
+          </Stack>
         </SettingsRow>
-        <SettingsRow label="账号登录" note="用户名、密码和 OTP 只用于本次换取 token，不会写入设置。">
+        <SettingsRow label="账号登录" note="用户名、密码和 OTP 只用于本次换取 token。">
           <Stack gap={8} style={{ width: 320 }}>
-            <AppInput value={loginUsername} onChange={(event) => onSetLoginUsername(event.currentTarget.value)} placeholder="用户名" />
+            <AppInput value={loginUsername} onChange={(event) => onSetLoginUsername(event.currentTarget.value)} placeholder="用户名" size="xs" />
             <AppInput
               type="password"
               value={loginPassword}
               onChange={(event) => onSetLoginPassword(event.currentTarget.value)}
               placeholder="密码"
+              size="xs"
             />
-            <AppInput value={loginOtp} onChange={(event) => onSetLoginOtp(event.currentTarget.value)} placeholder="OTP，可选" />
-            <AppButton loading={isLoggingInOpenList} onClick={onLoginOpenList}>
+            <AppInput value={loginOtp} onChange={(event) => onSetLoginOtp(event.currentTarget.value)} placeholder="OTP，可选" size="xs" />
+            <AppButton loading={isLoggingInOpenList} onClick={onLoginOpenList} size="xs">
               登录并保存 token
             </AppButton>
+            {loginResult && (
+              <InlineCheckResult ok={loginResult.ok} message={loginResult.message} checkedAt={loginResult.checkedAt} dotColor={loginResult.ok ? "#00894a" : "#d93a4e"} />
+            )}
           </Stack>
         </SettingsRow>
       </SettingsGroup>
-
-      {loginResult && <OpenListLoginResultPanel result={loginResult} />}
-      {checkResult && <OpenListConnectionResult result={checkResult} />}
 
       <SettingsGroup title="aria2">
         <SettingsRow label="启用 aria2" note="启用 aria2 provider 用于磁链和 torrent 资源下载。">
@@ -739,12 +748,19 @@ function DownloadSettings({
           />
         </SettingsRow>
         <SettingsRow label="aria2 RPC 地址" note="aria2 JSON-RPC 端点，例如 http://127.0.0.1:6800/jsonrpc。">
-          <AppInput
-            value={settings.aria2RpcUrl}
-            onChange={(event) => onSettingsChange({ ...settings, aria2RpcUrl: event.currentTarget.value })}
-            placeholder="http://127.0.0.1:6800/jsonrpc"
-            style={{ width: 320 }}
-          />
+          <Group gap="xs" wrap="nowrap" align="center">
+            {isCheckingAria2 ? (
+              <Text size="xs" c="blue">校验中…</Text>
+            ) : aria2CheckResult ? (
+              <Box component="span" style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", flexShrink: 0, backgroundColor: aria2CheckResult.ok ? "#00894a" : "#d93a4e" }} />
+            ) : null}
+            <AppInput
+              value={settings.aria2RpcUrl}
+              onChange={(event) => onSettingsChange({ ...settings, aria2RpcUrl: event.currentTarget.value })}
+              placeholder="http://127.0.0.1:6800/jsonrpc"
+              style={{ width: 280 }}
+            />
+          </Group>
         </SettingsRow>
         <SettingsRow label="aria2 RPC 密钥" note="--rpc-secret 设置的密钥，留空表示无密钥。">
           <AppInput
@@ -755,13 +771,16 @@ function DownloadSettings({
           />
         </SettingsRow>
         <SettingsRow label="连接校验" note="通过 RPC 接口检查 aria2 连通性。">
-          <AppButton loading={isCheckingAria2} onClick={onCheckAria2}>
-            校验连接
-          </AppButton>
+          <Stack gap={4}>
+            <AppButton loading={isCheckingAria2} onClick={onCheckAria2}>
+              校验连接
+            </AppButton>
+            {aria2CheckResult && (
+              <InlineCheckResult ok={aria2CheckResult.ok} message={aria2CheckResult.message} checkedAt={null} dotColor={aria2CheckResult.ok ? "#00894a" : "#d93a4e"} />
+            )}
+          </Stack>
         </SettingsRow>
       </SettingsGroup>
-
-      {aria2CheckResult && <Aria2ConnectionResult result={aria2CheckResult} />}
 
       <Group justify="flex-end" mt="md">
         {saveError && (
@@ -782,101 +801,25 @@ function DownloadSettings({
   );
 }
 
-function OpenListLoginResultPanel({ result }: { result: PublicOpenListLoginResult }) {
-  const status = OPENLIST_LOGIN_STATUS_CONFIG[result.status];
-
+function InlineCheckResult({ ok, message, checkedAt, dotColor }: { ok: boolean; message: string; checkedAt: string | null; dotColor: string }) {
   return (
-    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
-      <Group justify="space-between" align="flex-start" gap="md">
-        <Box style={{ minWidth: 0 }}>
-          <Text fw={900} c={status.color}>
-            {status.label}
-          </Text>
-          <Text size="sm" c="ink.6" mt={4}>
-            {result.message}
-          </Text>
-        </Box>
-        <Text size="xs" c="ink.5">
-          {formatDate(result.checkedAt)}
+    <Group gap={6} align="flex-start" wrap="nowrap" style={{ padding: "6px 0" }}>
+      <Box component="span" style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 5, backgroundColor: dotColor }} />
+      <Box style={{ minWidth: 0 }}>
+        <Text size="xs" fw={600} c={ok ? "#00894a" : "#d93a4e"}>
+          {ok ? "正常" : "失败"}
         </Text>
-      </Group>
-      <Group gap="lg" mt="sm" wrap="wrap">
-        <OpenListCheckMetric label="服务地址" value={result.baseUrl ?? "未配置"} />
-        <OpenListCheckMetric label="Token" value={result.tokenConfigured ? "已保存" : "未保存"} />
-        <OpenListCheckMetric label="登录 API" value={formatEndpointCheck(result.authApi)} />
-      </Group>
-    </Box>
-  );
-}
-
-function OpenListConnectionResult({ result }: { result: OpenListConnectionCheckResult }) {
-  const status = OPENLIST_STATUS_CONFIG[result.status];
-
-  return (
-    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
-      <Group justify="space-between" align="flex-start" gap="md">
-        <Box style={{ minWidth: 0 }}>
-          <Text fw={900} c={status.color}>
-            {status.label}
-          </Text>
-          <Text size="sm" c="ink.6" mt={4}>
-            {result.message}
-          </Text>
-        </Box>
-        <Text size="xs" c="ink.5">
-          {formatDate(result.checkedAt)}
+        <Text size="xs" c="ink.5" style={{ lineHeight: 1.4 }}>
+          {message}
         </Text>
-      </Group>
-      <Group gap="lg" mt="sm" wrap="wrap">
-        <OpenListCheckMetric label="服务地址" value={result.baseUrl ?? "未配置"} />
-        <OpenListCheckMetric label="Token" value={result.tokenConfigured ? "已配置" : "未配置"} />
-        <OpenListCheckMetric label="Public API" value={formatEndpointCheck(result.publicApi)} />
-        <OpenListCheckMetric label="账号 API" value={formatEndpointCheck(result.accountApi)} />
-      </Group>
-    </Box>
-  );
-}
-
-function Aria2ConnectionResult({ result }: { result: { ok: boolean; message: string } }) {
-  return (
-    <Box mb="lg" p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>
-      <Group justify="space-between" align="flex-start" gap="md">
-        <Box style={{ minWidth: 0 }}>
-          <Text fw={900} c={result.ok ? "#00894a" : "#d93a4e"}>
-            {result.ok ? "连接正常" : "连接失败"}
+        {checkedAt && (
+          <Text size="xs" c="ink.3" mt={1}>
+            {formatDate(checkedAt)}
           </Text>
-          <Text size="sm" c="ink.6" mt={4}>
-            {result.message}
-          </Text>
-        </Box>
-      </Group>
-    </Box>
+        )}
+      </Box>
+    </Group>
   );
-}
-
-function OpenListCheckMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <Box style={{ minWidth: 130, maxWidth: 300 }}>
-      <Text size="xs" c="ink.4" fw={700}>
-        {label}
-      </Text>
-      <Text size="sm" fw={800} c="ink.8" style={{ overflowWrap: "anywhere" }}>
-        {value}
-      </Text>
-    </Box>
-  );
-}
-
-function formatEndpointCheck(value: OpenListConnectionCheckResult["publicApi"]) {
-  if (!value) {
-    return "未请求";
-  }
-
-  if (value.status == null) {
-    return "请求失败";
-  }
-
-  return value.code == null ? `HTTP ${value.status}` : `HTTP ${value.status} / code ${value.code}`;
 }
 
 function ScanSettings() {
