@@ -137,6 +137,45 @@ export default function SettingsPage() {
     }
   }
 
+  async function saveSettingsWith(settings: RuntimeSettings) {
+    setIsSaving(true);
+    try {
+      const settingsToSave = {
+        ...settings,
+        openlistBaseUrl: settings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(settings.openlistBaseUrl.trim())
+          ? `http://${settings.openlistBaseUrl.trim()}`
+          : settings.openlistBaseUrl.trim(),
+        aria2RpcUrl: settings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(settings.aria2RpcUrl.trim())
+          ? `http://${settings.aria2RpcUrl.trim()}`
+          : settings.aria2RpcUrl.trim(),
+      };
+      const response = await fetch("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(settingsToSave),
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = (await response.json()) as { settings?: RuntimeSettings; error?: string };
+      if (!response.ok || !payload.settings) {
+        throw new Error(payload.error ?? "设置保存失败。");
+      }
+      const saved: RuntimeSettings = {
+        ...payload.settings,
+        openlistBaseUrl: payload.settings.openlistBaseUrl.trim() && !/^https?:\/\//i.test(payload.settings.openlistBaseUrl.trim())
+          ? `http://${payload.settings.openlistBaseUrl.trim()}`
+          : payload.settings.openlistBaseUrl.trim(),
+        aria2RpcUrl: payload.settings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(payload.settings.aria2RpcUrl.trim())
+          ? `http://${payload.settings.aria2RpcUrl.trim()}`
+          : payload.settings.aria2RpcUrl.trim(),
+      };
+      setRuntimeSettings(saved);
+      updateDirtyBaseline(saved);
+    } catch (error) {
+      console.error("设置保存失败", error);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   async function exportSqliteBackup() {
     setIsExportingBackup(true);
     setBackupMessage("");
@@ -267,13 +306,13 @@ export default function SettingsPage() {
       const retryRes = await fetch("/api/settings/openlist/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl, token, enabled: runtimeSettings.openlistEnabled }),
+        body: JSON.stringify({ baseUrl, token, enabled: loginUpdated.openlistEnabled }),
       });
       const retryPayload = (await retryRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
 
       if (retryPayload.result) {
         setOpenListCheckResult(retryPayload.result);
-        if (retryPayload.result.ok) await saveSettings();
+        if (retryPayload.result.ok) await saveSettingsWith(loginUpdated);
       } else {
         throw new Error(retryPayload.error ?? "登录成功但校验失败。");
       }
