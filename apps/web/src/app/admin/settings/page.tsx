@@ -40,8 +40,6 @@ export default function SettingsPage() {
   const [openListLoginUsername, setOpenListLoginUsername] = useState(() => localStorage.getItem("openlist_login_username") ?? "");
   const [openListLoginPassword, setOpenListLoginPassword] = useState(() => localStorage.getItem("openlist_login_password") ?? "");
   const [openListLoginOtp, setOpenListLoginOtp] = useState(() => localStorage.getItem("openlist_login_otp") ?? "");
-  const [savedMessage, setSavedMessage] = useState("");
-  const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
   const [savedBaselineJson, setSavedBaselineJson] = useState("");
 
@@ -99,8 +97,6 @@ export default function SettingsPage() {
 
   async function saveSettings() {
     setIsSaving(true);
-    setSavedMessage("");
-    setSaveError("");
 
     try {
       const settingsToSave = {
@@ -134,9 +130,8 @@ export default function SettingsPage() {
       };
       setRuntimeSettings(saved);
       updateDirtyBaseline(saved);
-      setSavedMessage("设置已保存");
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "设置保存失败。");
+      console.error("设置保存失败", error);
     } finally {
       setIsSaving(false);
     }
@@ -354,21 +349,13 @@ export default function SettingsPage() {
       <Box>
         {activeTab === "常规设置" && (
           <GeneralSettings
-            isSaving={isSaving}
-            onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
-            saveError={saveError}
-            savedMessage={savedMessage}
             settings={runtimeSettings}
           />
         )}
         {activeTab === "阅读设置" && (
           <ReaderSettings
-            isSaving={isSaving}
-            onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
-            saveError={saveError}
-            savedMessage={savedMessage}
             settings={runtimeSettings}
           />
         )}
@@ -379,19 +366,15 @@ export default function SettingsPage() {
             checkResult={openListCheckResult}
             isCheckingAria2={isCheckingAria2}
             isCheckingOpenList={isCheckingOpenList}
-            isSaving={isSaving}
             loginOtp={openListLoginOtp}
             loginPassword={openListLoginPassword}
             loginUsername={openListLoginUsername}
             onCheckAria2={checkAria2Connection}
             onCheckOpenList={checkOpenListConnection}
-            onSave={saveSettings}
             onSetLoginOtp={setOpenListLoginOtp}
             onSetLoginPassword={setOpenListLoginPassword}
             onSetLoginUsername={setOpenListLoginUsername}
             onSettingsChange={setRuntimeSettings}
-            saveError={saveError}
-            savedMessage={savedMessage}
             settings={runtimeSettings}
           />
         )}
@@ -399,32 +382,39 @@ export default function SettingsPage() {
           <SecuritySettings
             backupMessage={backupMessage}
             isExportingBackup={isExportingBackup}
-            isSaving={isSaving}
             onExportBackup={exportSqliteBackup}
-            onSave={saveSettings}
             onSettingsChange={setRuntimeSettings}
-            saveError={saveError}
-            savedMessage={savedMessage}
             settings={runtimeSettings}
           />
         )}
       </Box>
 
-      {isDirty && (
-        <Box style={{
-          position: "fixed", bottom: 32, right: 32, zIndex: 999,
-          display: "flex", alignItems: "center", gap: 12,
-          padding: "12px 20px",
-          borderRadius: 12,
-          background: "#fff",
-          boxShadow: "0 4px 20px rgba(239,59,145,0.15), 0 0 0 1px var(--mantine-color-pink-2)",
-        }}>
-          <Text size="xs" c="pink.6" fw={600}>有未保存的更改</Text>
-          <AppButton loading={isSaving} onClick={saveSettings} size="xs">
-            保存设置
-          </AppButton>
-        </Box>
-      )}
+      <Box style={{
+        position: "fixed", bottom: 32, right: 32, zIndex: 999,
+        display: "flex", alignItems: "center", gap: 14,
+        padding: "12px 24px",
+        borderRadius: 12,
+        background: isDirty ? "#fff4f8" : "#f4fffa",
+        boxShadow: isDirty
+          ? "0 4px 20px rgba(239,59,145,0.15), 0 0 0 1px var(--mantine-color-pink-3)"
+          : "0 2px 12px rgba(0,0,0,0.06), 0 0 0 1px var(--mantine-color-green-2)",
+        transition: "all 200ms ease",
+      }}>
+        <Box
+          component="span"
+          style={{
+            width: 8, height: 8, borderRadius: "50%",
+            backgroundColor: isDirty ? "#d93a4e" : "#00894a",
+            flexShrink: 0,
+          }}
+        />
+        <Text size="xs" fw={600} c={isDirty ? "pink.6" : "green.7"}>
+          {isDirty ? "有未保存的更改" : "设置已保存"}
+        </Text>
+        <AppButton loading={isSaving} onClick={saveSettings} size="xs" variant={isDirty ? "filled" : "outline"} styles={{ root: isDirty ? {} : { borderColor: "var(--mantine-color-green-4)", color: "var(--mantine-color-green-7)" } }}>
+          {isDirty ? "保存设置" : "重新保存"}
+        </AppButton>
+      </Box>
     </Box>
   );
 }
@@ -502,18 +492,10 @@ function ReadonlyValue({ value, tone = "neutral" }: { value: string; tone?: "neu
 }
 
 function GeneralSettings({
-  isSaving,
-  onSave,
   onSettingsChange,
-  saveError,
-  savedMessage,
   settings,
 }: {
-  isSaving: boolean;
-  onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
-  saveError: string;
-  savedMessage: string;
   settings: RuntimeSettings;
 }) {
   return (
@@ -566,39 +548,15 @@ function GeneralSettings({
           <AppInput value="未启用" readOnly style={{ width: 180 }} />
         </SettingsRow>
       </SettingsGroup>
-
-      <Group justify="flex-end" mt="md">
-        {saveError && (
-          <Text size="sm" c="red.7">
-            {saveError}
-          </Text>
-        )}
-        {savedMessage && (
-          <Text size="sm" c="green.7">
-            {savedMessage}
-          </Text>
-        )}
-        <AppButton loading={isSaving} onClick={onSave}>
-          保存常规设置
-        </AppButton>
-      </Group>
     </>
   );
 }
 
 function ReaderSettings({
-  isSaving,
-  onSave,
   onSettingsChange,
-  saveError,
-  savedMessage,
   settings,
 }: {
-  isSaving: boolean;
-  onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
-  saveError: string;
-  savedMessage: string;
   settings: RuntimeSettings;
 }) {
   return (
@@ -683,22 +641,6 @@ function ReaderSettings({
           </SettingsRow>
         ))}
       </SettingsGroup>
-
-      <Group justify="flex-end" mt="md">
-        {saveError && (
-          <Text size="sm" c="red.7">
-            {saveError}
-          </Text>
-        )}
-        {savedMessage && (
-          <Text size="sm" c="green.7">
-            {savedMessage}
-          </Text>
-        )}
-        <AppButton loading={isSaving} onClick={onSave}>
-          保存阅读设置
-        </AppButton>
-      </Group>
     </>
   );
 }
@@ -708,38 +650,30 @@ function DownloadSettings({
   checkResult,
   isCheckingAria2,
   isCheckingOpenList,
-  isSaving,
   loginOtp,
   loginPassword,
   loginUsername,
   onCheckAria2,
   onCheckOpenList,
-  onSave,
   onSetLoginOtp,
   onSetLoginPassword,
   onSetLoginUsername,
   onSettingsChange,
-  saveError,
-  savedMessage,
   settings,
 }: {
   aria2CheckResult: { ok: boolean; message: string } | null;
   checkResult: OpenListConnectionCheckResult | null;
   isCheckingAria2: boolean;
   isCheckingOpenList: boolean;
-  isSaving: boolean;
   loginOtp: string;
   loginPassword: string;
   loginUsername: string;
   onCheckAria2: () => void;
   onCheckOpenList: () => void;
-  onSave: () => void;
   onSetLoginOtp: (value: string) => void;
   onSetLoginPassword: (value: string) => void;
   onSetLoginUsername: (value: string) => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
-  saveError: string;
-  savedMessage: string;
   settings: RuntimeSettings;
 }) {
   const openListStatus = checkResult?.status;
@@ -860,21 +794,6 @@ function DownloadSettings({
         </SettingsRow>
       </SettingsGroup>
 
-      <Group justify="flex-end" mt="md">
-        {saveError && (
-          <Text size="sm" c="red.7">
-            {saveError}
-          </Text>
-        )}
-        {savedMessage && (
-          <Text size="sm" c="green.7">
-            {savedMessage}
-          </Text>
-        )}
-        <AppButton loading={isSaving} onClick={onSave}>
-          保存下载设置
-        </AppButton>
-      </Group>
     </>
   );
 }
@@ -953,22 +872,14 @@ function ScanSettings() {
 function SecuritySettings({
   backupMessage,
   isExportingBackup,
-  isSaving,
   onExportBackup,
-  onSave,
   onSettingsChange,
-  saveError,
-  savedMessage,
   settings,
 }: {
   backupMessage: string;
   isExportingBackup: boolean;
-  isSaving: boolean;
   onExportBackup: () => void;
-  onSave: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
-  saveError: string;
-  savedMessage: string;
   settings: RuntimeSettings;
 }) {
   return (
@@ -982,6 +893,11 @@ function SecuritySettings({
         <SettingsRow label="备份范围" note="包含漫画记录、阅读进度、标签、设置、扫描和操作日志。">
           <AppInput value="mangatest.sqlite" readOnly style={{ width: 180 }} />
         </SettingsRow>
+        {backupMessage && (
+          <SettingsRow label="">
+            <Text size="sm" c={backupMessage.includes("失败") ? "red.7" : "green.7"}>{backupMessage}</Text>
+          </SettingsRow>
+        )}
       </SettingsGroup>
 
       <SettingsGroup title="接口保护">
@@ -1023,19 +939,6 @@ function SecuritySettings({
             {backupMessage}
           </Text>
         )}
-        {saveError && (
-          <Text size="sm" c="red.7">
-            {saveError}
-          </Text>
-        )}
-        {savedMessage && (
-          <Text size="sm" c="green.7">
-            {savedMessage}
-          </Text>
-        )}
-        <AppButton loading={isSaving} onClick={onSave}>
-          保存安全设置
-        </AppButton>
       </Group>
     </>
   );
