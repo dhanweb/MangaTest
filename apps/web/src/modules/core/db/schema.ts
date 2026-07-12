@@ -297,15 +297,24 @@ export const comicResources = sqliteTable(
   }),
 );
 
+export const downloadTaskStatuses = ["queued", "submitted", "downloading", "running", "failed", "completed", "cancel_requested", "canceled"] as const;
+export const downloadTaskTypes = ["offline", "transfer"] as const;
+
 export const downloadTasks = sqliteTable(
   "download_tasks",
   {
     id: text("id").primaryKey(),
     comicResourceId: text("comic_resource_id").references(() => comicResources.id),
     provider: text("provider").notNull(),
-    status: text("status", { enum: ["queued", "running", "failed", "completed", "cancel_requested", "canceled"] })
+    status: text("status", { enum: downloadTaskStatuses })
       .notNull()
       .default("queued"),
+    taskType: text("task_type", { enum: downloadTaskTypes })
+      .notNull()
+      .default("transfer"),
+    offlineTaskId: text("offline_task_id"),
+    remoteTaskId: text("remote_task_id"),
+    remotePath: text("remote_path"),
     targetDirectory: text("target_directory"),
     errorMessage: text("error_message"),
     retryCount: integer("retry_count").notNull().default(0),
@@ -314,6 +323,8 @@ export const downloadTasks = sqliteTable(
   (table) => ({
     statusIdx: index("download_tasks_status_idx").on(table.status),
     resourceIdx: index("download_tasks_resource_idx").on(table.comicResourceId),
+    typeIdx: index("download_tasks_type_idx").on(table.taskType),
+    offlineTaskIdx: index("download_tasks_offline_task_idx").on(table.offlineTaskId),
   }),
 );
 

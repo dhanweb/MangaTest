@@ -249,6 +249,10 @@ export function bootstrapDatabase() {
       comic_resource_id TEXT REFERENCES comic_resources(id),
       provider TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'queued',
+      task_type TEXT NOT NULL DEFAULT 'transfer',
+      offline_task_id TEXT,
+      remote_task_id TEXT,
+      remote_path TEXT,
       target_directory TEXT,
       error_message TEXT,
       retry_count INTEGER NOT NULL DEFAULT 0,
@@ -493,6 +497,19 @@ export function bootstrapDatabase() {
   ensureColumn("local_files", "is_ignored", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("local_files", "ignored_at", "TEXT");
   ensureColumn("manga_roots", "kind", "TEXT NOT NULL DEFAULT 'user'");
+  ensureColumn("download_tasks", "task_type", "TEXT NOT NULL DEFAULT 'transfer'");
+  ensureColumn("download_tasks", "offline_task_id", "TEXT");
+  ensureColumn("download_tasks", "remote_task_id", "TEXT");
+  ensureColumn("download_tasks", "remote_path", "TEXT");
+
+  // Create new indices if they do not exist
+  const sqlite2 = getSqlite();
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS download_tasks_type_idx ON download_tasks (task_type)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS download_tasks_offline_task_idx ON download_tasks (offline_task_id)");
+  } catch { /* index may already exist */ }
 
   // Auto-create system manga root if it doesn't exist
   // Resolve to project root: process.cwd() is apps/web when run via workspace

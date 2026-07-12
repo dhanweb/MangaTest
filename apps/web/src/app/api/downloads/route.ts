@@ -8,6 +8,7 @@ import {
   listDownloadTasks,
   planNextDownloadDispatch,
   type DownloadProvider,
+  type DownloadTaskType,
 } from "@/modules/downloads";
 
 export const runtime = "nodejs";
@@ -22,7 +23,10 @@ export async function GET() {
     listOpenListCloudScans(),
   ]);
 
-  return Response.json({ resources, tasks, events, dispatchPlan, cloudScans });
+  const offlineTasks = tasks.filter((t) => t.taskType === "offline");
+  const transferTasks = tasks.filter((t) => t.taskType === "transfer");
+
+  return Response.json({ resources, tasks, offlineTasks, transferTasks, events, dispatchPlan, cloudScans });
 }
 
 export async function POST(request: Request) {
@@ -65,6 +69,7 @@ function parseCreateDownloadTaskPayload(payload: unknown) {
     input: {
       comicResourceId: record.comicResourceId,
       provider: provider ?? undefined,
+      taskType: isDownloadTaskType(record.taskType) ? record.taskType : undefined,
       targetDirectory: typeof record.targetDirectory === "string" ? record.targetDirectory : null,
     },
     error: null,
@@ -73,4 +78,8 @@ function parseCreateDownloadTaskPayload(payload: unknown) {
 
 function isDownloadProvider(value: unknown): value is DownloadProvider {
   return value === "openlist" || value === "builtin-http" || value === "aria2";
+}
+
+function isDownloadTaskType(value: unknown): value is DownloadTaskType {
+  return value === "offline" || value === "transfer";
 }
