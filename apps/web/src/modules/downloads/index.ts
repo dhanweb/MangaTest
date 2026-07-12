@@ -365,9 +365,11 @@ export async function createDownloadTask(input: CreateDownloadTaskInput): Promis
     status: task.status,
   });
 
+  await dispatchTaskNow(taskId);
+
   return {
     created: true,
-    task,
+    task: getDownloadTaskById(taskId) ?? task,
   };
 }
 
@@ -842,41 +844,8 @@ export async function runTransferWorkerTick(): Promise<DownloadWorkerTickResult>
   for (let i = 0; i < 20; i++) {
     const plan = await planNextDownloadDispatch("transfer");
     if (plan.status !== "ready" || !plan.task) break;
-
-    const preparation = persistDownloadTaskPreparationFromPlan(plan);
-
-    if (preparation?.status === "ready" && plan.task.provider === "openlist" && plan.task.resourceType === "openlist") {
-      const now = new Date().toISOString();
-      getDb().update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, plan.task.id)).run();
-      const transfer = await downloadPreparedOpenListTask(plan.task, preparation);
-      processed++;
-      reasons.push(transfer.status === "completed" ? `${plan.task.comicTitle}: 已下载` : `${plan.task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`);
-      continue;
-    }
-
-    if (plan.status === "ready" && plan.task.provider === "aria2") {
-      const now = new Date().toISOString();
-      getDb().update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, plan.task.id)).run();
-      const settings = await getRuntimeSettings();
-      const uri = plan.task.comicResourceId
-        ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
-        : "";
-
-      if (!uri) {
-        markDownloadTaskFinished(plan.task.id, "failed", "缺少资源下载地址。", now);
-        processed++;
-        reasons.push(`${plan.task.comicTitle}: 缺少资源下载地址`);
-        continue;
-      }
-
-      const transfer = await downloadAria2Task(plan.task, uri, settings);
-      processed++;
-      reasons.push(transfer.status === "completed" ? `${plan.task.comicTitle}: 已下载` : `${plan.task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`);
-      continue;
-    }
-
-    reasons.push(`${plan.task.comicTitle}: ${plan.reason}`);
-    break;
+    const msg = await dispatchTaskNow(plan.task.id);
+    if (msg) { processed++; reasons.push(msg); }
   }
 
   if (processed > 0) {
@@ -923,63 +892,8 @@ export async function runOfflineWorkerTick(): Promise<DownloadWorkerTickResult> 
   for (let i = 0; i < 20; i++) {
     const plan = await planNextDownloadDispatch("offline");
     if (plan.status !== "ready" || !plan.task) break;
-
-    const preparation = persistDownloadTaskPreparationFromPlan(plan);
-
-    if (plan.status === "ready" && plan.task.provider === "openlist" && plan.task.resourceType === "magnet") {
-      const fullMagnetUrl = plan.task.comicResourceId
-        ? getDb().select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, plan.task.comicResourceId)).get()?.url ?? ""
-        : "";
-      const savePath = "/115Open/Temp";
-      const result = await submitOpenListOfflineDownload(fullMagnetUrl, savePath, "115 Open");
-      const now = new Date().toISOString();
-
-      if (result.ok) {
-        getDb().update(downloadTasks).set({
-          status: "submitted",
-          remoteTaskId: result.taskId,
-          remotePath: savePath,
-          updatedAt: now,
-        }).where(eq(downloadTasks.id, plan.task.id)).run();
-        processed++;
-        reasons.push(`${plan.task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`);
-      } else {
-        markDownloadTaskFinished(plan.task.id, "failed", result.message, now);
-        processed++;
-        reasons.push(`${plan.task.comicTitle}: ${result.message}`);
-      }
-      continue;
-    }
-
-    if (plan.status === "ready" && plan.task.provider === "openlist" && plan.task.resourceType === "openlist") {
-      const preparation2 = preparation;
-      if (preparation2?.status === "ready") {
-        const result2 = await submitOpenListOfflineDownload(
-          preparation2.remotePath ?? "",
-          "/115Open/Temp",
-          "115 Open",
-        );
-        const now2 = new Date().toISOString();
-        if (result2.ok) {
-          getDb().update(downloadTasks).set({
-            status: "submitted",
-            remoteTaskId: result2.taskId,
-            remotePath: "/115Open/Temp",
-            updatedAt: now2,
-          }).where(eq(downloadTasks.id, plan.task.id)).run();
-          processed++;
-          reasons.push(`${plan.task.comicTitle}: 已提交到 OpenList (任务: ${result2.taskId})`);
-        } else {
-          markDownloadTaskFinished(plan.task.id, "failed", result2.message, now2);
-          processed++;
-          reasons.push(`${plan.task.comicTitle}: ${result2.message}`);
-        }
-      }
-      continue;
-    }
-
-    reasons.push(`${plan.task.comicTitle}: ${plan.reason}`);
-    break;
+    const msg = await dispatchTaskNow(plan.task.id);
+    if (msg) { processed++; reasons.push(msg); }
   }
 
   if (processed > 0) {
@@ -1003,6 +917,94 @@ export async function runOfflineWorkerTick(): Promise<DownloadWorkerTickResult> 
     plan,
     transfer: null,
   };
+}
+
+export async function dispatchTaskNow(taskId: string): Promise<string | null> {
+  bootstrapDatabase();
+
+  const task = getDownloadTaskById(taskId);
+  if (!task || task.status !== "queued") return null;
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const settings = await getRuntimeSettings();
+
+  if (task.taskType === "offline" && task.provider === "openlist" && task.resourceType === "magnet") {
+    const uri = task.comicResourceId
+      ? db.select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, task.comicResourceId)).get()?.url ?? ""
+      : "";
+    const result = await submitOpenListOfflineDownload(uri, "/115Open/Temp", "115 Open");
+    if (result.ok) {
+      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: "/115Open/Temp", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+      return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
+    }
+    const msg = result.message || "提交到 OpenList 失败";
+    markDownloadTaskFinished(task.id, "failed", msg, now);
+    return `${task.comicTitle}: ${msg}`;
+  }
+
+  if (task.taskType === "offline" && task.provider === "openlist" && task.resourceType === "openlist") {
+    const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
+    if (!resource) {
+      markDownloadTaskFinished(task.id, "failed", "缺少资源记录。", now);
+      return `${task.comicTitle}: 缺少资源记录`;
+    }
+    const adapter = getDownloadProviderAdapter(task.provider);
+    const readiness = adapter ? await adapter.prepare({ task, resource, settings }) : null;
+    if (!readiness?.canDispatch || !readiness.details?.remotePath) {
+      markDownloadTaskFinished(task.id, "failed", readiness?.reason || "资源准备失败。", now);
+      return `${task.comicTitle}: ${readiness?.reason || "资源准备失败"}`;
+    }
+    const remotePath = String(readiness.details.remotePath);
+    const result = await submitOpenListOfflineDownload(remotePath, "/115Open/Temp", "115 Open");
+    if (result.ok) {
+      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: "/115Open/Temp", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+      return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
+    }
+    const msg = result.message || "提交到 OpenList 失败";
+    markDownloadTaskFinished(task.id, "failed", msg, now);
+    return `${task.comicTitle}: ${msg}`;
+  }
+
+  if (task.taskType === "transfer" && task.provider === "openlist" && task.resourceType === "openlist") {
+    const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
+    if (!resource) {
+      markDownloadTaskFinished(task.id, "failed", "缺少资源记录。", now);
+      return `${task.comicTitle}: 缺少资源记录`;
+    }
+    const adapter = getDownloadProviderAdapter(task.provider);
+    const readiness = adapter ? await adapter.prepare({ task, resource, settings }) : null;
+    if (!readiness?.canDispatch || !readiness.details?.remotePath) {
+      markDownloadTaskFinished(task.id, "failed", readiness?.reason || "资源准备失败。", now);
+      return `${task.comicTitle}: ${readiness?.reason || "资源准备失败"}`;
+    }
+    const prep: DownloadTaskPreparationRecord = {
+      id: randomUUID(), downloadTaskId: task.id, comicResourceId: task.comicResourceId || null,
+      provider: task.provider, status: "ready", remotePath: String(readiness.details.remotePath),
+      remoteName: readiness.details.remoteName ? String(readiness.details.remoteName) : null,
+      sizeBytes: typeof readiness.details.sizeBytes === "number" ? readiness.details.sizeBytes : null,
+      remoteProvider: null, rawUrlAvailable: true, errorMessage: null,
+      preparedAt: now, createdAt: now, updatedAt: now,
+    };
+    db.update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+    const transfer = await downloadPreparedOpenListTask(task, prep);
+    return transfer.status === "completed" ? `${task.comicTitle}: 已下载` : `${task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`;
+  }
+
+  if (task.taskType === "transfer" && task.provider === "aria2") {
+    const uri = task.comicResourceId
+      ? db.select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, task.comicResourceId)).get()?.url ?? ""
+      : "";
+    if (!uri) {
+      markDownloadTaskFinished(task.id, "failed", "缺少资源下载地址。", now);
+      return `${task.comicTitle}: 缺少资源下载地址`;
+    }
+    db.update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+    const transfer = await downloadAria2Task(task, uri, settings);
+    return transfer.status === "completed" ? `${task.comicTitle}: 已下载` : `${task.comicTitle}: ${transfer.errorMessage ?? "下载失败"}`;
+  }
+
+  return null;
 }
 
 export async function listDownloadableResources(limit = 100): Promise<DownloadableResourceRecord[]> {
@@ -1127,8 +1129,10 @@ export async function retryDownloadTask(taskId: string): Promise<UpdateDownloadT
     status: updatedTask.status,
   });
 
+  await dispatchTaskNow(id);
+
   return {
-    task: updatedTask,
+    task: getDownloadTaskById(id) ?? updatedTask,
   };
 }
 
