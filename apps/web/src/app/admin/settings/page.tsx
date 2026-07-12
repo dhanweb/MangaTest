@@ -37,9 +37,9 @@ export default function SettingsPage() {
   const [openListCheckResult, setOpenListCheckResult] = useState<OpenListConnectionCheckResult | null>(null);
   const [aria2CheckResult, setAria2CheckResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [isCheckingAria2, setIsCheckingAria2] = useState(false);
-  const [openListLoginUsername, setOpenListLoginUsername] = useState("");
-  const [openListLoginPassword, setOpenListLoginPassword] = useState("");
-  const [openListLoginOtp, setOpenListLoginOtp] = useState("");
+  const [openListLoginUsername, setOpenListLoginUsername] = useState(() => localStorage.getItem("openlist_login_username") ?? "");
+  const [openListLoginPassword, setOpenListLoginPassword] = useState(() => localStorage.getItem("openlist_login_password") ?? "");
+  const [openListLoginOtp, setOpenListLoginOtp] = useState(() => localStorage.getItem("openlist_login_otp") ?? "");
   const [savedMessage, setSavedMessage] = useState("");
   const [saveError, setSaveError] = useState("");
   const [backupMessage, setBackupMessage] = useState("");
@@ -68,6 +68,16 @@ export default function SettingsPage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem("openlist_login_username", openListLoginUsername);
+  }, [openListLoginUsername]);
+  useEffect(() => {
+    localStorage.setItem("openlist_login_password", openListLoginPassword);
+  }, [openListLoginPassword]);
+  useEffect(() => {
+    localStorage.setItem("openlist_login_otp", openListLoginOtp);
+  }, [openListLoginOtp]);
 
   async function saveSettings() {
     setIsSaving(true);
