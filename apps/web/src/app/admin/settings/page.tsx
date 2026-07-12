@@ -176,7 +176,6 @@ export default function SettingsPage() {
     try {
       const rawUrl = runtimeSettings.openlistBaseUrl.trim();
       const baseUrl = rawUrl && !/^https?:\/\//i.test(rawUrl) ? `http://${rawUrl}` : rawUrl;
-      const hasLogin = openListLoginUsername.trim() && openListLoginPassword.trim();
 
       if (!baseUrl) {
         setOpenListCheckResult({
@@ -197,44 +196,32 @@ export default function SettingsPage() {
       }
 
       let token = runtimeSettings.openlistToken.trim();
+      const hasLogin = openListLoginUsername.trim() && openListLoginPassword.trim();
 
-      if (hasLogin) {
-        const loginRes = await fetch("/api/settings/openlist/login", {
+      // Try with existing token first
+      if (token) {
+        const checkRes = await fetch("/api/settings/openlist/check", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ baseUrl, username: openListLoginUsername, password: openListLoginPassword, otpCode: openListLoginOtp || null }),
+          body: JSON.stringify({ baseUrl, token, enabled: runtimeSettings.openlistEnabled }),
         });
-        const loginPayload = (await loginRes.json()) as { result?: PublicOpenListLoginResult; settings?: RuntimeSettings; error?: string };
+        const checkPayload = (await checkRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
 
-        if (!loginPayload.result || !loginPayload.result.ok) {
-          const ls = loginPayload.result?.status;
-          const ms: OpenListConnectionStatus = ls === "missing_settings" ? "missing_settings" : ls === "unauthorized" ? "unauthorized" : ls === "invalid_response" ? "invalid_response" : "unreachable";
-          setOpenListCheckResult({
-            ok: false, status: ms, checkedAt: new Date().toISOString(),
-            baseUrl, tokenConfigured: false,
-            message: loginPayload.result?.message ?? loginPayload.error ?? "登录失败。", publicApi: null, accountApi: null,
-          });
+        if (checkPayload.result?.ok) {
+          setOpenListCheckResult(checkPayload.result);
+          await saveSettings();
           return;
         }
 
-        if (loginPayload.settings) {
-          const s = loginPayload.settings;
-          const loginUpdated: RuntimeSettings = {
-            ...s,
-            openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
-              ? `http://${s.openlistBaseUrl.trim()}`
-              : s.openlistBaseUrl.trim(),
-            aria2RpcUrl: s.aria2RpcUrl.trim() && !/^https?:\/\//i.test(s.aria2RpcUrl.trim())
-              ? `http://${s.aria2RpcUrl.trim()}`
-              : s.aria2RpcUrl.trim(),
-          };
-          setRuntimeSettings(loginUpdated);
-          updateDirtyBaseline(loginUpdated);
-          token = s.openlistToken ?? "";
+        // Token expired — try re-login if we have credentials
+        const isUnauthorized = checkPayload.result?.status === "unauthorized";
+        if (!isUnauthorized || !hasLogin) {
+          setOpenListCheckResult(checkPayload.result!);
+          return;
         }
       }
 
-      if (!token) {
+      if (!hasLogin) {
         setOpenListCheckResult({
           ok: false, status: "missing_settings", checkedAt: new Date().toISOString(),
           baseUrl, tokenConfigured: false,
@@ -243,19 +230,53 @@ export default function SettingsPage() {
         return;
       }
 
-      const checkRes = await fetch("/api/settings/openlist/check", {
+      // No valid token — login to get one
+      const loginRes = await fetch("/api/settings/openlist/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseUrl, username: openListLoginUsername, password: openListLoginPassword, otpCode: openListLoginOtp || null }),
+      });
+      const loginPayload = (await loginRes.json()) as { result?: PublicOpenListLoginResult; settings?: RuntimeSettings; error?: string };
+
+      if (!loginPayload.result?.ok || !loginPayload.settings) {
+        const ls = loginPayload.result?.status;
+        const ms: OpenListConnectionStatus = ls === "missing_settings" ? "missing_settings" : ls === "unauthorized" ? "unauthorized" : ls === "invalid_response" ? "invalid_response" : "unreachable";
+        setOpenListCheckResult({
+          ok: false, status: ms, checkedAt: new Date().toISOString(),
+          baseUrl, tokenConfigured: false,
+          message: loginPayload.result?.message ?? loginPayload.error ?? "登录失败。", publicApi: null, accountApi: null,
+        });
+        return;
+      }
+
+      const s = loginPayload.settings;
+      const loginUpdated: RuntimeSettings = {
+        ...s,
+        openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
+          ? `http://${s.openlistBaseUrl.trim()}`
+          : s.openlistBaseUrl.trim(),
+        aria2RpcUrl: s.aria2RpcUrl.trim() && !/^https?:\/\//i.test(s.aria2RpcUrl.trim())
+          ? `http://${s.aria2RpcUrl.trim()}`
+          : s.aria2RpcUrl.trim(),
+      };
+      setRuntimeSettings(loginUpdated);
+      updateDirtyBaseline(loginUpdated);
+      token = s.openlistToken ?? "";
+
+      // Now check with the new token
+      const retryRes = await fetch("/api/settings/openlist/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ baseUrl, token, enabled: runtimeSettings.openlistEnabled }),
       });
-      const checkPayload = (await checkRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
+      const retryPayload = (await retryRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
 
-      if (!checkPayload.result) {
-        throw new Error(checkPayload.error ?? "校验失败。");
+      if (retryPayload.result) {
+        setOpenListCheckResult(retryPayload.result);
+        if (retryPayload.result.ok) await saveSettings();
+      } else {
+        throw new Error(retryPayload.error ?? "登录成功但校验失败。");
       }
-
-      setOpenListCheckResult(checkPayload.result);
-      if (checkPayload.result.ok) await saveSettings();
     } catch (error) {
       setOpenListCheckResult({
         ok: false, status: "unreachable", checkedAt: new Date().toISOString(),
@@ -390,7 +411,7 @@ export default function SettingsPage() {
       </Box>
 
       <Box style={{
-        position: "fixed", bottom: 32, right: 32, zIndex: 999,
+        position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 999,
         display: "flex", alignItems: "center", gap: 14,
         padding: "12px 24px",
         borderRadius: 12,
@@ -718,13 +739,18 @@ function DownloadSettings({
           </Group>
         </SettingsRow>
         <SettingsRow label="访问 token" note="直接填入已有的 token，或通过下方账号登录自动获取。">
-          <AppInput
-            type="password"
-            value={settings.openlistToken}
-            onChange={(event) => onSettingsChange({ ...settings, openlistToken: event.currentTarget.value })}
-            placeholder="未配置"
-            style={{ width: 320 }}
-          />
+          <Group gap="xs" wrap="nowrap" align="center">
+            {settings.openlistToken.trim() ? (
+              <Box component="span" style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", flexShrink: 0, backgroundColor: "#00894a" }} />
+            ) : null}
+            <AppInput
+              type="password"
+              value={settings.openlistToken}
+              onChange={(event) => onSettingsChange({ ...settings, openlistToken: event.currentTarget.value })}
+              placeholder="未配置"
+              style={{ width: 280 }}
+            />
+          </Group>
         </SettingsRow>
         <SettingsRow label="账号登录" note="填写用户名、密码和 OTP，点击下方按钮自动登录获取 token 并校验。">
           <Stack gap={8} style={{ width: 320 }}>
