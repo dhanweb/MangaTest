@@ -77,15 +77,26 @@ export function closeAdminTab(cache: AdminTabCache, tabId: string, now = Date.no
     return cache;
   }
 
+  // 只剩后台首页时不能关；其它页签即使只剩一个也可以关，并回退到首页
   if (cache.tabs.length <= 1) {
     return closingTab.id === DEFAULT_ADMIN_TAB_ID ? cache : createInitialAdminTabCache(now);
   }
 
+  // 后台首页在仍有其它页签时可关；不可关闭页签除外
   if (!closingTab.closeable && closingTab.id !== DEFAULT_ADMIN_TAB_ID) {
     return cache;
   }
 
+  if (closingTab.id === DEFAULT_ADMIN_TAB_ID && cache.tabs.every((tab) => tab.id === DEFAULT_ADMIN_TAB_ID)) {
+    return cache;
+  }
+
   const tabs = cache.tabs.filter((tab) => tab.id !== tabId);
+  // 若关掉后没有任何页签（理论上不会），回退首页
+  if (tabs.length === 0) {
+    return createInitialAdminTabCache(now);
+  }
+
   const fallback = tabs[Math.max(0, closingIndex - 1)] ?? tabs[0];
 
   return {
@@ -95,24 +106,46 @@ export function closeAdminTab(cache: AdminTabCache, tabId: string, now = Date.no
   };
 }
 
+/** 关闭全部页签并回到后台首页。 */
+export function closeAllTabs(_cache: AdminTabCache, now = Date.now()): AdminTabCache {
+  return createInitialAdminTabCache(now);
+}
+
 export function closeOtherTabs(cache: AdminTabCache, tabId: string, now = Date.now()): AdminTabCache {
   const tab = cache.tabs.find((t) => t.id === tabId);
-  if (!tab) return cache;
-  const keepIds = new Set([DEFAULT_ADMIN_TAB_ID, tabId]);
-  const activeTabId = cache.activeTabId === tabId ? tabId : cache.activeTabId;
+  if (!tab) {
+    return cache;
+  }
+
+  // 只保留目标页签 + 不可关闭页签（首页与其它页签一视同仁，可被关掉）
+  const tabs = cache.tabs.filter((t) => t.id === tabId || !t.closeable);
+  if (!tabs.some((t) => t.id === tabId)) {
+    return cache;
+  }
+
   return {
     ...cache,
-    activeTabId,
-    tabs: cache.tabs.filter((t) => keepIds.has(t.id) || !t.closeable).map((t) => (t.id === activeTabId ? { ...t, lastActiveAt: now } : t)),
+    activeTabId: tabId,
+    tabs: tabs.map((t) => (t.id === tabId ? { ...t, lastActiveAt: now } : t)),
   };
 }
 
 export function closeTabsToRight(cache: AdminTabCache, tabId: string, now = Date.now()): AdminTabCache {
   const idx = cache.tabs.findIndex((t) => t.id === tabId);
-  if (idx < 0) return cache;
+  if (idx < 0) {
+    return cache;
+  }
+
+  // 右侧可关闭页签全部关掉（含后台首页）；不可关闭页签保留
+  const tabs = cache.tabs.filter((t, i) => i <= idx || !t.closeable);
+  const activeStillOpen = tabs.some((t) => t.id === cache.activeTabId);
+  // 若当前激活页签被关掉，回落到右键所在页签
+  const activeTabId = activeStillOpen ? cache.activeTabId : tabId;
+
   return {
     ...cache,
-    tabs: cache.tabs.filter((t, i) => i <= idx || !t.closeable || t.id === DEFAULT_ADMIN_TAB_ID).map((t) => (t.id === cache.activeTabId ? { ...t, lastActiveAt: now } : t)),
+    activeTabId,
+    tabs: tabs.map((t) => (t.id === activeTabId ? { ...t, lastActiveAt: now } : t)),
   };
 }
 

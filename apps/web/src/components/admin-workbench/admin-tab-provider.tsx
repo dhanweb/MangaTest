@@ -18,13 +18,14 @@ import { loadAdminTabCache, saveAdminTabCache } from "./admin-tab-storage";
 import {
   activateAdminTab,
   closeAdminTab,
+  closeAllTabs,
   closeOtherTabs,
   closeTabsToRight,
   createInitialAdminTabCache,
   openAdminTab,
   renameAdminTab,
 } from "./admin-tab-state";
-import { ADMIN_TAB_STATE_PREFIX, type AdminTab, type AdminTabCache } from "./admin-tab-types";
+import { ADMIN_TAB_STATE_PREFIX, DEFAULT_ADMIN_TAB_ID, type AdminTab, type AdminTabCache } from "./admin-tab-types";
 
 interface AdminTabContextValue {
   activeTabId: string;
@@ -34,6 +35,7 @@ interface AdminTabContextValue {
   closeTab(tabId: string): void;
   closeOtherTabs(tabId: string): void;
   closeTabsToRight(tabId: string): void;
+  closeAllTabs(): void;
   refreshActiveTab(): void;
   setCurrentTabTitle(title: string): void;
   setTabTitle(tabId: string, title: string): void;
@@ -128,27 +130,72 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
     [router],
   );
 
-  const handleCloseOtherTabs = useCallback((tabId: string) => {
-    setCache((current) => {
-      const next = closeOtherTabs(current, tabId);
-      if (next.activeTabId !== current.activeTabId) {
-        const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
-        if (nextTab) startTransition(() => router.push(nextTab.href));
-      }
-      return next;
-    });
-  }, [router]);
+  const handleCloseOtherTabs = useCallback(
+    (tabId: string) => {
+      const previous = cacheRef.current;
+      const next = closeOtherTabs(previous, tabId);
 
-  const handleCloseTabsToRight = useCallback((tabId: string) => {
-    setCache((current) => {
-      const next = closeTabsToRight(current, tabId);
-      if (next.activeTabId !== current.activeTabId) {
-        const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
-        if (nextTab) startTransition(() => router.push(nextTab.href));
+      if (next === previous) {
+        return;
       }
-      return next;
-    });
-  }, [router]);
+
+      setCache(next);
+
+      for (const tab of previous.tabs) {
+        if (!next.tabs.some((t) => t.id === tab.id)) {
+          clearStoredTabState(tab.id);
+        }
+      }
+
+      const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
+      if (nextTab && nextTab.href !== currentHref) {
+        startTransition(() => router.push(nextTab.href));
+      }
+    },
+    [currentHref, router],
+  );
+
+  const handleCloseTabsToRight = useCallback(
+    (tabId: string) => {
+      const previous = cacheRef.current;
+      const next = closeTabsToRight(previous, tabId);
+
+      if (next === previous) {
+        return;
+      }
+
+      setCache(next);
+
+      for (const tab of previous.tabs) {
+        if (!next.tabs.some((t) => t.id === tab.id)) {
+          clearStoredTabState(tab.id);
+        }
+      }
+
+      const nextTab = next.tabs.find((t) => t.id === next.activeTabId);
+      if (nextTab && nextTab.href !== currentHref) {
+        startTransition(() => router.push(nextTab.href));
+      }
+    },
+    [currentHref, router],
+  );
+
+  const handleCloseAllTabs = useCallback(() => {
+    const previous = cacheRef.current;
+    const next = closeAllTabs(previous);
+
+    setCache(next);
+
+    for (const tab of previous.tabs) {
+      if (tab.id !== DEFAULT_ADMIN_TAB_ID) {
+        clearStoredTabState(tab.id);
+      }
+    }
+
+    if (currentHref !== DEFAULT_ADMIN_TAB_ID) {
+      startTransition(() => router.push(DEFAULT_ADMIN_TAB_ID));
+    }
+  }, [currentHref, router]);
 
   const refreshActiveTab = useCallback(() => {
     router.refresh();
@@ -171,11 +218,24 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
       closeTab,
       closeOtherTabs: handleCloseOtherTabs,
       closeTabsToRight: handleCloseTabsToRight,
+      closeAllTabs: handleCloseAllTabs,
       refreshActiveTab,
       setCurrentTabTitle,
       setTabTitle,
     }),
-    [activateTab, cache.activeTabId, cache.tabs, closeTab, handleCloseOtherTabs, handleCloseTabsToRight, openTab, refreshActiveTab, setCurrentTabTitle, setTabTitle],
+    [
+      activateTab,
+      cache.activeTabId,
+      cache.tabs,
+      closeTab,
+      handleCloseAllTabs,
+      handleCloseOtherTabs,
+      handleCloseTabsToRight,
+      openTab,
+      refreshActiveTab,
+      setCurrentTabTitle,
+      setTabTitle,
+    ],
   );
 
   return <AdminTabContext.Provider value={value}>{children}</AdminTabContext.Provider>;

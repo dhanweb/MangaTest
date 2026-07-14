@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_ADMIN_TAB_ID, type AdminTabCache } from "./admin-tab-types";
-import { activateAdminTab, closeAdminTab, createInitialAdminTabCache, openAdminTab } from "./admin-tab-state";
+import {
+  activateAdminTab,
+  closeAdminTab,
+  closeAllTabs,
+  closeOtherTabs,
+  closeTabsToRight,
+  createInitialAdminTabCache,
+  openAdminTab,
+} from "./admin-tab-state";
 
 describe("admin tab state", () => {
   it("starts with a dashboard tab", () => {
@@ -75,5 +83,69 @@ describe("admin tab state", () => {
     expect(cache.tabs.some((tab) => tab.id === "/admin")).toBe(false);
     expect(cache.tabs.some((tab) => tab.id === "/admin/comics/0")).toBe(false);
     expect(cache.activeTabId).toBe("/admin/comics/13");
+  });
+
+  it("closes other tabs including dashboard and activates the retained tab", () => {
+    const cache = ["/admin/paths", "/admin/comics", "/admin/tags"].reduce(
+      (current, href, index) => openAdminTab(current, href, undefined, 200 + index),
+      createInitialAdminTabCache(100),
+    );
+    // 当前激活的是最后打开的 tags
+    expect(cache.activeTabId).toBe("/admin/tags");
+
+    const closed = closeOtherTabs(cache, "/admin/comics", 500);
+
+    expect(closed.activeTabId).toBe("/admin/comics");
+    // 首页不再被强制保留
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["/admin/comics"]);
+    expect(closed.tabs.find((tab) => tab.id === "/admin/comics")?.lastActiveAt).toBe(500);
+  });
+
+  it("closes tabs to the right including dashboard and falls back when active tab is removed", () => {
+    const cache = ["/admin/paths", "/admin/comics", "/admin/tags"].reduce(
+      (current, href, index) => openAdminTab(current, href, undefined, 200 + index),
+      createInitialAdminTabCache(100),
+    );
+    expect(cache.activeTabId).toBe("/admin/tags");
+
+    const closed = closeTabsToRight(cache, "/admin/paths", 600);
+
+    expect(closed.activeTabId).toBe("/admin/paths");
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["/admin", "/admin/paths"]);
+  });
+
+  it("can close the dashboard tab when other tabs remain", () => {
+    const cache = openAdminTab(createInitialAdminTabCache(100), "/admin/downloads", undefined, 200);
+    const closed = closeAdminTab(cache, DEFAULT_ADMIN_TAB_ID, 300);
+
+    expect(closed.tabs.map((tab) => tab.id)).toEqual(["/admin/downloads"]);
+    expect(closed.activeTabId).toBe("/admin/downloads");
+  });
+
+  it("closes all tabs and returns to dashboard home", () => {
+    const cache = ["/admin/paths", "/admin/comics"].reduce(
+      (current, href, index) => openAdminTab(current, href, undefined, 200 + index),
+      createInitialAdminTabCache(100),
+    );
+
+    const closed = closeAllTabs(cache, 900);
+
+    expect(closed.activeTabId).toBe(DEFAULT_ADMIN_TAB_ID);
+    expect(closed.tabs.map((tab) => tab.id)).toEqual([DEFAULT_ADMIN_TAB_ID]);
+    expect(closed.tabs[0]?.title).toBe("后台首页");
+  });
+
+  it("allows closing the only remaining non-home tab back to dashboard", () => {
+    const withComics = openAdminTab(createInitialAdminTabCache(100), "/admin/comics", undefined, 200);
+    const onlyComics = {
+      ...withComics,
+      activeTabId: "/admin/comics",
+      tabs: withComics.tabs.filter((tab) => tab.id === "/admin/comics"),
+    };
+
+    const closed = closeAdminTab(onlyComics, "/admin/comics", 300);
+
+    expect(closed.activeTabId).toBe(DEFAULT_ADMIN_TAB_ID);
+    expect(closed.tabs.map((tab) => tab.id)).toEqual([DEFAULT_ADMIN_TAB_ID]);
   });
 });
