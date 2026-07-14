@@ -4,6 +4,7 @@ import { inspectOpenListResource, listOpenListDirectory } from "./connection";
 
 export {
   checkOpenListConnection,
+  ensureOpenListToken,
   hashOpenListPassword,
   inspectOpenListResource,
   listOpenListDirectory,
@@ -14,6 +15,7 @@ export {
   submitOpenListOfflineDownload,
 } from "./connection";
 export type {
+  OpenListAuthRefreshResult,
   OpenListConnectionCheckResult,
   OpenListConnectionStatus,
   OpenListDownloadLinkResult,
@@ -41,9 +43,10 @@ export const openlistProviderAdapter: DownloadProviderAdapter = {
       return { canDispatch: false, code: "provider_disabled", reason: "OpenList provider 尚未在设置中启用。" };
     }
 
+    const hasSavedLogin = Boolean(settings.openlistUsername.trim() && settings.openlistPassword);
     const missingSettings = [
       settings.openlistBaseUrl.trim() ? null : "openlistBaseUrl",
-      settings.openlistToken.trim() ? null : "openlistToken",
+      settings.openlistToken.trim() || hasSavedLogin ? null : "openlistToken",
     ].filter((v): v is string => Boolean(v));
 
     if (missingSettings.length > 0) {

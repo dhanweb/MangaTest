@@ -6,6 +6,7 @@ import type { DownloadProviderPrepareInput } from "../types";
 
 import {
   checkOpenListConnection,
+  ensureOpenListToken,
   hashOpenListPassword,
   inspectOpenListResource,
   listOpenListDirectory,
@@ -16,18 +17,23 @@ import {
 import { openlistProviderAdapter } from "./index";
 
 describe("checkOpenListConnection", () => {
-  it("does not call OpenList when provider is disabled", async () => {
+  it("checks the connection even when the provider is disabled", async () => {
     const requests: string[] = [];
     const result = await checkOpenListConnection({
       fetchImpl: async (input) => {
         requests.push(String(input));
         return Response.json({ code: 200 });
       },
-      settings: runtimeSettings({ openlistEnabled: false }),
+      settings: runtimeSettings({
+        openlistEnabled: false,
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistToken: "configured-token",
+      }),
     });
 
-    expect(result.status).toBe("disabled");
-    expect(requests).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("reachable");
+    expect(requests).toHaveLength(2);
   });
 
   it("requires base URL and token before probing", async () => {
@@ -279,6 +285,206 @@ describe("resolveOpenListDownloadLink", () => {
       type: 4,
     });
   });
+
+  it("flattens OpenList http.Header array values and joins relative link URLs", async () => {
+    const requests: string[] = [];
+    const result = await resolveOpenListDownloadLink("/115Open/Temp/Comic.cbz", {
+      settings: runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistEnabled: true,
+        openlistToken: "secret-openlist-token",
+      }),
+      fetchImpl: async (input) => {
+        const url = String(input);
+        requests.push(url);
+
+        if (url.endsWith("/api/fs/link")) {
+          return Response.json({
+            code: 200,
+            data: {
+              // Alist/OpenList serializes http.Header as map[string][]string
+              header: {
+                "User-Agent": ["Mozilla/5.0 OpenList-115"],
+                Referer: ["https://115.com/"],
+                empty: [],
+              },
+              url: "/d/115Open/Temp/Comic.cbz?sign=secret",
+            },
+            message: "success",
+          });
+        }
+
+        return Response.json({
+          code: 200,
+          data: {
+            is_dir: false,
+            name: "Comic.cbz",
+            provider: "115 Open",
+            raw_url: "",
+            size: 1024,
+            type: 4,
+          },
+          message: "success",
+        });
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe("file_ready");
+    expect(result.rawUrl).toBe("http://127.0.0.1:5244/d/115Open/Temp/Comic.cbz?sign=secret");
+    expect(result.headers).toEqual({
+      "User-Agent": "Mozilla/5.0 OpenList-115",
+      Referer: "https://115.com/",
+    });
+    expect(requests.some((url) => url.endsWith("/api/fs/get"))).toBe(true);
+    expect(requests.some((url) => url.endsWith("/api/fs/link"))).toBe(true);
+  });
+});
+
+describe("normalizeOpenListRequestHeaders", () => {
+  it("accepts string and string[] header values", async () => {
+    const { normalizeOpenListRequestHeaders } = await import("./connection");
+
+    expect(
+      normalizeOpenListRequestHeaders({
+        "User-Agent": ["Mozilla/5.0"],
+        Referer: "https://example.test/",
+        "X-Empty": [],
+        "X-Number": 1,
+      }),
+    ).toEqual({
+      "User-Agent": "Mozilla/5.0",
+      Referer: "https://example.test/",
+    });
+  });
+});
+
+describe("ensureOpenListToken / auto re-login", () => {
+  it("returns existing token without calling login when forceRefresh is false", async () => {
+    const result = await ensureOpenListToken(
+      runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistToken: "still-valid-token",
+        openlistUsername: "admin",
+        openlistPassword: "secret",
+      }),
+      {
+        forceRefresh: false,
+        fetchImpl: async () => {
+          throw new Error("login should not be called");
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.tokenRefreshed).toBe(false);
+    expect(result.settings.openlistToken).toBe("still-valid-token");
+  });
+
+  it("fails clearly when token expired and credentials are missing", async () => {
+    const result = await ensureOpenListToken(
+      runtimeSettings({
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistToken: "expired",
+        openlistUsername: "",
+        openlistPassword: "",
+      }),
+      { forceRefresh: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.tokenRefreshed).toBe(false);
+    expect(result.message).toContain("未保存账号密码");
+  });
+
+  it("re-logs in and retries download link when OpenList returns unauthorized", async () => {
+    const { randomUUID } = await import("node:crypto");
+    const { mkdir } = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const workspace = path.join(os.tmpdir(), `mangatest-openlist-relogin-${randomUUID()}`);
+    const dbPath = path.join(workspace, "test.sqlite");
+    await mkdir(workspace, { recursive: true });
+    process.env.MANGATEST_DB_PATH = dbPath;
+
+    try {
+      const { bootstrapDatabase } = await import("@/modules/core/db");
+      const { saveRuntimeSettings } = await import("@/modules/core/settings");
+      bootstrapDatabase();
+      await saveRuntimeSettings({
+        openlistEnabled: true,
+        openlistBaseUrl: "http://127.0.0.1:5244",
+        openlistToken: "expired-token",
+        openlistUsername: "admin",
+        openlistPassword: "plain-password",
+      });
+
+      let getCalls = 0;
+      const result = await resolveOpenListDownloadLink("/Library/Comic.cbz", {
+        settings: runtimeSettings({
+          openlistEnabled: true,
+          openlistBaseUrl: "http://127.0.0.1:5244",
+          openlistToken: "expired-token",
+          openlistUsername: "admin",
+          openlistPassword: "plain-password",
+        }),
+        fetchImpl: async (input, init) => {
+          const url = String(input);
+
+          if (url.endsWith("/api/auth/login/hash")) {
+            return Response.json({ code: 200, data: { token: "fresh-token" }, message: "success" });
+          }
+
+          if (url.endsWith("/api/fs/get")) {
+            getCalls += 1;
+            const auth = new Headers(init?.headers).get("Authorization");
+            if (auth === "expired-token") {
+              return Response.json({ code: 401, message: "token is expired" }, { status: 401 });
+            }
+            if (auth === "fresh-token") {
+              return Response.json({
+                code: 200,
+                data: {
+                  is_dir: false,
+                  name: "Comic.cbz",
+                  provider: "Local",
+                  raw_url: "https://private.example/Comic.cbz?sign=secret",
+                  size: 1024,
+                  type: 4,
+                },
+                message: "success",
+              });
+            }
+          }
+
+          if (url.endsWith("/api/fs/link")) {
+            return Response.json({
+              code: 200,
+              data: {
+                url: "https://private.example/Comic.cbz?sign=secret",
+                header: { "User-Agent": ["Mozilla/5.0"] },
+              },
+              message: "success",
+            });
+          }
+
+          return Response.json({ code: 500, message: `unexpected ${url}` }, { status: 500 });
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.status).toBe("file_ready");
+      expect(result.rawUrl).toBe("https://private.example/Comic.cbz?sign=secret");
+      expect(result.headers["User-Agent"]).toBe("Mozilla/5.0");
+      expect(getCalls).toBeGreaterThanOrEqual(2);
+
+      const { getRuntimeSettings } = await import("@/modules/core/settings");
+      const saved = await getRuntimeSettings();
+      expect(saved.openlistToken).toBe("fresh-token");
+    } finally {
+      delete process.env.MANGATEST_DB_PATH;
+    }
+  });
 });
 
 describe("listOpenListDirectory", () => {
@@ -455,6 +661,8 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     openlistBaseUrl: "",
     openlistEnabled: false,
     openlistToken: "",
+    openlistUsername: "",
+    openlistPassword: "",
     readerImmersiveDefault: false,
     readerPreloadAheadPages: 2,
     readerPreloadEnabled: true,

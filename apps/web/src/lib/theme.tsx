@@ -3,6 +3,8 @@
 import { createTheme, MantineProvider } from "@mantine/core";
 import type { ReactNode } from "react";
 
+import { Toaster } from "@/components/ui/toast";
+
 const theme = createTheme({
   colors: {
     pink: [
@@ -90,6 +92,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
       {children}
+      <Toaster />
     </MantineProvider>
   );
 }

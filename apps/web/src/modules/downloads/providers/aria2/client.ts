@@ -51,6 +51,12 @@ export interface Aria2DownloadOptions {
   dir: string;
   out?: string;
   taskId?: string;
+  headers?: Record<string, string>;
+  /**
+   * OpenList/CDN 签名链接常拒绝多 Range 分片请求（会返回 403）。
+   * 传 true 时使用单连接下载。
+   */
+  singleConnection?: boolean;
 }
 
 export type Aria2DownloadStatus = "active" | "waiting" | "paused" | "error" | "complete" | "removed";
@@ -82,13 +88,14 @@ const POLL_INTERVAL_MS = 2000;
 const MAX_POLL_TIME_MS = 3_600_000;
 
 export async function downloadWithAria2(options: Aria2DownloadOptions): Promise<Aria2DownloadResult> {
-  const { rpcUrl, rpcToken, uri, dir, out, taskId } = options;
+  const { rpcUrl, rpcToken, uri, dir, out, taskId, headers, singleConnection } = options;
+  const useSingleConnection = Boolean(singleConnection) || Boolean(headers && Object.keys(headers).length > 0);
 
-  const addParams: Record<string, string> = {
+  const addParams: Record<string, string | string[]> = {
     dir,
     "continue": "true",
-    "max-connection-per-server": "16",
-    "split": "16",
+    "max-connection-per-server": useSingleConnection ? "1" : "16",
+    "split": useSingleConnection ? "1" : "16",
     "min-split-size": "1M",
     "max-tries": "0",
     "retry-wait": "5",
@@ -102,6 +109,11 @@ export async function downloadWithAria2(options: Aria2DownloadOptions): Promise<
 
   if (uri.startsWith("magnet:")) {
     addParams["bt-save-metadata"] = "true";
+  }
+
+  if (headers && Object.keys(headers).length > 0) {
+    // aria2 要求 header 为 "Name: value" 字符串数组
+    addParams.header = Object.entries(headers).map(([k, v]) => `${k}: ${v}`);
   }
 
   try {

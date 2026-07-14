@@ -5,6 +5,7 @@ import { Bookmark, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { AppBadge, AppButton, AppInput, AppSelect, AppSwitch, AppTextarea, AppTitle } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type {
   CollectionEventOperation,
   CollectionEventRecord,
@@ -34,7 +35,6 @@ export function CollectionsPanel({
   const [kind, setKind] = useState<CollectionKind>("collection");
   const [sortMode, setSortMode] = useState<CollectionSortMode>("manual");
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
     const response = await fetch("/api/collections", { cache: "no-store" }).then((res) => res.json() as Promise<CollectionsApiResponse>);
@@ -48,11 +48,10 @@ export function CollectionsPanel({
 
   async function createCollection() {
     if (!name.trim()) {
-      setError("收藏夹名称不能为空。");
+      toast.error("收藏夹名称不能为空。");
       return;
     }
     setPending(true);
-    setError(null);
     try {
       const response = await fetch("/api/collections", {
         method: "POST",
@@ -60,14 +59,15 @@ export function CollectionsPanel({
         body: JSON.stringify({ name, description, kind, sortMode }),
       }).then((res) => res.json() as Promise<CollectionsApiResponse>);
       if (response.error) {
-        setError(response.error);
+        toast.error(response.error);
       } else {
         setName("");
         setDescription("");
         await refresh();
+        toast.success("收藏夹已创建");
       }
     } catch {
-      setError("创建收藏夹失败。");
+      toast.error("创建收藏夹失败。");
     } finally {
       setPending(false);
     }
@@ -75,7 +75,6 @@ export function CollectionsPanel({
 
   async function toggleEnabled(collection: CollectionRecord) {
     setPending(true);
-    setError(null);
     try {
       const response = await fetch(`/api/collections/${collection.id}`, {
         method: "PATCH",
@@ -83,9 +82,10 @@ export function CollectionsPanel({
         body: JSON.stringify({ isEnabled: !collection.isEnabled }),
       }).then((res) => res.json() as Promise<CollectionsApiResponse>);
       if (response.error) {
-        setError(response.error);
+        toast.error(response.error);
       } else {
         await refresh();
+        toast.success(collection.isEnabled ? "已禁用收藏夹" : "已启用收藏夹");
       }
     } finally {
       setPending(false);
@@ -97,13 +97,13 @@ export function CollectionsPanel({
       return;
     }
     setPending(true);
-    setError(null);
     try {
       const response = await fetch(`/api/collections/${collection.id}`, { method: "DELETE" }).then((res) => res.json() as CollectionsApiResponse);
       if (response.error) {
-        setError(response.error);
+        toast.error(response.error);
       } else {
         await refresh();
+        toast.success("收藏夹已删除");
       }
     } finally {
       setPending(false);
@@ -154,11 +154,6 @@ export function CollectionsPanel({
               创建
             </AppButton>
           </Group>
-          {error ? (
-            <Text size="sm" c="red.6">
-              {error}
-            </Text>
-          ) : null}
         </Stack>
       </Box>
 

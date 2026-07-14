@@ -516,6 +516,7 @@ export const operationLogs = sqliteTable(
         "download_task_create",
         "download_task_cancel",
         "download_task_retry",
+        "download_task_pull_back",
         "collection_create",
         "collection_update",
         "collection_delete",

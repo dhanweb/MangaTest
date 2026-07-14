@@ -1,16 +1,18 @@
 "use client";
 
 import {
-  ActionIcon, Badge, Box, Group, Paper, Radio, ScrollArea, SimpleGrid, Stack, Table, Tabs, Text, TextInput,
+  ActionIcon, Badge, Box, Group, Paper, Radio, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput,
 } from "@mantine/core";
 import {
-  ArrowLeft, BookOpen, EyeOff, GitMerge, GripVertical, RotateCcw, Save, Search, Trash2, Upload,
+  ArrowLeft, BookOpen, EyeOff, GitMerge, RotateCcw, Save, Search, Trash2,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabTitle } from "@/components/admin-workbench/use-admin-tab-title";
 import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
 import { namespaceLabel } from "@/modules/tags";
@@ -61,7 +63,6 @@ export function ComicAdminDetailPanel({
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [isLoadingLogs, setIsLoadingLogs] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ text: string; tone: "success" | "error" } | null>(null);
   const [mergeModalOpened, setMergeModalOpened] = useState(false);
   const [mergeSearch, setMergeSearch] = useState("");
   const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
@@ -79,7 +80,10 @@ export function ComicAdminDetailPanel({
     [currentComic.id, mergeSearch, rows],
   );
 
-  const showMsg = useCallback((text: string, tone: "success" | "error") => { setMsg({ text, tone }); setTimeout(() => setMsg(null), 4000); }, []);
+  const showMsg = useCallback((text: string, tone: "success" | "error") => {
+    if (tone === "error") toast.error(text);
+    else toast.success(text);
+  }, []);
 
   useEffect(() => {
     let c = false;
@@ -88,10 +92,28 @@ export function ComicAdminDetailPanel({
   }, [currentComic.id]);
 
   useEffect(() => {
-    if (editTargetIsMerged) { setIsLoadingChapters(false); return; }
-    let c = false;
-    fetch(`/api/comics/${currentComic.id}/chapters/order`).then((r) => r.json()).then((d: { chapters?: LibraryChapterRecord[] }) => { if (!c && d.chapters) { setSavedChapters(d.chapters); setChapterDrafts(d.chapters); } }).catch(() => {}).finally(() => { if (!c) setIsLoadingChapters(false); });
-    return () => { c = true; };
+    // 合并漫画不需要章节顺序；用派生 loading，避免在 effect 里同步 setState
+    if (editTargetIsMerged) {
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/comics/${currentComic.id}/chapters/order`)
+      .then((r) => r.json())
+      .then((d: { chapters?: LibraryChapterRecord[] }) => {
+        if (!cancelled && d.chapters) {
+          setSavedChapters(d.chapters);
+          setChapterDrafts(d.chapters);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingChapters(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentComic.id, editTargetIsMerged]);
 
   useEffect(() => {
@@ -231,21 +253,20 @@ export function ComicAdminDetailPanel({
 
   return (
     <Box>
-      {msg && (
-        <Box style={{
-          position: "fixed", top: 16, right: 16, zIndex: 9999, padding: "10px 18px", borderRadius: 10,
-          background: msg.tone === "success" ? "#087f5b" : "#d93a4e", color: "#fff",
-          fontSize: 13, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", maxWidth: 400, overflowWrap: "anywhere",
-        }}>{msg.text}</Box>
-      )}
-
       <AppButton component={Link} href="/admin/comics" variant="transparent" leftSection={<ArrowLeft size={14} />} px={0} mb="md" size="xs">返回漫画管理</AppButton>
 
       <Paper p="lg" mb="lg" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 14, background: "white" }}>
         <Group align="flex-start" gap="lg" wrap="nowrap">
           <Box style={{ width: 180, minHeight: 250, borderRadius: 12, overflow: "hidden", border: "1px solid var(--mantine-color-pink-1)", flexShrink: 0, background: "var(--mantine-color-pink-0)", position: "relative" }}>
-            <img src={`/api/comics/${currentComic.id}/cover?w=360&h=500&use=cover`} alt="cover" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+            <Image
+              src={`/api/comics/${currentComic.id}/cover?w=360&h=500&use=cover`}
+              alt="cover"
+              width={360}
+              height={500}
+              unoptimized
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            />
           </Box>
           <Box style={{ flex: 1, minWidth: 0 }}>
             <Group gap="md" mb={4} wrap="wrap">
@@ -563,10 +584,10 @@ function TagManager({ comicId, tagGroups, tagRows, isLoading, pendingAction, onT
                     onKeyDown={(e) => { if (e.key === "Enter" && addName.trim()) confirmAdd(ns); if (e.key === "Escape") cancelAdd(); }}
                     style={{ width: 180 }}
                   />
-                  <ActionIcon size="sm" color="green" variant="filled" onClick={() => { if (addName.trim()) confirmAdd(ns); }}>✓</ActionIcon>
+                  <ActionIcon size="sm" color="green" variant="filled" loading={pendingAction === "tag:add"} onClick={() => { if (addName.trim()) confirmAdd(ns); }}>✓</ActionIcon>
                   <ActionIcon size="sm" variant="default" onClick={cancelAdd}>✕</ActionIcon>
                 </Group>
-              ) : <ActionIcon size="sm" variant="outline" color="pink" onClick={() => startAdd(ns)}>+</ActionIcon>}
+              ) : <ActionIcon size="sm" variant="outline" color="pink" disabled={pendingAction?.startsWith("tag:")} onClick={() => startAdd(ns)}>+</ActionIcon>}
             </Box>
           ))}
         </Stack>
@@ -613,7 +634,7 @@ function fmtKind(k: string | null) { return k === "directory" ? "DIR" : k?.toUpp
 
 function taskLabel(s: string | null) { const m: Record<string, string> = { queued: "排队中", running: "下载中", completed: "已完成", failed: "失败", cancel_requested: "取消中", canceled: "已取消" }; return m[s ?? ""] ?? s ?? ""; }
 
-function opLabel(op: string) { const m: Record<string, string> = { hide: "隐藏", soft_delete: "软删除", restore: "恢复", path_repair: "路径修复", merge_chapter: "合并章节", switch_primary_file: "切换主文件", cache_cleanup: "缓存清理", download_task_create: "创建下载", download_task_cancel: "取消下载", download_task_retry: "重试下载", collection_create: "创建收藏", collection_update: "更新收藏", collection_delete: "删除收藏", collection_add_comic: "加入收藏", collection_remove_comic: "移出收藏" }; return m[op] ?? op; }
+function opLabel(op: string) { const m: Record<string, string> = { hide: "隐藏", soft_delete: "软删除", restore: "恢复", path_repair: "路径修复", merge_chapter: "合并章节", switch_primary_file: "切换主文件", cache_cleanup: "缓存清理", download_task_create: "创建下载", download_task_cancel: "取消下载", download_task_retry: "重试下载", download_task_pull_back: "拉回本地", collection_create: "创建收藏", collection_update: "更新收藏", collection_delete: "删除收藏", collection_add_comic: "加入收藏", collection_remove_comic: "移出收藏" }; return m[op] ?? op; }
 
 function fmtDate(v: string) { try { return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(v)); } catch { return v; } }
 

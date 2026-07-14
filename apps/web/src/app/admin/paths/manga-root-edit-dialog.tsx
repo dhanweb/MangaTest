@@ -1,11 +1,12 @@
 "use client";
 
-import { ActionIcon, Group, Stack, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Group, Stack, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Save } from "lucide-react";
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 
 import { AppButton, AppInput, AppModal, AppSwitch } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type { MangaRootWithStats } from "@/modules/library";
 
 import { updateMangaRootAction, type SaveMangaRootState } from "./actions";
@@ -18,6 +19,20 @@ const initialState: SaveMangaRootState = {
 export function MangaRootEditDialog({ root }: { root: MangaRootWithStats }) {
   const [opened, { open, close }] = useDisclosure(false);
   const [state, formAction, isPending] = useActionState(updateMangaRootAction, initialState);
+  const lastMessageRef = useRef("");
+
+  useEffect(() => {
+    if (!state.message || state.message === lastMessageRef.current) {
+      return;
+    }
+    lastMessageRef.current = state.message;
+    if (state.status === "error") {
+      toast.error(state.message);
+    } else if (state.status === "success") {
+      toast.success(state.message);
+      close();
+    }
+  }, [close, state.message, state.status]);
 
   return (
     <>
@@ -43,11 +58,6 @@ export function MangaRootEditDialog({ root }: { root: MangaRootWithStats }) {
                 {isPending ? "保存中..." : "保存"}
               </AppButton>
             </Group>
-            {state.message ? (
-              <Text size="sm" fw={700} c={state.status === "error" ? "red" : "pink.5"}>
-                {state.message}
-              </Text>
-            ) : null}
           </Stack>
         </form>
       </AppModal>

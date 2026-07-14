@@ -1,4 +1,4 @@
-import { saveRuntimeSettings } from "@/modules/core/settings";
+import { getRuntimeSettings } from "@/modules/core/settings";
 import { loginOpenList, type OpenListLoginInput, type OpenListLoginResult } from "@/modules/downloads/providers/openlist";
 
 export const runtime = "nodejs";
@@ -21,11 +21,15 @@ export async function POST(request: Request) {
     return Response.json({ result: publicResult }, { status: 400 });
   }
 
-  const settings = await saveRuntimeSettings({
+  // Return a candidate settings object for the caller to validate first.
+  // Do not persist a token until the subsequent connection check succeeds.
+  const currentSettings = await getRuntimeSettings();
+  const settings = {
+    ...currentSettings,
     openlistBaseUrl: result.baseUrl,
-    openlistEnabled: true,
+    openlistEnabled: input.enabled ?? currentSettings.openlistEnabled,
     openlistToken: result.token,
-  });
+  };
 
   return Response.json({
     result: publicResult,
@@ -45,6 +49,7 @@ function parseOpenListLoginPayload(payload: unknown): OpenListLoginInput | null 
 
   return {
     baseUrl: record.baseUrl,
+    enabled: typeof record.enabled === "boolean" ? record.enabled : undefined,
     username: record.username,
     password: record.password,
     otpCode: typeof record.otpCode === "string" ? record.otpCode : null,

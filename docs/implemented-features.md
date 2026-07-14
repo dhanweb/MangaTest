@@ -90,7 +90,9 @@ This document records features that are already implemented in `apps/web`.
 - Download task creation chooses the default provider from resource type: magnet/torrent uses aria2, HTTP uses builtin HTTP, and OpenList resources use OpenList.
 - Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.
 - Queued download tasks can be canceled, and failed or canceled tasks can be manually retried back into the queue.
-- Download task create, cancel, and retry actions write operation log entries with redacted resource details.
+- Download task create, cancel, retry, and pull-back actions write operation log entries with redacted resource details.
+- Pull-back from a completed offline task returns structured failure reasons (settings missing, OpenList list HTTP/API error, timeout, empty remote directory) and surfaces them in the admin UI toast and API response `code`/`details`.
+- Pull-back scans one nested directory level under the offline save path (115 often creates a same-named folder) and matches by resource label / title / parent folder before falling back to the largest file.
 - Download provider adapters are registered for OpenList, aria2, and builtin HTTP as provider-boundary stubs.
 - Download worker preflight can select the next queued task and report provider readiness without executing external downloads.
 - OpenList settings include a read-only connection check that probes public and account APIs without creating download tasks or returning tokens to the client.

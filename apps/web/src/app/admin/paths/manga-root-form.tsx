@@ -1,10 +1,11 @@
 "use client";
 
-import { Group, Stack, Text } from "@mantine/core";
+import { Group, Stack } from "@mantine/core";
 import { Plus } from "lucide-react";
-import { useActionState } from "react";
+import { useActionState, useEffect, useRef } from "react";
 
 import { AppButton, AppInput } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 
 import { saveMangaRootAction, type SaveMangaRootState } from "./actions";
 
@@ -15,6 +16,19 @@ const initialState: SaveMangaRootState = {
 
 export function MangaRootForm() {
   const [state, formAction, isPending] = useActionState(saveMangaRootAction, initialState);
+  const lastMessageRef = useRef("");
+
+  useEffect(() => {
+    if (!state.message || state.message === lastMessageRef.current) {
+      return;
+    }
+    lastMessageRef.current = state.message;
+    if (state.status === "error") {
+      toast.error(state.message);
+    } else if (state.status === "success") {
+      toast.success(state.message);
+    }
+  }, [state.message, state.status]);
 
   return (
     <form action={formAction}>
@@ -31,11 +45,6 @@ export function MangaRootForm() {
             {isPending ? "保存中..." : "添加"}
           </AppButton>
         </Group>
-        {state.message ? (
-          <Text size="sm" fw={700} c={state.status === "error" ? "red" : "pink.5"}>
-            {state.message}
-          </Text>
-        ) : null}
       </Stack>
     </form>
   );

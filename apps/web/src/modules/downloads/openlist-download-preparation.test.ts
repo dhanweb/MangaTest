@@ -47,6 +47,17 @@ describe("OpenList download preparations", () => {
         url: String(input),
       });
 
+      if (String(input).endsWith("/api/fs/link")) {
+        return Response.json({
+          code: 200,
+          data: {
+            url: "https://private.example/download/Comic.cbz?sign=secret",
+            header: {},
+          },
+          message: "success",
+        });
+      }
+
       return Response.json({
         code: 200,
         data: {
@@ -136,7 +147,7 @@ describe("OpenList download preparations", () => {
     expect(countRows(sqlite, "manga_roots", "absolute_path like '%下载入库'")).toBe(1);
     expect(countRows(sqlite, "local_files", "relative_path = 'OpenList Comic.cbz'")).toBe(1);
     expect(countRows(sqlite, "pages")).toBe(2);
-    expect(requests).toHaveLength(3);
+    expect(requests).toHaveLength(4);
     expect(requests[0]).toMatchObject({
       authorization: "secret-openlist-token",
       body: {
@@ -150,7 +161,8 @@ describe("OpenList download preparations", () => {
       url: "http://127.0.0.1:5244/root/api/fs/get",
     });
     expect(requests[1]?.url).toBe("http://127.0.0.1:5244/root/api/fs/get");
-    expect(requests[2]?.url).toBe("https://private.example/download/Comic.cbz?sign=secret");
+    expect(requests[2]?.url).toBe("http://127.0.0.1:5244/root/api/fs/link");
+    expect(requests[3]?.url).toBe("https://private.example/download/Comic.cbz?sign=secret");
     expect(JSON.stringify(tick)).not.toContain("secret-openlist-token");
     expect(JSON.stringify(tick)).not.toContain("private.example");
     expect(JSON.stringify(tick)).not.toContain("sign=secret");
@@ -236,6 +248,17 @@ describe("OpenList download preparations", () => {
         });
       }
 
+      if (String(input).endsWith("/api/fs/link")) {
+        return Response.json({
+          code: 200,
+          data: {
+            url: "https://private.example/download/Comic.cbz?sign=secret",
+            header: {},
+          },
+          message: "success",
+        });
+      }
+
       return Response.json({
         code: 200,
         data: {
@@ -311,6 +334,17 @@ describe("OpenList download preparations", () => {
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
       if (String(input).startsWith("https://private.example/")) {
         return new Response("forbidden", { status: 403 });
+      }
+
+      if (String(input).endsWith("/api/fs/link")) {
+        return Response.json({
+          code: 200,
+          data: {
+            url: "https://private.example/download/Comic.cbz?sign=secret",
+            header: {},
+          },
+          message: "success",
+        });
       }
 
       return Response.json({

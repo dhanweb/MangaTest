@@ -25,7 +25,14 @@ import {
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
 
-import { listOpenListDirectory, normalizeOpenListResourcePath, resolveOpenListDownloadLink, submitOpenListOfflineDownload } from "./providers/openlist/connection";
+import {
+  ensureOpenListToken,
+  listOpenListDirectory,
+  listOpenListOfflineTasks,
+  normalizeOpenListResourcePath,
+  resolveOpenListDownloadLink,
+  submitOpenListOfflineDownload,
+} from "./providers/openlist/connection";
 import { cancelAria2Download, cleanupAria2TempDir, downloadWithAria2 } from "./providers/aria2/client";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
@@ -57,8 +64,58 @@ export type CloudScanStatus = (typeof CLOUD_SCAN_STATUSES)[number];
 export const COMIC_RESOURCE_TYPES = ["magnet", "torrent", "http", "openlist"] as const;
 export type ComicResourceType = (typeof COMIC_RESOURCE_TYPES)[number];
 
-const DOWNLOAD_TASK_EVENT_OPERATIONS = ["download_task_create", "download_task_cancel", "download_task_retry"] as const;
+const DOWNLOAD_TASK_EVENT_OPERATIONS = [
+  "download_task_create",
+  "download_task_cancel",
+  "download_task_retry",
+  "download_task_pull_back",
+] as const;
 export type DownloadTaskEventOperation = (typeof DOWNLOAD_TASK_EVENT_OPERATIONS)[number];
+
+export const CREATE_TRANSFER_FROM_OFFLINE_FAILURE_CODES = [
+  "not_offline_task",
+  "openlist_disabled",
+  "openlist_base_url_missing",
+  "openlist_token_missing",
+  "remote_list_timeout",
+  "remote_list_http_error",
+  "remote_list_api_error",
+  "remote_list_empty",
+  "remote_list_failed",
+  "task_create_failed",
+] as const;
+export type CreateTransferFromOfflineFailureCode = (typeof CREATE_TRANSFER_FROM_OFFLINE_FAILURE_CODES)[number];
+
+export type CreateTransferFromOfflineResult =
+  | {
+      ok: true;
+      task: DownloadTaskRecord;
+      message: string;
+      details: {
+        remotePath: string;
+        remoteFilePath: string;
+        fileName: string;
+        fileSize: number;
+        comicTitle: string;
+        matchedBy: "title" | "resource_label" | "parent_dir" | "largest_file";
+      };
+    }
+  | {
+      ok: false;
+      task?: undefined;
+      code: CreateTransferFromOfflineFailureCode;
+      message: string;
+      details: {
+        remotePath?: string;
+        comicTitle?: string;
+        openlistCode?: number | null;
+        httpStatus?: number | null;
+        fileCount?: number;
+        dirCount?: number;
+        errorName?: string;
+        errorMessage?: string;
+      };
+    };
 
 export interface CreateDownloadTaskInput {
   comicResourceId: string;
@@ -797,6 +854,44 @@ export async function planNextDownloadDispatch(taskType?: DownloadTaskType): Pro
   }
 
   const settings = await getRuntimeSettings();
+
+  // 拉回本地已解析出具体远程文件路径时，直接进入 transfer，不再走 magnet 离线提交逻辑。
+  if (task.taskType === "transfer" && task.provider === "openlist" && task.remotePath?.trim()) {
+    if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim() || !settings.openlistToken.trim()) {
+      return createDownloadDispatchPlan({
+        status: "blocked",
+        reason: "OpenList 未正确配置，无法执行拉回传输。",
+        provider: task.provider,
+        adapterLabel: adapter.label,
+        task,
+        resource: toDownloadDispatchResourceRecord(resource),
+        readiness: {
+          canDispatch: false,
+          code: "missing_settings",
+          reason: "OpenList 未正确配置。",
+        },
+      });
+    }
+
+    return createDownloadDispatchPlan({
+      status: "ready",
+      reason: `使用已解析远程路径传输：${task.remotePath}`,
+      provider: task.provider,
+      adapterLabel: adapter.label,
+      task,
+      resource: toDownloadDispatchResourceRecord(resource),
+      readiness: {
+        canDispatch: true,
+        code: "ready",
+        reason: "远程路径已由拉回流程解析。",
+        details: {
+          remotePath: task.remotePath,
+          remoteName: task.remotePath.split("/").filter(Boolean).pop() ?? task.resourceLabel,
+        },
+      },
+    });
+  }
+
   const readiness = await adapter.prepare({ task, resource, settings });
 
   return createDownloadDispatchPlan({
@@ -966,25 +1061,48 @@ export async function dispatchTaskNow(taskId: string): Promise<string | null> {
     return `${task.comicTitle}: ${msg}`;
   }
 
-  if (task.taskType === "transfer" && task.provider === "openlist" && task.resourceType === "openlist") {
-    const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
-    if (!resource) {
-      markDownloadTaskFinished(task.id, "failed", "缺少资源记录。", now);
-      return `${task.comicTitle}: 缺少资源记录`;
+  if (task.taskType === "transfer" && task.provider === "openlist") {
+    let remotePath = task.remotePath?.trim() || "";
+    let remoteName: string | null = remotePath ? remotePath.split("/").filter(Boolean).pop() ?? null : null;
+    let sizeBytes: number | null = null;
+
+    // 拉回任务已带具体文件路径；普通 openlist 资源仍走 adapter 探测。
+    if (!remotePath) {
+      if (task.resourceType !== "openlist") {
+        markDownloadTaskFinished(task.id, "failed", "传输任务缺少远程路径。", now);
+        return `${task.comicTitle}: 传输任务缺少远程路径`;
+      }
+      const resource = getDownloadProviderResourceSnapshot(task.comicResourceId);
+      if (!resource) {
+        markDownloadTaskFinished(task.id, "failed", "缺少资源记录。", now);
+        return `${task.comicTitle}: 缺少资源记录`;
+      }
+      const adapter = getDownloadProviderAdapter(task.provider);
+      const readiness = adapter ? await adapter.prepare({ task, resource, settings }) : null;
+      if (!readiness?.canDispatch || !readiness.details?.remotePath) {
+        markDownloadTaskFinished(task.id, "failed", readiness?.reason || "资源准备失败。", now);
+        return `${task.comicTitle}: ${readiness?.reason || "资源准备失败"}`;
+      }
+      remotePath = String(readiness.details.remotePath);
+      remoteName = readiness.details.remoteName ? String(readiness.details.remoteName) : null;
+      sizeBytes = typeof readiness.details.sizeBytes === "number" ? readiness.details.sizeBytes : null;
     }
-    const adapter = getDownloadProviderAdapter(task.provider);
-    const readiness = adapter ? await adapter.prepare({ task, resource, settings }) : null;
-    if (!readiness?.canDispatch || !readiness.details?.remotePath) {
-      markDownloadTaskFinished(task.id, "failed", readiness?.reason || "资源准备失败。", now);
-      return `${task.comicTitle}: ${readiness?.reason || "资源准备失败"}`;
-    }
+
     const prep: DownloadTaskPreparationRecord = {
-      id: randomUUID(), downloadTaskId: task.id, comicResourceId: task.comicResourceId || null,
-      provider: task.provider, status: "ready", remotePath: String(readiness.details.remotePath),
-      remoteName: readiness.details.remoteName ? String(readiness.details.remoteName) : null,
-      sizeBytes: typeof readiness.details.sizeBytes === "number" ? readiness.details.sizeBytes : null,
-      remoteProvider: null, rawUrlAvailable: true, errorMessage: null,
-      preparedAt: now, createdAt: now, updatedAt: now,
+      id: randomUUID(),
+      downloadTaskId: task.id,
+      comicResourceId: task.comicResourceId || null,
+      provider: task.provider,
+      status: "ready",
+      remotePath,
+      remoteName,
+      sizeBytes,
+      remoteProvider: null,
+      rawUrlAvailable: true,
+      errorMessage: null,
+      preparedAt: now,
+      createdAt: now,
+      updatedAt: now,
     };
     db.update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
     const transfer = await downloadPreparedOpenListTask(task, prep);
@@ -1277,57 +1395,6 @@ export function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
   };
 }
 
-function persistDownloadTaskPreparationFromPlan(plan: DownloadDispatchPlan): DownloadTaskPreparationRecord | null {
-  if (plan.provider !== "openlist" || !plan.task || !plan.readiness) {
-    return null;
-  }
-
-  const details = plan.readiness.details ?? {};
-  const remotePath = normalizeOpenListResourcePath(readinessStringDetail(details, "remotePath"));
-
-  if (!remotePath) {
-    return null;
-  }
-
-  const rawUrlAvailable = details.rawUrlAvailable === true;
-  const remoteIsDirectory = details.remoteIsDirectory === true;
-  const status: DownloadPreparationStatus = rawUrlAvailable && !remoteIsDirectory ? "ready" : "blocked";
-  const now = new Date().toISOString();
-  const existing = getDb()
-    .select({ id: downloadTaskPreparations.id })
-    .from(downloadTaskPreparations)
-    .where(eq(downloadTaskPreparations.downloadTaskId, plan.task.id))
-    .get();
-  const values = {
-    comicResourceId: plan.task.comicResourceId || null,
-    downloadTaskId: plan.task.id,
-    errorMessage: status === "ready" ? null : plan.readiness.reason,
-    preparedAt: now,
-    provider: plan.provider,
-    rawUrlAvailable,
-    remoteName: readinessStringDetail(details, "remoteName"),
-    remotePath,
-    remoteProvider: readinessStringDetail(details, "remoteProvider"),
-    sizeBytes: readinessNumberDetail(details, "remoteSizeBytes"),
-    status,
-    updatedAt: now,
-  };
-
-  if (existing) {
-    getDb().update(downloadTaskPreparations).set(values).where(eq(downloadTaskPreparations.id, existing.id)).run();
-  } else {
-    getDb()
-      .insert(downloadTaskPreparations)
-      .values({
-        ...values,
-        id: randomUUID(),
-      })
-      .run();
-  }
-
-  return getDownloadTaskPreparationByTaskId(plan.task.id);
-}
-
 function attachDownloadTaskPreparations(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
   if (tasks.length === 0) {
     return tasks;
@@ -1481,6 +1548,9 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
         dir: tempDirectory,
         out: fileName,
         taskId: task.id,
+        // 115 等存储依赖 link 返回的 User-Agent/Referer；多连接 Range 也易 403。
+        headers: link.headers,
+        singleConnection: true,
       });
 
       if (!result.success) {
@@ -1515,6 +1585,7 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
 
     const response = await fetch(downloadUrl, {
       cache: "no-store",
+      headers: Object.keys(link.headers).length > 0 ? link.headers : undefined,
       signal: AbortSignal.timeout(30000),
     });
 
@@ -2770,16 +2841,6 @@ function redactOpenListRemotePath(remotePath: string, name: string) {
   return `openlist:/.../${safeName}`;
 }
 
-function readinessStringDetail(details: Record<string, boolean | number | string | null>, key: string) {
-  const value = details[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-}
-
-function readinessNumberDetail(details: Record<string, boolean | number | string | null>, key: string) {
-  const value = details[key];
-  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : null;
-}
-
 function resolveDownloadTaskTempDirectory(settings: RuntimeSettings, taskId: string) {
   return path.resolve(process.cwd(), settings.cacheDirectory, "downloads", "tmp", taskId);
 }
@@ -2865,24 +2926,20 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
     )).all();
   if (submittedTasks.length === 0) return [];
 
-  const settings = await getRuntimeSettings();
-  if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim() || !settings.openlistToken.trim()) return [];
-  const baseUrl = settings.openlistBaseUrl.replace(/\/+$/, "");
-  const token = settings.openlistToken.trim();
-  if (!baseUrl) return [];
+  let settings = await getRuntimeSettings();
+  if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) return [];
+  if (!settings.openlistToken.trim()) {
+    const ensured = await ensureOpenListToken(settings, { forceRefresh: true });
+    if (!ensured.ok) return [];
+    settings = ensured.settings;
+  }
+  if (!settings.openlistBaseUrl.replace(/\/+$/, "")) return [];
 
-  const olTasks: Array<{ id: string; name: string; state: number; error: string }> = [];
-  try {
-    for (const kind of ["undone", "done"]) {
-      const res = await fetch(`${baseUrl}/api/task/offline_download/${kind}`, {
-        method: "GET",
-        headers: { Authorization: token },
-        signal: AbortSignal.timeout(5000),
-      });
-      const p = await res.json().catch(() => null);
-      if (p?.code === 200 && Array.isArray(p?.data)) olTasks.push(...p.data);
-    }
-  } catch { /* skip */ }
+  // listOpenListOfflineTasks 内部会在 401/403 时自动登录刷新 token
+  const olTasks: Array<{ id: string; name: string; state: number; error: string }> = [
+    ...(await listOpenListOfflineTasks("undone", { settings })),
+    ...(await listOpenListOfflineTasks("done", { settings })),
+  ];
 
   const results: string[] = [];
 
@@ -2897,10 +2954,12 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
         if (!fullTask) continue;
         markDownloadTaskFinished(task.id, "completed", null, now);
         const created = await createTransferTaskFromOfflineTask(fullTask);
-        if (created) {
+        if (created.ok) {
           results.push(`${fullTask.comicTitle}: OpenList 完成，已创建传输任务`);
         } else {
-          results.push(`${fullTask.comicTitle}: OpenList 完成（未能自动创建传输任务）`);
+          results.push(
+            `${fullTask.comicTitle}: OpenList 完成（未能自动创建传输任务：${created.message}）`,
+          );
         }
         continue;
       }
@@ -2925,56 +2984,130 @@ async function pollOpenListDownloadStatus(): Promise<string[]> {
   return results;
 }
 
-export async function createTransferTaskFromOfflineTask(offlineTask: DownloadTaskRecord): Promise<DownloadTaskRecord | null> {
+export async function createTransferTaskFromOfflineTask(
+  offlineTask: DownloadTaskRecord,
+): Promise<CreateTransferFromOfflineResult> {
   bootstrapDatabase();
 
-  if (offlineTask.taskType !== "offline") return null;
-
-  const db = getDb();
-  const settings = await getRuntimeSettings();
-  if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim() || !settings.openlistToken.trim()) return null;
-  const baseUrl = settings.openlistBaseUrl.replace(/\/+$/, "");
-  const token = settings.openlistToken.trim();
-
+  const comicTitle = offlineTask.comicTitle;
   const remotePath = offlineTask.remotePath ?? "/115Open/Temp";
-  let remoteFile: { name: string; size: number } | null = null;
+  const resourceLabel = getComicResourceDisplayLabel(offlineTask.comicResourceId);
 
-  try {
-    const listRes = await fetch(`${baseUrl}/api/fs/list`, {
-      method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ path: remotePath, page: 1, per_page: 100, refresh: true }),
-      signal: AbortSignal.timeout(5000),
+  if (offlineTask.taskType !== "offline") {
+    return failCreateTransfer(offlineTask, "not_offline_task", "只能对离线任务创建传输任务。", {
+      remotePath,
+      comicTitle,
     });
-    const listData = await listRes.json().catch(() => null);
-    if (listData?.code === 200 && listData?.data?.content) {
-      const files = listData.data.content as Array<{ name: string; size: number; is_dir?: boolean }>;
-      const title = offlineTask.comicTitle;
-      remoteFile = files.find((f) => !f.is_dir && f.size > 0 && (f.name.includes(title) || title.includes(f.name))) ?? null;
+  }
+
+  let settings = await getRuntimeSettings();
+  if (!settings.openlistEnabled) {
+    return failCreateTransfer(offlineTask, "openlist_disabled", "OpenList 未启用，请先在设置中开启。", {
+      remotePath,
+      comicTitle,
+    });
+  }
+  if (!settings.openlistBaseUrl.trim()) {
+    return failCreateTransfer(offlineTask, "openlist_base_url_missing", "OpenList 地址未配置。", {
+      remotePath,
+      comicTitle,
+    });
+  }
+  if (!settings.openlistToken.trim()) {
+    const ensured = await ensureOpenListToken(settings, { forceRefresh: true });
+    if (!ensured.ok) {
+      return failCreateTransfer(offlineTask, "openlist_token_missing", ensured.message, {
+        remotePath,
+        comicTitle,
+      });
     }
-  } catch { /* skip */ }
+    settings = ensured.settings;
+  }
 
-  if (!remoteFile) {
-    const listRes2 = await fetch(`${baseUrl}/api/fs/list`, {
-      method: "POST",
-      headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify({ path: remotePath, page: 1, per_page: 100, refresh: true }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const listData2 = await listRes2.json().catch(() => null);
-    if (listData2?.code === 200 && listData2?.data?.content) {
-      const allFiles = (listData2.data.content as Array<{ name: string; size: number; is_dir?: boolean }>)
-        .filter((f) => !f.is_dir && f.size > 0)
-        .sort((a, b) => b.size - a.size);
-      remoteFile = allFiles[0] ?? null;
+  const baseUrl = settings.openlistBaseUrl.replace(/\/+$/, "");
+  let token = settings.openlistToken.trim();
+  // 115 离线下载常把结果落在 savePath 下的同名文件夹里，而不是直接文件；需递归一层查找。
+  let listResult = await listOpenListRemoteFilesForPullBack(baseUrl, token, remotePath, {
+    matchHints: [comicTitle, resourceLabel, offlineTask.resourceLabel].filter(Boolean) as string[],
+  });
+
+  // 列目录认证失败时尝试自动登录并重试一次
+  if (
+    !listResult.ok &&
+    (listResult.httpStatus === 401 ||
+      listResult.httpStatus === 403 ||
+      listResult.openlistCode === 401 ||
+      listResult.openlistCode === 403)
+  ) {
+    const ensured = await ensureOpenListToken(settings, { forceRefresh: true });
+    if (ensured.ok) {
+      settings = ensured.settings;
+      token = settings.openlistToken.trim();
+      listResult = await listOpenListRemoteFilesForPullBack(baseUrl, token, remotePath, {
+        matchHints: [comicTitle, resourceLabel, offlineTask.resourceLabel].filter(Boolean) as string[],
+      });
     }
   }
 
-  if (!remoteFile) return null;
+  if (!listResult.ok) {
+    return failCreateTransfer(offlineTask, listResult.code, listResult.message, {
+      remotePath,
+      comicTitle,
+      openlistCode: listResult.openlistCode,
+      httpStatus: listResult.httpStatus,
+      errorName: listResult.errorName,
+      errorMessage: listResult.errorMessage,
+      dirCount: listResult.dirCount,
+      fileCount: listResult.fileCount,
+    });
+  }
+
+  const files = listResult.files;
+  if (files.length === 0) {
+    const dirHint = listResult.dirCount > 0
+      ? `根目录有 ${listResult.dirCount} 个子目录，但一层内未找到可用文件。`
+      : "根目录没有任何文件或子目录。";
+    return failCreateTransfer(
+      offlineTask,
+      "remote_list_empty",
+      `远程目录无可拉回文件：${remotePath}。${dirHint}`,
+      {
+        remotePath,
+        comicTitle,
+        fileCount: 0,
+        dirCount: listResult.dirCount,
+        openlistCode: 200,
+        httpStatus: listResult.httpStatus,
+      },
+    );
+  }
+
+  const remoteFile = pickRemoteFileForPullBack(files, {
+    comicTitle,
+    resourceLabel,
+    resourceDisplayLabel: offlineTask.resourceLabel,
+  });
+
+  if (!remoteFile) {
+    return failCreateTransfer(
+      offlineTask,
+      "remote_list_empty",
+      `远程目录没有可用文件：${remotePath}。`,
+      {
+        remotePath,
+        comicTitle,
+        fileCount: files.length,
+        dirCount: listResult.dirCount,
+        openlistCode: 200,
+        httpStatus: listResult.httpStatus,
+      },
+    );
+  }
 
   const transferTaskId = randomUUID();
   const now = new Date().toISOString();
-  const remoteFilePath = `${remotePath.replace(/\/$/, "")}/${remoteFile.name}`;
+  const remoteFilePath = remoteFile.path;
+  const db = getDb();
 
   db.insert(downloadTasks)
     .values({
@@ -2991,5 +3124,334 @@ export async function createTransferTaskFromOfflineTask(offlineTask: DownloadTas
     .run();
 
   const transferTask = getDownloadTaskById(transferTaskId);
-  return transferTask;
+  if (!transferTask) {
+    return failCreateTransfer(offlineTask, "task_create_failed", "传输任务写入数据库后读取失败。", {
+      remotePath: remoteFilePath,
+      comicTitle,
+      fileCount: files.length,
+      dirCount: listResult.dirCount,
+    });
+  }
+
+  const success: CreateTransferFromOfflineResult = {
+    ok: true,
+    task: transferTask,
+    message: remoteFile.matchedBy === "largest_file"
+      ? `标题未精确匹配，已按最大文件创建传输任务：${remoteFile.name}`
+      : `已创建传输任务：${remoteFile.name}`,
+    details: {
+      remotePath,
+      remoteFilePath,
+      fileName: remoteFile.name,
+      fileSize: remoteFile.size,
+      comicTitle,
+      matchedBy: remoteFile.matchedBy,
+    },
+  };
+
+  recordPullBackEvent(offlineTask, transferTask, success);
+  return success;
+}
+
+type OpenListRemoteFile = {
+  name: string;
+  size: number;
+  path: string;
+  parentName: string | null;
+};
+
+type ListOpenListRemoteFilesResult =
+  | { ok: true; files: OpenListRemoteFile[]; httpStatus: number; dirCount: number; fileCount: number }
+  | {
+      ok: false;
+      code: CreateTransferFromOfflineFailureCode;
+      message: string;
+      httpStatus?: number | null;
+      openlistCode?: number | null;
+      errorName?: string;
+      errorMessage?: string;
+      dirCount?: number;
+      fileCount?: number;
+    };
+
+type OpenListListEntry = { name: string; size: number; is_dir?: boolean };
+
+async function listOpenListDirectoryEntries(
+  baseUrl: string,
+  token: string,
+  remotePath: string,
+): Promise<ListOpenListRemoteFilesResult & { entries?: OpenListListEntry[] }> {
+  try {
+    const listRes = await fetch(`${baseUrl}/api/fs/list`, {
+      method: "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ path: remotePath, page: 1, per_page: 100, refresh: true }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    const listData = await listRes.json().catch(() => null) as {
+      code?: number;
+      message?: string;
+      data?: { content?: OpenListListEntry[] | null };
+    } | null;
+
+    if (!listRes.ok) {
+      return {
+        ok: false,
+        code: "remote_list_http_error",
+        message: `OpenList 列目录 HTTP 失败（${listRes.status}）：${remotePath}`,
+        httpStatus: listRes.status,
+        openlistCode: typeof listData?.code === "number" ? listData.code : null,
+        errorMessage: typeof listData?.message === "string" ? listData.message : undefined,
+      };
+    }
+
+    if (listData?.code !== 200) {
+      const openlistCode = typeof listData?.code === "number" ? listData.code : null;
+      const apiMessage = typeof listData?.message === "string" && listData.message.trim()
+        ? listData.message.trim()
+        : "未知错误";
+      return {
+        ok: false,
+        code: "remote_list_api_error",
+        message: `OpenList 列目录失败（code=${openlistCode ?? "?"}）：${apiMessage}；路径 ${remotePath}`,
+        httpStatus: listRes.status,
+        openlistCode,
+        errorMessage: apiMessage,
+      };
+    }
+
+    const content = Array.isArray(listData?.data?.content) ? listData.data.content : [];
+    return {
+      ok: true,
+      files: [],
+      httpStatus: listRes.status,
+      dirCount: content.filter((f) => f.is_dir).length,
+      fileCount: content.filter((f) => !f.is_dir && Number(f.size) > 0).length,
+      entries: content,
+    };
+  } catch (error) {
+    const errorName = error instanceof Error ? error.name : "Error";
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isTimeout = errorName === "TimeoutError" || /timeout|aborted/i.test(errorMessage);
+
+    return {
+      ok: false,
+      code: isTimeout ? "remote_list_timeout" : "remote_list_failed",
+      message: isTimeout
+        ? `OpenList 列目录超时（8s）：${remotePath}`
+        : `OpenList 列目录请求失败：${sanitizePullBackErrorMessage(errorMessage)}；路径 ${remotePath}`,
+      httpStatus: null,
+      openlistCode: null,
+      errorName,
+      errorMessage: sanitizePullBackErrorMessage(errorMessage),
+    };
+  }
+}
+
+function joinOpenListPath(parentPath: string, name: string) {
+  return `${parentPath.replace(/\/+$/, "")}/${name}`;
+}
+
+function scoreNameMatch(candidate: string, hints: string[]) {
+  const normalizedCandidate = candidate.toLowerCase();
+  let best = 0;
+  for (const hint of hints) {
+    const normalizedHint = hint.trim().toLowerCase();
+    if (!normalizedHint) continue;
+    if (normalizedCandidate === normalizedHint) best = Math.max(best, 100);
+    else if (normalizedCandidate.includes(normalizedHint) || normalizedHint.includes(normalizedCandidate)) {
+      best = Math.max(best, 80);
+    } else {
+      // 部分 token 重叠（日文/英文标题混用时有用）
+      const tokens = normalizedHint.split(/[\s\[\]()（）_|.-]+/).filter((t) => t.length >= 4);
+      const hits = tokens.filter((t) => normalizedCandidate.includes(t)).length;
+      if (hits > 0) best = Math.max(best, Math.min(70, hits * 15));
+    }
+  }
+  return best;
+}
+
+async function listOpenListRemoteFilesForPullBack(
+  baseUrl: string,
+  token: string,
+  remotePath: string,
+  options: { matchHints?: string[] } = {},
+): Promise<ListOpenListRemoteFilesResult> {
+  const root = await listOpenListDirectoryEntries(baseUrl, token, remotePath);
+  if (!root.ok) return root;
+
+  const entries = root.entries ?? [];
+  const files: OpenListRemoteFile[] = [];
+  const directories = entries.filter((f) => f.is_dir && typeof f.name === "string" && f.name.length > 0);
+
+  for (const entry of entries) {
+    if (entry.is_dir || typeof entry.name !== "string" || !entry.name || Number(entry.size) <= 0) continue;
+    files.push({
+      name: entry.name,
+      size: Number(entry.size),
+      path: joinOpenListPath(remotePath, entry.name),
+      parentName: null,
+    });
+  }
+
+  // 优先深入“看起来像本次下载结果”的子目录（115 常建同名 .zip 文件夹）
+  const hints = options.matchHints ?? [];
+  const orderedDirs = [...directories].sort((a, b) => {
+    const scoreDiff = scoreNameMatch(b.name, hints) - scoreNameMatch(a.name, hints);
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const dir of orderedDirs) {
+    const childPath = joinOpenListPath(remotePath, dir.name);
+    const child = await listOpenListDirectoryEntries(baseUrl, token, childPath);
+    if (!child.ok || !child.entries) continue;
+
+    for (const entry of child.entries) {
+      if (entry.is_dir || typeof entry.name !== "string" || !entry.name || Number(entry.size) <= 0) continue;
+      files.push({
+        name: entry.name,
+        size: Number(entry.size),
+        path: joinOpenListPath(childPath, entry.name),
+        parentName: dir.name,
+      });
+    }
+  }
+
+  return {
+    ok: true,
+    files,
+    httpStatus: root.httpStatus,
+    dirCount: directories.length,
+    fileCount: files.length,
+  };
+}
+
+function getComicResourceDisplayLabel(comicResourceId: string): string | null {
+  const row = getDb()
+    .select({
+      displayLabel: comicResources.displayLabel,
+    })
+    .from(comicResources)
+    .where(eq(comicResources.id, comicResourceId))
+    .get();
+  const label = row?.displayLabel?.trim();
+  return label || null;
+}
+
+function pickRemoteFileForPullBack(
+  files: OpenListRemoteFile[],
+  input: { comicTitle: string; resourceLabel: string | null; resourceDisplayLabel: string | null },
+): (OpenListRemoteFile & { matchedBy: "title" | "resource_label" | "parent_dir" | "largest_file" }) | null {
+  if (files.length === 0) return null;
+
+  const hints = [input.resourceLabel, input.resourceDisplayLabel, input.comicTitle].filter(Boolean) as string[];
+
+  let best: (OpenListRemoteFile & { matchedBy: "title" | "resource_label" | "parent_dir" | "largest_file"; score: number }) | null = null;
+
+  for (const file of files) {
+    const nameScore = scoreNameMatch(file.name, hints);
+    const parentScore = file.parentName ? scoreNameMatch(file.parentName, hints) : 0;
+    const score = Math.max(nameScore, parentScore);
+
+    let matchedBy: "title" | "resource_label" | "parent_dir" | "largest_file" = "largest_file";
+    if (nameScore >= 80 && (input.resourceLabel || input.resourceDisplayLabel)) {
+      matchedBy = "resource_label";
+    } else if (nameScore >= 80) {
+      matchedBy = "title";
+    } else if (parentScore >= 80) {
+      matchedBy = "parent_dir";
+    } else if (score > 0) {
+      matchedBy = parentScore >= nameScore ? "parent_dir" : "title";
+    }
+
+    if (!best || score > best.score || (score === best.score && file.size > best.size)) {
+      best = { ...file, matchedBy: score > 0 ? matchedBy : "largest_file", score };
+    }
+  }
+
+  if (!best) return null;
+  if (best.score > 0) {
+    return { name: best.name, size: best.size, path: best.path, parentName: best.parentName, matchedBy: best.matchedBy };
+  }
+
+  const largest = [...files].sort((a, b) => b.size - a.size)[0];
+  return largest
+    ? { ...largest, matchedBy: "largest_file" }
+    : null;
+}
+
+function failCreateTransfer(
+  offlineTask: DownloadTaskRecord,
+  code: CreateTransferFromOfflineFailureCode,
+  message: string,
+  details: Extract<CreateTransferFromOfflineResult, { ok: false }>["details"],
+): CreateTransferFromOfflineResult {
+  const result: CreateTransferFromOfflineResult = { ok: false, code, message, details };
+  console.warn("[downloads/pull-back]", code, message, details);
+  recordPullBackEvent(offlineTask, null, result);
+  return result;
+}
+
+function recordPullBackEvent(
+  offlineTask: DownloadTaskRecord,
+  transferTask: DownloadTaskRecord | null,
+  result: CreateTransferFromOfflineResult,
+) {
+  try {
+    const summary = result.ok
+      ? `拉回本地成功：${offlineTask.comicTitle} → ${result.details.fileName}`
+      : `拉回本地失败：${offlineTask.comicTitle}（${result.code}） ${result.message}`;
+
+    const detail = {
+      offlineTaskId: offlineTask.id,
+      transferTaskId: transferTask?.id ?? null,
+      comicResourceId: offlineTask.comicResourceId,
+      comicId: offlineTask.comicId,
+      comicTitle: offlineTask.comicTitle,
+      ok: result.ok,
+      ...(result.ok
+        ? {
+            remotePath: result.details.remotePath,
+            remoteFilePath: result.details.remoteFilePath,
+            fileName: result.details.fileName,
+            fileSize: result.details.fileSize,
+            matchedBy: result.details.matchedBy,
+          }
+        : {
+            code: result.code,
+            message: result.message,
+            remotePath: result.details.remotePath ?? offlineTask.remotePath,
+            openlistCode: result.details.openlistCode ?? null,
+            httpStatus: result.details.httpStatus ?? null,
+            fileCount: result.details.fileCount ?? null,
+            errorName: result.details.errorName ?? null,
+            errorMessage: result.details.errorMessage ?? null,
+          }),
+    };
+
+    getDb()
+      .insert(operationLogs)
+      .values({
+        id: randomUUID(),
+        operation: "download_task_pull_back",
+        targetType: "download_task",
+        targetId: transferTask?.id ?? offlineTask.id,
+        summary,
+        detailJson: JSON.stringify(detail),
+      })
+      .run();
+  } catch (error) {
+    console.warn("[downloads/pull-back] failed to write operation log", error);
+  }
+}
+
+function sanitizePullBackErrorMessage(message: string) {
+  const trimmed = message.trim();
+  if (!trimmed) return "未知错误";
+  if (/https?:\/\//i.test(trimmed) || /sign=/i.test(trimmed) || /token=/i.test(trimmed)) {
+    return "请求失败（细节已脱敏）";
+  }
+  return trimmed.slice(0, 240);
 }

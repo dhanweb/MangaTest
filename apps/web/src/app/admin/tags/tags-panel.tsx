@@ -7,6 +7,7 @@ import { useMemo, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type { CanonicalTag } from "@/modules/tags";
 import { NAMESPACE_LABELS, namespaceLabel, namespaceOptionLabel, tagDisplayLabel } from "@/modules/tags";
 
@@ -34,7 +35,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
   const [editTarget, setEditTarget] = useState<TagRow | null>(null);
   const [form, setForm] = useState<TagFormState>(DEFAULT_TAG_FORM);
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState("");
 
   const namespaceOptions = useMemo(() => {
     const seen = new Set([...Object.keys(NAMESPACE_LABELS), ...items.map((tag) => tag.namespace)]);
@@ -66,7 +66,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
   const openAdd = () => {
     setEditTarget(null);
     setForm(DEFAULT_TAG_FORM);
-    setError("");
     open();
   };
 
@@ -78,13 +77,11 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
       name: item.name,
       displayNameZh: item.displayNameZh ?? "",
     });
-    setError("");
     open();
   };
 
   async function saveTag() {
     setIsSaving(true);
-    setError("");
 
     const response = await fetch("/api/tags", {
       method: editTarget ? "PATCH" : "POST",
@@ -94,7 +91,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
     const payload = (await response.json()) as { tag?: CanonicalTag; error?: string };
 
     if (!response.ok || !payload.tag) {
-      setError(payload.error ?? "保存标签失败。");
+      toast.error(payload.error ?? "保存标签失败。");
       setIsSaving(false);
       return;
     }
@@ -113,6 +110,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
     });
     setIsSaving(false);
     close();
+    toast.success(editTarget ? "标签已更新" : "标签已创建");
   }
 
   async function deleteTag(item: TagRow) {
@@ -123,7 +121,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
       return;
     }
 
-    setError("");
     const response = await fetch("/api/tags", {
       method: "DELETE",
       body: JSON.stringify({ id: item.id }),
@@ -132,11 +129,12 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
     const payload = (await response.json()) as { deleted?: boolean; error?: string };
 
     if (!response.ok || !payload.deleted) {
-      setError(payload.error ?? "删除标签失败。");
+      toast.error(payload.error ?? "删除标签失败。");
       return;
     }
 
     setItems((current) => current.filter((tag) => tag.id !== item.id));
+    toast.success("标签已删除");
   }
 
   return (
@@ -278,12 +276,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
         </Table>
       </Box>
 
-      {error && !opened ? (
-        <Text size="sm" c="red.7" mt="sm">
-          {error}
-        </Text>
-      ) : null}
-
       <DraggableModal
         opened={opened}
         onClose={close}
@@ -318,11 +310,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             value={form.displayNameZh}
             onChange={(event) => setForm((current) => ({ ...current, displayNameZh: event.currentTarget.value }))}
           />
-          {error && (
-            <Text size="sm" c="red.7">
-              {error}
-            </Text>
-          )}
           <Group justify="flex-end" mt="sm">
             <AppButton variant="outline" onClick={close}>
               取消

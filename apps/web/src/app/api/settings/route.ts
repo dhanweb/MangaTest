@@ -83,6 +83,14 @@ export async function PATCH(request: Request) {
     input.openlistToken = payload.openlistToken.trim();
   }
 
+  if (typeof payload.openlistUsername === "string") {
+    input.openlistUsername = payload.openlistUsername.trim();
+  }
+
+  if (typeof payload.openlistPassword === "string") {
+    input.openlistPassword = payload.openlistPassword;
+  }
+
   if (typeof payload.aria2Enabled === "boolean") {
     input.aria2Enabled = payload.aria2Enabled;
   }

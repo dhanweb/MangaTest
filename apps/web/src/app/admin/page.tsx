@@ -177,6 +177,7 @@ function formatOperation(operation: string) {
     download_task_cancel: "取消下载",
     download_task_create: "创建下载",
     download_task_retry: "重试下载",
+    download_task_pull_back: "拉回本地",
     hide: "隐藏",
     merge_chapter: "合并章节",
     path_repair: "路径修复",

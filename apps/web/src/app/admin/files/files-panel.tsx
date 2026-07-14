@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type { ComicMaintenanceAction, DuplicateCandidateGroupRecord, ScanAllMangaRootsResult } from "@/modules/library";
 import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
@@ -26,15 +27,11 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   const [search, setSearch] = useAdminTabState("search", "");
   const [repairTarget, setRepairTarget] = useState<FileMaintenanceIssueRecord | null>(null);
   const [repairPath, setRepairPath] = useState("");
-  const [duplicateError, setDuplicateError] = useState("");
   const [pendingDuplicateAction, setPendingDuplicateAction] = useState<string | null>(null);
-  const [repairError, setRepairError] = useState("");
   const [isRepairing, setIsRepairing] = useState(false);
   const [isRechecking, setIsRechecking] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [pendingIgnoreId, setPendingIgnoreId] = useState<string | null>(null);
-  const [scanMessage, setScanMessage] = useState("");
-  const [scanError, setScanError] = useState("");
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -70,7 +67,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   function openRepair(issue: FileMaintenanceIssueRecord) {
     setRepairTarget(issue);
     setRepairPath(issue.filePath);
-    setRepairError("");
   }
 
   async function repairPathForTarget() {
@@ -79,7 +75,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
 
     setIsRepairing(true);
-    setRepairError("");
 
     const response = await fetch(`/api/local-files/${encodeURIComponent(repairTarget.id)}/repair`, {
       method: "POST",
@@ -89,7 +84,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     const payload = (await response.json()) as { error?: string };
 
     if (!response.ok) {
-      setRepairError(payload.error ?? "修复路径失败。");
+      toast.error(payload.error ?? "修复路径失败。");
       setIsRepairing(false);
       return;
     }
@@ -97,12 +92,12 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     setItems((current) => current.filter((item) => item.id !== repairTarget.id));
     setIsRepairing(false);
     setRepairTarget(null);
+    toast.success("路径已修复");
   }
 
   async function changeDuplicateComicStatus(comicId: string, action: Extract<ComicMaintenanceAction, "hide" | "soft_delete">) {
     const actionKey = `${comicId}:${action}`;
     setPendingDuplicateAction(actionKey);
-    setDuplicateError("");
 
     try {
       const response = await fetch(`/api/comics/${comicId}/status`, {
@@ -126,8 +121,9 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           candidates: group.candidates.map((candidate) => (candidate.id === comicId ? { ...candidate, status: payload.comic?.status ?? candidate.status } : candidate)),
         })),
       );
+      toast.success(action === "hide" ? "已隐藏重复候选" : "已软删除重复候选");
     } catch (error) {
-      setDuplicateError(error instanceof Error ? error.message : "处理重复候选失败。");
+      toast.error(error instanceof Error ? error.message : "处理重复候选失败。");
     } finally {
       setPendingDuplicateAction(null);
     }
@@ -139,8 +135,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
 
     setIsScanning(true);
-    setScanMessage("");
-    setScanError("");
 
     try {
       const response = await fetch("/api/local-files/scan", { method: "POST" });
@@ -156,13 +150,17 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           ? "没有启用的漫画根目录可扫描。"
           : `扫描完成：成功 ${result.scannedRootCount} 个根目录，失败 ${result.failedRootCount} 个，新增 ${result.addedCount} 本，标记缺失 ${result.missingCount} 个。`;
 
-      setScanMessage(result.failedRootCount > 0 ? `${message} 失败项已记录在扫描会话中。` : message);
+      if (result.failedRootCount > 0) {
+        toast.error(`${message} 失败项已记录在扫描会话中。`);
+      } else {
+        toast.success(message);
+      }
 
       if (result.enabledRootCount > 0) {
         window.setTimeout(() => window.location.reload(), 900);
       }
     } catch (error) {
-      setScanError(error instanceof Error ? error.message : "扫描全部漫画根目录失败。");
+      toast.error(error instanceof Error ? error.message : "扫描全部漫画根目录失败。");
     } finally {
       setIsScanning(false);
     }
@@ -174,8 +172,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
 
     setIsRechecking(true);
-    setScanMessage("");
-    setScanError("");
 
     try {
       const response = await fetch("/api/local-files/recheck", { method: "POST" });
@@ -188,7 +184,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
         throw new Error(payload.error ?? "重新检查缺失文件失败。");
       }
 
-      setScanMessage(
+      toast.success(
         `重新检查完成：检查 ${payload.result.checkedCount} 条缺失记录，恢复 ${payload.result.restoredCount} 条，仍缺失 ${payload.result.stillMissingCount} 条。`,
       );
 
@@ -196,7 +192,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
         window.setTimeout(() => window.location.reload(), 700);
       }
     } catch (error) {
-      setScanError(error instanceof Error ? error.message : "重新检查缺失文件失败。");
+      toast.error(error instanceof Error ? error.message : "重新检查缺失文件失败。");
     } finally {
       setIsRechecking(false);
     }
@@ -208,8 +204,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
     }
 
     setPendingIgnoreId(issue.id);
-    setScanMessage("");
-    setScanError("");
 
     try {
       const response = await fetch(`/api/local-files/${encodeURIComponent(issue.id)}/ignore`, { method: "POST" });
@@ -220,9 +214,9 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
       }
 
       setItems((current) => current.filter((item) => item.id !== issue.id));
-      setScanMessage("已忽略这条缺失文件问题；重新检查或重新扫描发现文件恢复后会自动清除忽略状态。");
+      toast.success("已忽略这条缺失文件问题；重新检查或重新扫描发现文件恢复后会自动清除忽略状态。");
     } catch (error) {
-      setScanError(error instanceof Error ? error.message : "忽略缺失文件问题失败。");
+      toast.error(error instanceof Error ? error.message : "忽略缺失文件问题失败。");
     } finally {
       setPendingIgnoreId(null);
     }
@@ -293,12 +287,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           </AppButton>
         </Group>
       </Group>
-
-      {(scanMessage || scanError) && (
-        <Text size="sm" c={scanError ? "red.7" : "green.7"} mb="md">
-          {scanError || scanMessage}
-        </Text>
-      )}
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
         <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
@@ -406,12 +394,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
           </Box>
         </Group>
 
-        {duplicateError && (
-          <Text size="sm" c="red.7" mb="sm">
-            {duplicateError}
-          </Text>
-        )}
-
         <Stack gap="sm">
           {filteredDuplicateGroups.map((group) => (
             <Box key={group.sortTitle} style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, overflow: "hidden" }}>
@@ -507,11 +489,6 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
             只更新数据库记录，不移动、不复制、不删除真实文件。新路径必须位于原 manga root 下。
           </Text>
           <AppInput label="新绝对路径" value={repairPath} onChange={(event) => setRepairPath(event.currentTarget.value)} />
-          {repairError && (
-            <Text size="sm" c="red.7">
-              {repairError}
-            </Text>
-          )}
           <Group justify="flex-end">
             <AppButton variant="outline" onClick={() => setRepairTarget(null)}>
               取消

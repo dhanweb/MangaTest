@@ -23,6 +23,10 @@ export interface RuntimeSettings {
   openlistEnabled: boolean;
   openlistBaseUrl: string;
   openlistToken: string;
+  /** 用于 token 过期时服务端自动重新登录（本地自托管）。 */
+  openlistUsername: string;
+  /** 用于 token 过期时服务端自动重新登录（本地自托管）。 */
+  openlistPassword: string;
   aria2Enabled: boolean;
   aria2RpcUrl: string;
   aria2RpcToken: string;

@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSwitch } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
 import type {
@@ -40,7 +41,6 @@ export default function SettingsPage() {
   const [openListLoginUsername, setOpenListLoginUsername] = useState(() => localStorage.getItem("openlist_login_username") ?? "");
   const [openListLoginPassword, setOpenListLoginPassword] = useState(() => localStorage.getItem("openlist_login_password") ?? "");
   const [openListLoginOtp, setOpenListLoginOtp] = useState(() => localStorage.getItem("openlist_login_otp") ?? "");
-  const [backupMessage, setBackupMessage] = useState("");
   const [savedBaselineJson, setSavedBaselineJson] = useState("");
 
   function updateDirtyBaseline(settings: RuntimeSettings) {
@@ -67,6 +67,10 @@ export default function SettingsPage() {
       };
       setRuntimeSettings(loaded);
       updateDirtyBaseline(loaded);
+      // 服务端已存账号时优先使用，便于 token 过期自动登录；否则回退 localStorage。
+      setOpenListLoginUsername(loaded.openlistUsername?.trim() || localStorage.getItem("openlist_login_username") || "");
+      setOpenListLoginPassword(loaded.openlistPassword || localStorage.getItem("openlist_login_password") || "");
+      setOpenListLoginOtp(localStorage.getItem("openlist_login_otp") || "");
         }
       })
       .catch(() => undefined);
@@ -107,6 +111,9 @@ export default function SettingsPage() {
         aria2RpcUrl: runtimeSettings.aria2RpcUrl.trim() && !/^https?:\/\//i.test(runtimeSettings.aria2RpcUrl.trim())
           ? `http://${runtimeSettings.aria2RpcUrl.trim()}`
           : runtimeSettings.aria2RpcUrl.trim(),
+        // 账号密码随设置一并保存，供下载任务 token 过期时自动重登
+        openlistUsername: openListLoginUsername.trim(),
+        openlistPassword: openListLoginPassword,
       };
       const response = await fetch("/api/settings", {
         method: "PATCH",
@@ -130,14 +137,16 @@ export default function SettingsPage() {
       };
       setRuntimeSettings(saved);
       updateDirtyBaseline(saved);
+      toast.success("设置已保存");
     } catch (error) {
       console.error("设置保存失败", error);
+      toast.error(error instanceof Error ? error.message : "设置保存失败。");
     } finally {
       setIsSaving(false);
     }
   }
 
-  async function saveSettingsWith(settings: RuntimeSettings) {
+  async function saveSettingsWith(settings: RuntimeSettings, options?: { silent?: boolean }) {
     setIsSaving(true);
     try {
       const settingsToSave = {
@@ -169,8 +178,13 @@ export default function SettingsPage() {
       };
       setRuntimeSettings(saved);
       updateDirtyBaseline(saved);
+      if (!options?.silent) {
+        toast.success("设置已保存");
+      }
     } catch (error) {
       console.error("设置保存失败", error);
+      toast.error(error instanceof Error ? error.message : "设置保存失败。");
+      throw error;
     } finally {
       setIsSaving(false);
     }
@@ -178,7 +192,6 @@ export default function SettingsPage() {
 
   async function exportSqliteBackup() {
     setIsExportingBackup(true);
-    setBackupMessage("");
 
     try {
       const response = await fetch("/api/settings/backup");
@@ -200,11 +213,19 @@ export default function SettingsPage() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      setBackupMessage("备份已开始下载");
+      toast.success("备份已开始下载");
     } catch (error) {
-      setBackupMessage(error instanceof Error ? error.message : "SQLite 备份导出失败。");
+      toast.error(error instanceof Error ? error.message : "SQLite 备份导出失败。");
     } finally {
       setIsExportingBackup(false);
+    }
+  }
+
+  function showOpenListCheckToast(result: Pick<OpenListConnectionCheckResult, "ok" | "message">) {
+    if (result.ok) {
+      toast.success(result.message || "OpenList 连接正常，设置已保存");
+    } else {
+      toast.error(result.message || "OpenList 校验失败。");
     }
   }
 
@@ -217,27 +238,84 @@ export default function SettingsPage() {
       const baseUrl = rawUrl && !/^https?:\/\//i.test(rawUrl) ? `http://${rawUrl}` : rawUrl;
 
       if (!baseUrl) {
-        setOpenListCheckResult({
+        const result: OpenListConnectionCheckResult = {
           ok: false, status: "missing_settings", checkedAt: new Date().toISOString(),
           baseUrl: null, tokenConfigured: false,
           message: "请先填写 OpenList 服务地址。", publicApi: null, accountApi: null,
-        });
+        };
+        setOpenListCheckResult(result);
+        showOpenListCheckToast(result);
         return;
       }
 
-      if (!runtimeSettings.openlistEnabled) {
-        setOpenListCheckResult({
-          ok: false, status: "disabled", checkedAt: new Date().toISOString(),
-          baseUrl, tokenConfigured: Boolean(runtimeSettings.openlistToken.trim()),
-          message: "OpenList 尚未启用。", publicApi: null, accountApi: null,
+      const token = runtimeSettings.openlistToken.trim();
+      const hasLogin = Boolean(openListLoginUsername.trim() && openListLoginPassword.trim());
+
+      // Explicit login credentials take precedence over any existing token.
+      // This makes the button behavior predictable when the user wants to refresh authentication.
+      if (hasLogin) {
+        const loginRes = await fetch("/api/settings/openlist/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baseUrl,
+            enabled: runtimeSettings.openlistEnabled,
+            username: openListLoginUsername,
+            password: openListLoginPassword,
+            otpCode: openListLoginOtp || null,
+          }),
         });
+        const loginPayload = (await loginRes.json()) as { result?: PublicOpenListLoginResult; settings?: RuntimeSettings; error?: string };
+
+        if (!loginPayload.result?.ok || !loginPayload.settings) {
+          const ls = loginPayload.result?.status;
+          const ms: OpenListConnectionStatus = ls === "missing_settings" ? "missing_settings" : ls === "unauthorized" ? "unauthorized" : ls === "invalid_response" ? "invalid_response" : "unreachable";
+          const result: OpenListConnectionCheckResult = {
+            ok: false, status: ms, checkedAt: new Date().toISOString(),
+            baseUrl, tokenConfigured: false,
+            message: loginPayload.result?.message ?? loginPayload.error ?? "登录失败。", publicApi: null, accountApi: null,
+          };
+          setOpenListCheckResult(result);
+          showOpenListCheckToast(result);
+          return;
+        }
+
+        const s = loginPayload.settings;
+        const loginUpdated: RuntimeSettings = {
+          ...runtimeSettings,
+          openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
+            ? `http://${s.openlistBaseUrl.trim()}`
+            : s.openlistBaseUrl.trim(),
+          openlistToken: s.openlistToken.trim(),
+          openlistUsername: openListLoginUsername.trim(),
+          openlistPassword: openListLoginPassword,
+        };
+
+        const retryRes = await fetch("/api/settings/openlist/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            baseUrl: loginUpdated.openlistBaseUrl,
+            token: loginUpdated.openlistToken,
+            enabled: loginUpdated.openlistEnabled,
+          }),
+        });
+        const retryPayload = (await retryRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
+
+        if (!retryPayload.result) {
+          throw new Error(retryPayload.error ?? "登录成功但校验失败。");
+        }
+
+        setOpenListCheckResult(retryPayload.result);
+        if (retryPayload.result.ok) {
+          await saveSettingsWith(loginUpdated, { silent: true });
+          toast.success(retryPayload.result.message || "OpenList 登录成功，设置已保存");
+        } else {
+          showOpenListCheckToast(retryPayload.result);
+        }
         return;
       }
 
-      let token = runtimeSettings.openlistToken.trim();
-      const hasLogin = openListLoginUsername.trim() && openListLoginPassword.trim();
-
-      // Try with existing token first
       if (token) {
         const checkRes = await fetch("/api/settings/openlist/check", {
           method: "POST",
@@ -246,83 +324,41 @@ export default function SettingsPage() {
         });
         const checkPayload = (await checkRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
 
-        if (checkPayload.result?.ok) {
-          setOpenListCheckResult(checkPayload.result);
-          await saveSettings();
-          return;
+        if (!checkPayload.result) {
+          throw new Error(checkPayload.error ?? "校验失败。");
         }
 
-        // Token expired — try re-login if we have credentials
-        const isUnauthorized = checkPayload.result?.status === "unauthorized";
-        if (!isUnauthorized || !hasLogin) {
-          setOpenListCheckResult(checkPayload.result!);
-          return;
+        setOpenListCheckResult(checkPayload.result);
+        if (checkPayload.result.ok) {
+          await saveSettingsWith({
+            ...runtimeSettings,
+            openlistBaseUrl: baseUrl,
+            openlistUsername: openListLoginUsername.trim(),
+            openlistPassword: openListLoginPassword,
+          }, { silent: true });
+          toast.success(checkPayload.result.message || "OpenList 连接正常，设置已保存");
+        } else {
+          showOpenListCheckToast(checkPayload.result);
         }
-      }
-
-      if (!hasLogin) {
-        setOpenListCheckResult({
-          ok: false, status: "missing_settings", checkedAt: new Date().toISOString(),
-          baseUrl, tokenConfigured: false,
-          message: "请填写访问 token 或通过账号登录获取。", publicApi: null, accountApi: null,
-        });
         return;
       }
 
-      // No valid token — login to get one
-      const loginRes = await fetch("/api/settings/openlist/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl, username: openListLoginUsername, password: openListLoginPassword, otpCode: openListLoginOtp || null }),
-      });
-      const loginPayload = (await loginRes.json()) as { result?: PublicOpenListLoginResult; settings?: RuntimeSettings; error?: string };
-
-      if (!loginPayload.result?.ok || !loginPayload.settings) {
-        const ls = loginPayload.result?.status;
-        const ms: OpenListConnectionStatus = ls === "missing_settings" ? "missing_settings" : ls === "unauthorized" ? "unauthorized" : ls === "invalid_response" ? "invalid_response" : "unreachable";
-        setOpenListCheckResult({
-          ok: false, status: ms, checkedAt: new Date().toISOString(),
-          baseUrl, tokenConfigured: false,
-          message: loginPayload.result?.message ?? loginPayload.error ?? "登录失败。", publicApi: null, accountApi: null,
-        });
-        return;
-      }
-
-      const s = loginPayload.settings;
-      const loginUpdated: RuntimeSettings = {
-        ...s,
-        openlistBaseUrl: s.openlistBaseUrl.trim() && !/^https?:\/\//i.test(s.openlistBaseUrl.trim())
-          ? `http://${s.openlistBaseUrl.trim()}`
-          : s.openlistBaseUrl.trim(),
-        aria2RpcUrl: s.aria2RpcUrl.trim() && !/^https?:\/\//i.test(s.aria2RpcUrl.trim())
-          ? `http://${s.aria2RpcUrl.trim()}`
-          : s.aria2RpcUrl.trim(),
+      const result: OpenListConnectionCheckResult = {
+        ok: false, status: "missing_settings", checkedAt: new Date().toISOString(),
+        baseUrl, tokenConfigured: false,
+        message: "请填写访问 token 或通过账号登录获取。", publicApi: null, accountApi: null,
       };
-      setRuntimeSettings(loginUpdated);
-      updateDirtyBaseline(loginUpdated);
-      token = s.openlistToken ?? "";
-
-      // Now check with the new token
-      const retryRes = await fetch("/api/settings/openlist/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ baseUrl, token, enabled: loginUpdated.openlistEnabled }),
-      });
-      const retryPayload = (await retryRes.json()) as { result?: OpenListConnectionCheckResult; error?: string };
-
-      if (retryPayload.result) {
-        setOpenListCheckResult(retryPayload.result);
-        if (retryPayload.result.ok) await saveSettingsWith(loginUpdated);
-      } else {
-        throw new Error(retryPayload.error ?? "登录成功但校验失败。");
-      }
+      setOpenListCheckResult(result);
+      showOpenListCheckToast(result);
     } catch (error) {
-      setOpenListCheckResult({
+      const result: OpenListConnectionCheckResult = {
         ok: false, status: "unreachable", checkedAt: new Date().toISOString(),
         baseUrl: runtimeSettings.openlistBaseUrl.trim() || null,
         tokenConfigured: Boolean(runtimeSettings.openlistToken.trim()),
         message: error instanceof Error ? error.message : "校验失败。", publicApi: null, accountApi: null,
-      });
+      };
+      setOpenListCheckResult(result);
+      showOpenListCheckToast(result);
     } finally {
       setIsCheckingOpenList(false);
     }
@@ -348,12 +384,16 @@ export default function SettingsPage() {
       }
 
       setAria2CheckResult(payload.result);
-      if (payload.result.ok) await saveSettings();
+      if (payload.result.ok) {
+        await saveSettingsWith(runtimeSettings, { silent: true });
+        toast.success(payload.result.message || "aria2 连接正常，设置已保存");
+      } else {
+        toast.error(payload.result.message || "aria2 连接校验失败。");
+      }
     } catch (error) {
-      setAria2CheckResult({
-        ok: false,
-        message: error instanceof Error ? error.message : "aria2 连接校验失败。",
-      });
+      const message = error instanceof Error ? error.message : "aria2 连接校验失败。";
+      setAria2CheckResult({ ok: false, message });
+      toast.error(message);
     } finally {
       setIsCheckingAria2(false);
     }
@@ -440,7 +480,6 @@ export default function SettingsPage() {
         )}
         {activeTab === "安全设置" && (
           <SecuritySettings
-            backupMessage={backupMessage}
             isExportingBackup={isExportingBackup}
             onExportBackup={exportSqliteBackup}
             onSettingsChange={setRuntimeSettings}
@@ -791,7 +830,7 @@ function DownloadSettings({
             />
           </Group>
         </SettingsRow>
-        <SettingsRow label="账号登录" note="填写用户名、密码和 OTP，点击下方按钮自动登录获取 token 并校验。">
+        <SettingsRow label="账号登录" note="用户名/密码会保存到本地服务端，token 过期时下载任务可自动重登刷新。OTP 不会用于自动登录。">
           <Stack gap={8} style={{ width: 320 }}>
             <AppInput value={loginUsername} onChange={(event) => onSetLoginUsername(event.currentTarget.value)} placeholder="用户名" size="xs" />
             <AppInput
@@ -804,15 +843,10 @@ function DownloadSettings({
             <AppInput value={loginOtp} onChange={(event) => onSetLoginOtp(event.currentTarget.value)} placeholder="OTP，可选" size="xs" />
           </Stack>
         </SettingsRow>
-        <SettingsRow label="校验并保存" note={checkResult && checkResult.ok ? "连接正常，设置已保存" : "优先使用账号登录；若已有 token 则直接校验。"}>
-          <Stack gap={4}>
-            <AppButton loading={isCheckingOpenList} onClick={onCheckOpenList}>
-              校验并保存
-            </AppButton>
-            {checkResult && (
-              <InlineCheckResult ok={checkResult.ok} message={checkResult.message} checkedAt={checkResult.checkedAt} dotColor={openListDotColor ?? "#53606c"} />
-            )}
-          </Stack>
+        <SettingsRow label="校验并保存" note={checkResult && checkResult.ok ? "最近一次校验成功" : "填写账号密码时优先登录并保存凭证；结果以右上角 toast 提示。"}>
+          <AppButton loading={isCheckingOpenList} onClick={onCheckOpenList}>
+            校验并保存
+          </AppButton>
         </SettingsRow>
       </SettingsGroup>
 
@@ -847,40 +881,14 @@ function DownloadSettings({
             style={{ width: 320 }}
           />
         </SettingsRow>
-        <SettingsRow label="连接校验" note="通过 RPC 接口检查 aria2 连通性。">
-          <Stack gap={4}>
-            <AppButton loading={isCheckingAria2} onClick={onCheckAria2}>
-              校验连接
-            </AppButton>
-            {aria2CheckResult && (
-              <InlineCheckResult ok={aria2CheckResult.ok} message={aria2CheckResult.message} checkedAt={null} dotColor={aria2CheckResult.ok ? "#00894a" : "#d93a4e"} />
-            )}
-          </Stack>
+        <SettingsRow label="连接校验" note="通过 RPC 接口检查 aria2 连通性；结果以右上角 toast 提示。">
+          <AppButton loading={isCheckingAria2} onClick={onCheckAria2}>
+            校验连接
+          </AppButton>
         </SettingsRow>
       </SettingsGroup>
 
     </>
-  );
-}
-
-function InlineCheckResult({ ok, message, checkedAt, dotColor }: { ok: boolean; message: string; checkedAt: string | null; dotColor: string }) {
-  return (
-    <Group gap={6} align="flex-start" wrap="nowrap" style={{ padding: "6px 0" }}>
-      <Box component="span" style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", flexShrink: 0, marginTop: 5, backgroundColor: dotColor }} />
-      <Box style={{ minWidth: 0 }}>
-        <Text size="xs" fw={600} c={ok ? "#00894a" : "#d93a4e"}>
-          {ok ? "正常" : "失败"}
-        </Text>
-        <Text size="xs" c="ink.5" style={{ lineHeight: 1.4 }}>
-          {message}
-        </Text>
-        {checkedAt && (
-          <Text size="xs" c="ink.3" mt={1}>
-            {formatDate(checkedAt)}
-          </Text>
-        )}
-      </Box>
-    </Group>
   );
 }
 
@@ -935,13 +943,11 @@ function ScanSettings() {
 }
 
 function SecuritySettings({
-  backupMessage,
   isExportingBackup,
   onExportBackup,
   onSettingsChange,
   settings,
 }: {
-  backupMessage: string;
   isExportingBackup: boolean;
   onExportBackup: () => void;
   onSettingsChange: (settings: RuntimeSettings) => void;
@@ -958,11 +964,6 @@ function SecuritySettings({
         <SettingsRow label="备份范围" note="包含漫画记录、阅读进度、标签、设置、扫描和操作日志。">
           <AppInput value="mangatest.sqlite" readOnly style={{ width: 180 }} />
         </SettingsRow>
-        {backupMessage && (
-          <SettingsRow label="">
-            <Text size="sm" c={backupMessage.includes("失败") ? "red.7" : "green.7"}>{backupMessage}</Text>
-          </SettingsRow>
-        )}
       </SettingsGroup>
 
       <SettingsGroup title="接口保护">
@@ -998,13 +999,6 @@ function SecuritySettings({
         </SettingsRow>
       </SettingsGroup>
 
-      <Group justify="flex-end" mt="md">
-        {backupMessage && (
-          <Text size="sm" c={backupMessage.includes("失败") ? "red.7" : "green.7"}>
-            {backupMessage}
-          </Text>
-        )}
-      </Group>
     </>
   );
 }
@@ -1012,13 +1006,4 @@ function SecuritySettings({
 function parseAttachmentFilename(disposition: string) {
   const match = /filename="([^"]+)"/.exec(disposition);
   return match?.[1] ?? null;
-}
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

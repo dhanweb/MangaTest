@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput } from "@/components/ui/app-components";
+import { toast } from "@/components/ui/toast";
 import type {
   DownloadableResourceRecord,
   DownloadDispatchPlan,
@@ -43,6 +44,9 @@ type ApiData = {
   plan?: DownloadWorkerTickResult["plan"];
   reason?: string;
   error?: string;
+  code?: string;
+  details?: Record<string, unknown>;
+  message?: string;
   created?: boolean;
   task?: DownloadTaskRecord;
   transferTask?: DownloadTaskRecord;
@@ -83,7 +87,6 @@ export function DownloadsPanel({
   const [pendingCreate, setPendingCreate] = useState(false);
   const [pendingTick, setPendingTick] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
-  const [msg, setMsg] = useState<{ text: string; tone: "success" | "error" } | null>(null);
 
   const selected = useMemo(() => resourceItems.find((r) => r.id === selectedId) ?? null, [resourceItems, selectedId]);
   const providerOpts = useMemo(
@@ -98,16 +101,25 @@ export function DownloadsPanel({
   const tickingRef = useRef(false);
   const offlineTickingRef = useRef(false);
 
-  function showMsg(text: string, tone: "success" | "error") { setMsg({ text, tone }); setTimeout(() => setMsg(null), 4000); }
-
   async function fetchApi(path: string, opts: RequestInit = {}): Promise<ApiData | null> {
     try {
       const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
       const d = await res.json() as ApiData;
-      if (!res.ok) throw new Error(d.error || "请求失败");
+      if (!res.ok) {
+        const detailParts: string[] = [];
+        if (d.code) detailParts.push(d.code);
+        if (d.details && typeof d.details.remotePath === "string") {
+          detailParts.push(`path=${d.details.remotePath}`);
+        }
+        if (d.details && typeof d.details.openlistCode === "number") {
+          detailParts.push(`openlist=${d.details.openlistCode}`);
+        }
+        const suffix = detailParts.length > 0 ? ` [${detailParts.join(", ")}]` : "";
+        throw new Error(`${d.error || "请求失败"}${suffix}`);
+      }
       return d;
     } catch (err) {
-      showMsg(err instanceof Error ? err.message : "请求失败", "error");
+      toast.error(err instanceof Error ? err.message : "请求失败");
       return null;
     }
   }
@@ -167,8 +179,8 @@ export function DownloadsPanel({
       body: JSON.stringify({ comicResourceId: selected.id, provider, taskType: "offline", targetDirectory: targetDir || null }),
     });
     if (d) {
-      if (d.created) showMsg("离线任务已创建", "success");
-      else showMsg("已有相同任务，未重复创建", "success");
+      if (d.created) toast.success("离线任务已创建");
+      else toast.success("已有相同任务，未重复创建");
       await refresh();
     }
     setPendingCreate(false);
@@ -179,7 +191,7 @@ export function DownloadsPanel({
     const d = await fetchApi("/api/downloads/worker/offline-tick", { method: "POST" });
     if (d) {
       if (d.plan) setPlanItem(d.plan);
-      showMsg(d.reason || "离线 Worker 已执行", "success");
+      toast.success(d.reason || "离线 Worker 已执行");
       await refresh();
     }
     setPendingTick(false);
@@ -190,7 +202,7 @@ export function DownloadsPanel({
     const d = await fetchApi("/api/downloads/worker/transfer-tick", { method: "POST" });
     if (d) {
       if (d.plan) setPlanItem(d.plan);
-      showMsg(d.reason || "传输 Worker 已执行", "success");
+      toast.success(d.reason || "传输 Worker 已执行");
       await refresh();
     }
     setPendingTick(false);
@@ -220,21 +232,15 @@ export function DownloadsPanel({
   async function pullBackTask(taskId: string) {
     setPendingAction(`pullback:${taskId}`);
     const d = await fetchApi(`/api/downloads/${taskId}/pull-back`, { method: "POST" });
-    if (d && d.created) showMsg("已创建传输任务，请查看传输列表", "success");
+    if (d && d.created) {
+      toast.success(d.message || "已创建传输任务，请查看传输列表");
+    }
     await refresh();
     setPendingAction(null);
   }
 
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
-      {msg && (
-        <Box style={{
-          position: "fixed", top: 16, right: 16, zIndex: 9999, padding: "10px 18px", borderRadius: 10,
-          background: msg.tone === "success" ? "#087f5b" : "#d93a4e", color: "#fff",
-          fontSize: 13, fontWeight: 600, boxShadow: "0 4px 16px rgba(0,0,0,0.18)", maxWidth: 400,
-        }}>{msg.text}</Box>
-      )}
-
       <Group justify="space-between" mb="lg">
         <Box>
           <Text component="h1" size="20px" fw={700} mb={2}>下载任务</Text>

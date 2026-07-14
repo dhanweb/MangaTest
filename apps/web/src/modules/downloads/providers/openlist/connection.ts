@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
+import { getRuntimeSettings, saveRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 
 export const OPENLIST_PASSWORD_HASH_SALT = "-https://github.com/alist-org/alist";
 
@@ -84,6 +84,7 @@ export interface OpenListResourceProbeResult {
 
 export interface OpenListDownloadLinkResult extends OpenListResourceProbeResult {
   rawUrl: string | null;
+  headers: Record<string, string>;
 }
 
 export interface OpenListDirectoryListResult {
@@ -103,10 +104,20 @@ interface OpenListResourceProbeOptions {
   page?: number;
   settings?: RuntimeSettings;
   perPage?: number;
+  /** 内部重试标记，防止自动刷新 token 死循环。 */
+  skipAuthRefresh?: boolean;
+}
+
+export interface OpenListAuthRefreshResult {
+  ok: boolean;
+  settings: RuntimeSettings;
+  tokenRefreshed: boolean;
+  message: string;
 }
 
 export interface OpenListLoginInput {
   baseUrl: string;
+  enabled?: boolean;
   username: string;
   password: string;
   otpCode?: string | null;
@@ -133,19 +144,6 @@ export async function checkOpenListConnection(options: OpenListConnectionCheckOp
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
   const token = settings.openlistToken.trim();
   const tokenConfigured = token.length > 0;
-
-  if (!settings.openlistEnabled) {
-    return {
-      ok: false,
-      status: "disabled",
-      checkedAt,
-      baseUrl,
-      tokenConfigured,
-      message: "OpenList provider 尚未启用。",
-      publicApi: null,
-      accountApi: null,
-    };
-  }
 
   if (!baseUrl || !tokenConfigured) {
     return {
@@ -298,12 +296,123 @@ export async function loginOpenList(input: OpenListLoginInput, options: OpenList
   };
 }
 
+/**
+ * 使用已保存的账号密码重新登录 OpenList，并写回 openlistToken。
+ * forceRefresh=false 且已有 token 时不请求登录。
+ */
+export async function ensureOpenListToken(
+  settings: RuntimeSettings,
+  options: { fetchImpl?: typeof fetch; forceRefresh?: boolean } = {},
+): Promise<OpenListAuthRefreshResult> {
+  if (!options.forceRefresh && settings.openlistToken.trim()) {
+    return {
+      ok: true,
+      settings,
+      tokenRefreshed: false,
+      message: "OpenList token 仍可用。",
+    };
+  }
+
+  const baseUrl = settings.openlistBaseUrl.trim();
+  const username = settings.openlistUsername.trim();
+  const password = settings.openlistPassword;
+
+  if (!baseUrl || !username || !password) {
+    return {
+      ok: false,
+      settings,
+      tokenRefreshed: false,
+      message: "OpenList token 已过期或缺失，且未保存账号密码，无法自动登录。请到设置页重新登录。",
+    };
+  }
+
+  const login = await loginOpenList(
+    {
+      baseUrl,
+      enabled: settings.openlistEnabled,
+      username,
+      password,
+    },
+    { fetchImpl: options.fetchImpl },
+  );
+
+  if (!login.ok || !login.token) {
+    return {
+      ok: false,
+      settings,
+      tokenRefreshed: false,
+      message: login.message || "OpenList 自动登录失败。",
+    };
+  }
+
+  const nextSettings = await saveRuntimeSettings({
+    openlistBaseUrl: login.baseUrl ?? baseUrl,
+    openlistToken: login.token,
+  });
+
+  return {
+    ok: true,
+    settings: nextSettings,
+    tokenRefreshed: true,
+    message: "OpenList token 已自动刷新。",
+  };
+}
+
+type OpenListAuthRetryResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; refreshMessage: string | null };
+
+async function retryWithRefreshedOpenListToken<T>(
+  settings: RuntimeSettings,
+  options: { fetchImpl?: typeof fetch; skipAuthRefresh?: boolean },
+  retry: (nextSettings: RuntimeSettings) => Promise<T>,
+): Promise<OpenListAuthRetryResult<T>> {
+  if (options.skipAuthRefresh) {
+    return { ok: false, refreshMessage: null };
+  }
+
+  const refreshed = await ensureOpenListToken(settings, {
+    fetchImpl: options.fetchImpl,
+    forceRefresh: true,
+  });
+
+  if (!refreshed.ok) {
+    return { ok: false, refreshMessage: refreshed.message };
+  }
+
+  return { ok: true, value: await retry(refreshed.settings) };
+}
+
+function unauthorizedOpenListMessage(refreshMessage: string | null | undefined, fallback = "OpenList token 未通过认证。") {
+  if (refreshMessage?.trim()) {
+    return refreshMessage.trim();
+  }
+  return fallback;
+}
+
+function isOpenListUnauthorized(check: { status: number | null; code: number | null; message?: string | null } | null | undefined) {
+  if (!check) {
+    return false;
+  }
+
+  if (check.status === 401 || check.status === 403) {
+    return true;
+  }
+
+  if (check.code === 401 || check.code === 403) {
+    return true;
+  }
+
+  const message = (check.message ?? "").toLowerCase();
+  return /token.*(expired|invalid)|guest user is disabled|please login|unauthorized|未登录|token\s*失效|token\s*过期/.test(message);
+}
+
 export async function inspectOpenListResource(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListResourceProbeResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
-  const token = settings.openlistToken.trim();
-  const tokenConfigured = token.length > 0;
+  let token = settings.openlistToken.trim();
+  let tokenConfigured = token.length > 0;
   const resourcePath = normalizeOpenListResourcePath(resourceUrl);
 
   if (!settings.openlistEnabled) {
@@ -320,7 +429,31 @@ export async function inspectOpenListResource(resourceUrl: string | null | undef
     };
   }
 
-  if (!baseUrl || !tokenConfigured) {
+  if (!baseUrl) {
+    return {
+      ok: false,
+      status: "missing_settings",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 资源预检需要服务地址和访问 token。",
+      resource: null,
+      fileApi: null,
+    };
+  }
+
+  if (!tokenConfigured && !options.skipAuthRefresh) {
+    const ensured = await ensureOpenListToken(settings, { fetchImpl: options.fetchImpl, forceRefresh: true });
+    if (ensured.ok) {
+      return inspectOpenListResource(resourceUrl, { ...options, settings: ensured.settings, skipAuthRefresh: true });
+    }
+  }
+
+  token = settings.openlistToken.trim();
+  tokenConfigured = token.length > 0;
+
+  if (!tokenConfigured) {
     return {
       ok: false,
       status: "missing_settings",
@@ -352,7 +485,14 @@ export async function inspectOpenListResource(resourceUrl: string | null | undef
   const fileApi = await postOpenListFileGet(fetchImpl, buildOpenListUrl(baseUrl, "api/fs/get"), token, resourcePath);
   const publicFileApi = toPublicEndpointCheck(fileApi);
 
-  if (fileApi.status === 401 || fileApi.status === 403) {
+  if (isOpenListUnauthorized(fileApi)) {
+    const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+      inspectOpenListResource(resourceUrl, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+    );
+    if (retried.ok) {
+      return retried.value;
+    }
+
     return {
       ok: false,
       status: "unauthorized",
@@ -360,7 +500,7 @@ export async function inspectOpenListResource(resourceUrl: string | null | undef
       baseUrl,
       path: resourcePath,
       tokenConfigured,
-      message: "OpenList token 未通过认证。",
+      message: unauthorizedOpenListMessage(retried.refreshMessage),
       resource: null,
       fileApi: publicFileApi,
     };
@@ -469,19 +609,33 @@ export async function submitOpenListOfflineDownload(
   url: string,
   savePath: string,
   tool = "115 Open",
-  options: { fetchImpl?: typeof fetch; settings?: RuntimeSettings } = {},
+  options: { fetchImpl?: typeof fetch; settings?: RuntimeSettings; skipAuthRefresh?: boolean } = {},
 ): Promise<OpenListOfflineDownloadResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
-  const token = settings.openlistToken.trim();
-  const tokenConfigured = token.length > 0;
+  let token = settings.openlistToken.trim();
+  let tokenConfigured = token.length > 0;
 
   if (!settings.openlistEnabled) {
     return { ok: false, status: "disabled", checkedAt, baseUrl, tokenConfigured, message: "OpenList provider 尚未启用。", taskId: null, apiCheck: null };
   }
 
-  if (!baseUrl || !tokenConfigured) {
+  if (!baseUrl) {
+    return { ok: false, status: "missing_settings", checkedAt, baseUrl, tokenConfigured, message: "OpenList needs base URL and token.", taskId: null, apiCheck: null };
+  }
+
+  if (!tokenConfigured && !options.skipAuthRefresh) {
+    const ensured = await ensureOpenListToken(settings, { fetchImpl: options.fetchImpl, forceRefresh: true });
+    if (ensured.ok) {
+      return submitOpenListOfflineDownload(url, savePath, tool, { ...options, settings: ensured.settings, skipAuthRefresh: true });
+    }
+  }
+
+  token = settings.openlistToken.trim();
+  tokenConfigured = token.length > 0;
+
+  if (!tokenConfigured) {
     return { ok: false, status: "missing_settings", checkedAt, baseUrl, tokenConfigured, message: "OpenList needs base URL and token.", taskId: null, apiCheck: null };
   }
 
@@ -502,8 +656,23 @@ export async function submitOpenListOfflineDownload(
 
     const apiCheck: OpenListEndpointCheck = { endpoint, ok: response.ok && (payloadCode == null || payloadCode === 200), status: response.status, code: payloadCode, message: payloadMessage };
 
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, status: "unauthorized", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "OpenList token 未通过认证。", taskId: null, apiCheck };
+    if (isOpenListUnauthorized({ status: response.status, code: payloadCode, message: payloadMessage })) {
+      const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+        submitOpenListOfflineDownload(url, savePath, tool, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+      );
+      if (retried.ok) {
+        return retried.value;
+      }
+      return {
+        ok: false,
+        status: "unauthorized",
+        checkedAt,
+        baseUrl,
+        tokenConfigured,
+        message: unauthorizedOpenListMessage(retried.refreshMessage, payloadMessage || "OpenList token 未通过认证。"),
+        taskId: null,
+        apiCheck,
+      };
     }
     if (!response.ok || (payloadCode != null && payloadCode !== 200)) {
       return { ok: false, status: "invalid_response", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载提交失败。", taskId: null, apiCheck };
@@ -517,29 +686,67 @@ export async function submitOpenListOfflineDownload(
   }
 }
 
-export async function listOpenListOfflineTasks(kind: "undone" | "done"): Promise<OpenListOfflineTaskItem[]> {
-  const settings = await getRuntimeSettings();
+export async function listOpenListOfflineTasks(
+  kind: "undone" | "done",
+  options: { fetchImpl?: typeof fetch; settings?: RuntimeSettings; skipAuthRefresh?: boolean } = {},
+): Promise<OpenListOfflineTaskItem[]> {
+  const settings = options.settings ?? (await getRuntimeSettings());
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
-  const token = settings.openlistToken.trim();
-  if (!baseUrl || !token) return [];
+  let token = settings.openlistToken.trim();
+
+  if (!baseUrl) {
+    return [];
+  }
+
+  if (!token && !options.skipAuthRefresh) {
+    const ensured = await ensureOpenListToken(settings, { fetchImpl: options.fetchImpl, forceRefresh: true });
+    if (ensured.ok) {
+      return listOpenListOfflineTasks(kind, { ...options, settings: ensured.settings, skipAuthRefresh: true });
+    }
+  }
+
+  token = settings.openlistToken.trim();
+  if (!token) {
+    return [];
+  }
+
+  const fetchImpl = options.fetchImpl ?? fetch;
+
   try {
-    const res = await fetch(buildOpenListUrl(baseUrl, `api/task/offline_download/${kind}`), {
+    const res = await fetchImpl(buildOpenListUrl(baseUrl, `api/task/offline_download/${kind}`), {
       method: "GET",
       headers: { Authorization: token },
       signal: AbortSignal.timeout(5000),
     });
     const payload = await res.json().catch(() => null);
-    if (payload?.code === 200 && Array.isArray(payload?.data)) return payload.data;
+    const payloadCode = typeof payload?.code === "number" ? payload.code : null;
+    const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
+
+    if (isOpenListUnauthorized({ status: res.status, code: payloadCode, message: payloadMessage })) {
+      const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+        listOpenListOfflineTasks(kind, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+      );
+      if (retried.ok) {
+        return retried.value;
+      }
+      return [];
+    }
+
+    if (payload?.code === 200 && Array.isArray(payload?.data)) {
+      return payload.data;
+    }
     return [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 export async function resolveOpenListDownloadLink(resourceUrl: string | null | undefined, options: OpenListResourceProbeOptions = {}): Promise<OpenListDownloadLinkResult> {
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
-  const token = settings.openlistToken.trim();
-  const tokenConfigured = token.length > 0;
+  let token = settings.openlistToken.trim();
+  let tokenConfigured = token.length > 0;
   const resourcePath = normalizeOpenListResourcePath(resourceUrl);
 
   if (!settings.openlistEnabled) {
@@ -553,11 +760,12 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: "OpenList provider 尚未启用。",
       resource: null,
       rawUrl: null,
+      headers: {},
       fileApi: null,
     };
   }
 
-  if (!baseUrl || !tokenConfigured) {
+  if (!baseUrl) {
     return {
       ok: false,
       status: "missing_settings",
@@ -568,6 +776,35 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: "OpenList 下载取链需要服务地址和访问 token。",
       resource: null,
       rawUrl: null,
+      headers: {},
+      fileApi: null,
+    };
+  }
+
+  let missingTokenRefreshMessage: string | null = null;
+  if (!tokenConfigured && !options.skipAuthRefresh) {
+    const ensured = await ensureOpenListToken(settings, { fetchImpl: options.fetchImpl, forceRefresh: true });
+    if (ensured.ok) {
+      return resolveOpenListDownloadLink(resourceUrl, { ...options, settings: ensured.settings, skipAuthRefresh: true });
+    }
+    missingTokenRefreshMessage = ensured.message;
+  }
+
+  token = settings.openlistToken.trim();
+  tokenConfigured = token.length > 0;
+
+  if (!tokenConfigured) {
+    return {
+      ok: false,
+      status: "missing_settings",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: unauthorizedOpenListMessage(missingTokenRefreshMessage, "OpenList 下载取链需要服务地址和访问 token。"),
+      resource: null,
+      rawUrl: null,
+      headers: {},
       fileApi: null,
     };
   }
@@ -583,6 +820,7 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: "资源缺少 OpenList 路径。",
       resource: null,
       rawUrl: null,
+      headers: {},
       fileApi: null,
     };
   }
@@ -591,7 +829,14 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
   const fileApi = await postOpenListFileGet(fetchImpl, buildOpenListUrl(baseUrl, "api/fs/get"), token, resourcePath);
   const publicFileApi = toPublicEndpointCheck(fileApi);
 
-  if (fileApi.status === 401 || fileApi.status === 403) {
+  if (isOpenListUnauthorized(fileApi)) {
+    const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+      resolveOpenListDownloadLink(resourceUrl, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+    );
+    if (retried.ok) {
+      return retried.value;
+    }
+
     return {
       ok: false,
       status: "unauthorized",
@@ -599,9 +844,10 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       baseUrl,
       path: resourcePath,
       tokenConfigured,
-      message: "OpenList token 未通过认证。",
+      message: unauthorizedOpenListMessage(retried.refreshMessage),
       resource: null,
       rawUrl: null,
+      headers: {},
       fileApi: publicFileApi,
     };
   }
@@ -617,6 +863,7 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: "OpenList 路径不存在或当前账号不可见。",
       resource: null,
       rawUrl: null,
+      headers: {},
       fileApi: publicFileApi,
     };
   }
@@ -632,6 +879,7 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: fileApi.message ?? "OpenList 文件信息接口返回异常。",
       resource: null,
       rawUrl: null,
+      headers: {},
       fileApi: publicFileApi,
     };
   }
@@ -647,35 +895,75 @@ export async function resolveOpenListDownloadLink(resourceUrl: string | null | u
       message: "OpenList 路径是目录，不能直接下载为临时文件。",
       resource: fileApi.resource,
       rawUrl: null,
+      headers: {},
       fileApi: publicFileApi,
     };
   }
 
-  if (!fileApi.rawUrl) {
+  // 优先通过 /api/fs/link 获取下载链接（含请求头，如 User-Agent、Referer），
+  // 这些请求头对某些存储（如 115）是必需的，aria2 裸 URL 请求会返回 403。
+  // 参考 OpenList download-first-from-dir.js：link 返回 header/headers，URL 可能是相对路径。
+  const linkApi = await postOpenListFileLink(
+    fetchImpl,
+    buildOpenListUrl(baseUrl, "api/fs/link"),
+    token,
+    resourcePath,
+  );
+
+  if (isOpenListUnauthorized(linkApi)) {
+    const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+      resolveOpenListDownloadLink(resourceUrl, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+    );
+    if (retried.ok) {
+      return retried.value;
+    }
+  }
+
+  if (linkApi.ok && linkApi.linkUrl) {
+    const absoluteLinkUrl = joinOpenListDownloadUrl(baseUrl, linkApi.linkUrl) ?? linkApi.linkUrl;
     return {
       ok: true,
-      status: "file_without_raw_url",
+      status: "file_ready",
       checkedAt,
       baseUrl,
       path: resourcePath,
       tokenConfigured,
-      message: "OpenList 文件可访问，但响应中没有可用 raw_url。",
+      message: "OpenList 文件下载链接已获取（含请求头）。",
       resource: fileApi.resource,
-      rawUrl: null,
+      rawUrl: absoluteLinkUrl,
+      headers: linkApi.headers,
+      fileApi: publicFileApi,
+    };
+  }
+
+  if (fileApi.rawUrl) {
+    const absoluteRawUrl = joinOpenListDownloadUrl(baseUrl, fileApi.rawUrl) ?? fileApi.rawUrl;
+    return {
+      ok: true,
+      status: "file_ready",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 文件下载链接已获取（raw_url）。",
+      resource: fileApi.resource,
+      rawUrl: absoluteRawUrl,
+      headers: {},
       fileApi: publicFileApi,
     };
   }
 
   return {
     ok: true,
-    status: "file_ready",
+    status: "file_without_raw_url",
     checkedAt,
     baseUrl,
     path: resourcePath,
     tokenConfigured,
-    message: "OpenList 文件下载链接已获取。",
+    message: "OpenList 文件可访问，但 /api/fs/link 和 raw_url 均无可用链接。",
     resource: fileApi.resource,
-    rawUrl: fileApi.rawUrl,
+    rawUrl: null,
+    headers: {},
     fileApi: publicFileApi,
   };
 }
@@ -684,8 +972,8 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
   const settings = options.settings ?? (await getRuntimeSettings());
   const checkedAt = new Date().toISOString();
   const baseUrl = normalizeBaseUrl(settings.openlistBaseUrl);
-  const token = settings.openlistToken.trim();
-  const tokenConfigured = token.length > 0;
+  let token = settings.openlistToken.trim();
+  let tokenConfigured = token.length > 0;
   const resourcePath = normalizeOpenListResourcePath(resourceUrl);
 
   if (!settings.openlistEnabled) {
@@ -702,7 +990,31 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
     };
   }
 
-  if (!baseUrl || !tokenConfigured) {
+  if (!baseUrl) {
+    return {
+      ok: false,
+      status: "missing_settings",
+      checkedAt,
+      baseUrl,
+      path: resourcePath,
+      tokenConfigured,
+      message: "OpenList 目录列举需要服务地址和访问 token。",
+      directory: null,
+      listApi: null,
+    };
+  }
+
+  if (!tokenConfigured && !options.skipAuthRefresh) {
+    const ensured = await ensureOpenListToken(settings, { fetchImpl: options.fetchImpl, forceRefresh: true });
+    if (ensured.ok) {
+      return listOpenListDirectory(resourceUrl, { ...options, settings: ensured.settings, skipAuthRefresh: true });
+    }
+  }
+
+  token = settings.openlistToken.trim();
+  tokenConfigured = token.length > 0;
+
+  if (!tokenConfigured) {
     return {
       ok: false,
       status: "missing_settings",
@@ -741,7 +1053,14 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
   );
   const publicListApi = toPublicEndpointCheck(listApi);
 
-  if (listApi.status === 401 || listApi.status === 403) {
+  if (isOpenListUnauthorized(listApi)) {
+    const retried = await retryWithRefreshedOpenListToken(settings, options, (nextSettings) =>
+      listOpenListDirectory(resourceUrl, { ...options, settings: nextSettings, skipAuthRefresh: true }),
+    );
+    if (retried.ok) {
+      return retried.value;
+    }
+
     return {
       ok: false,
       status: "unauthorized",
@@ -749,7 +1068,7 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
       baseUrl,
       path: resourcePath,
       tokenConfigured,
-      message: "OpenList token 未通过认证。",
+      message: unauthorizedOpenListMessage(retried.refreshMessage),
       directory: null,
       listApi: publicListApi,
     };
@@ -933,6 +1252,59 @@ async function postOpenListFileGet(
   }
 }
 
+async function postOpenListFileLink(
+  fetchImpl: typeof fetch,
+  url: string,
+  token: string,
+  resourcePath: string,
+): Promise<OpenListEndpointCheck & { linkUrl: string | null; headers: Record<string, string> }> {
+  const endpoint = redactOpenListEndpoint(url);
+
+  try {
+    const response = await fetchImpl(url, {
+      body: JSON.stringify({
+        path: resourcePath,
+        password: "",
+      }),
+      cache: "no-store",
+      headers: {
+        Authorization: token,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => null);
+    const payloadCode = typeof payload?.code === "number" ? payload.code : null;
+    const payloadMessage = typeof payload?.message === "string" ? payload.message : null;
+    const data = payload?.data as Record<string, unknown> | undefined;
+    // OpenList/Alist 与 download-first-from-dir.js：url | raw_url | download_url
+    const linkUrl = extractOpenListLinkUrl(data);
+    // http.Header 序列化为 map[string][]string，值常为数组；只取 string 会丢掉全部请求头导致 CDN 403。
+    const headers = normalizeOpenListRequestHeaders(data?.header ?? data?.headers);
+
+    return {
+      endpoint,
+      ok: response.ok && (payloadCode == null || payloadCode === 200) && Boolean(linkUrl),
+      status: response.status,
+      code: payloadCode,
+      message: payloadMessage,
+      linkUrl,
+      headers,
+    };
+  } catch (error) {
+    return {
+      endpoint,
+      ok: false,
+      status: null,
+      code: null,
+      message: error instanceof Error ? error.message : "OpenList 下载链请求失败。",
+      linkUrl: null,
+      headers: {},
+    };
+  }
+}
+
 async function postOpenListAuth(
   fetchImpl: typeof fetch,
   url: string,
@@ -1062,7 +1434,86 @@ function extractOpenListRawUrl(value: unknown) {
   }
 
   const record = value as Record<string, unknown>;
-  return typeof record.raw_url === "string" && record.raw_url.trim() ? record.raw_url.trim() : null;
+  // 与 download-first-from-dir.js 一致：raw_url || url || download_url || sign_url
+  for (const key of ["raw_url", "url", "download_url", "sign_url"] as const) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+function extractOpenListLinkUrl(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["url", "raw_url", "download_url", "sign_url"] as const) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
+/**
+ * OpenList/Alist `/api/fs/link` 的 header 字段类型为 http.Header（map[string][]string），
+ * JSON 里值多为 string[]；也兼容 string 与 headers 字段名。
+ */
+export function normalizeOpenListRequestHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!key.trim()) {
+      continue;
+    }
+
+    if (typeof raw === "string" && raw.trim()) {
+      result[key] = raw;
+      continue;
+    }
+
+    if (Array.isArray(raw)) {
+      const first = raw.find((item): item is string => typeof item === "string" && item.trim().length > 0);
+      if (first) {
+        result[key] = first;
+      }
+    }
+  }
+
+  return result;
+}
+
+/** 将 OpenList 返回的相对下载路径拼成绝对 URL（参考 download-first-from-dir.js joinUrl）。 */
+export function joinOpenListDownloadUrl(baseUrl: string, value: string | null | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const text = value.trim();
+  if (!text) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(text)) {
+    return text;
+  }
+
+  const base = baseUrl.replace(/\/+$/, "");
+  if (text.startsWith("/")) {
+    return `${base}${text}`;
+  }
+
+  return `${base}/${text}`;
 }
 
 function normalizeOpenListDirectorySnapshot(value: unknown): OpenListDirectorySnapshot | null {
