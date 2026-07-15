@@ -10,3 +10,4 @@ export interface PageSource {
 export * from "./file-enumerator";
 export * from "./file-maintenance.repository";
 export * from "./path-safety";
+export * from "./root-relocate";

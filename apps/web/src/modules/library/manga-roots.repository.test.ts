@@ -35,7 +35,7 @@ describe("MangaRootRepository", () => {
 
     expect(updated.displayName).toBe("Renamed");
     expect(updated.isEnabled).toBe(false);
-    expect(listedAfterUpdate[0]).toMatchObject({
+    expect(listedAfterUpdate.find((item) => item.id === root.id)).toMatchObject({
       id: root.id,
       displayName: "Renamed",
       isEnabled: false,
@@ -43,7 +43,10 @@ describe("MangaRootRepository", () => {
     });
 
     await expect(repository.deleteUnused(root.id)).resolves.toEqual({ deleted: true });
-    await expect(repository.list()).resolves.toHaveLength(0);
+    const remainingAfterDelete = await repository.list();
+    expect(remainingAfterDelete.some((item) => item.id === root.id)).toBe(false);
+    // bootstrap may keep the built-in system root
+    expect(remainingAfterDelete.every((item) => item.kind === "system" || item.id !== root.id)).toBe(true);
 
     const usedRoot = await repository.create({ absolutePath: usedRootPath, displayName: "Used" });
     const db = getDb();

@@ -10,6 +10,7 @@ import type { MangaRootWithStats, ScanSessionRecord } from "@/modules/library";
 
 import { deleteMangaRootAction, scanMangaRootAction } from "./actions";
 import { MangaRootEditDialog } from "./manga-root-edit-dialog";
+import { SystemRootPathDialog } from "./system-root-path-dialog";
 import { MangaRootDialog } from "./manga-root-dialog";
 
 interface PathsPanelProps {
@@ -142,6 +143,7 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                         </ActionIcon>
                       </Tooltip>
                     </form>
+                    <SystemRootPathDialog root={root} />
                     <MangaRootEditDialog root={root} />
                     <form
                       action={deleteMangaRootAction}

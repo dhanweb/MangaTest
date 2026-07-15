@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { createAndScanMangaRoot } from "@/modules/library/create-and-scan-manga-root";
+import { relocateSystemMangaRoot } from "@/modules/library/relocate-system-manga-root";
 import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
 import { scanMangaRoot } from "@/modules/library/scan-library-root";
 
@@ -101,4 +102,46 @@ export async function deleteMangaRootAction(formData: FormData) {
 
   revalidatePath("/admin/paths");
   revalidatePath("/");
+}
+
+export async function relocateSystemMangaRootAction(
+  _state: SaveMangaRootState,
+  formData: FormData,
+): Promise<SaveMangaRootState> {
+  const id = String(formData.get("mangaRootId") ?? "");
+  const nextAbsolutePath = String(formData.get("nextAbsolutePath") ?? "");
+  const moveFiles = formData.get("moveFiles") === "true";
+
+  if (!id) {
+    return {
+      status: "error",
+      message: "缺少漫画根目录 ID。",
+    };
+  }
+
+  try {
+    const result = await relocateSystemMangaRoot({
+      mangaRootId: id,
+      nextAbsolutePath,
+      moveFiles,
+    });
+    revalidatePath("/admin/paths");
+    revalidatePath("/");
+    revalidatePath("/admin/files");
+    revalidatePath("/admin/comics");
+
+    const successMessage = moveFiles
+      ? ("系统目录已迁移到 " + result.toPath + "，移动 " + result.movedEntryCount + " 项，更新 " + result.updatedLocalFileCount + " 条文件记录。")
+      : ("系统目录路径已更新为 " + result.toPath + "（未移动文件），更新 " + result.updatedLocalFileCount + " 条文件记录。");
+
+    return {
+      status: "success",
+      message: successMessage,
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "迁移系统目录失败。",
+    };
+  }
 }

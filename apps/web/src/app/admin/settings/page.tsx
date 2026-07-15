@@ -1,11 +1,11 @@
 "use client";
 
 import { Box, Group, Stack, Text } from "@mantine/core";
-import { Download, Settings } from "lucide-react";
+import { Download, Settings, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
-import { AppButton, AppInput, AppSwitch } from "@/components/ui/app-components";
+import { AppButton, AppInput, AppModal, AppSwitch } from "@/components/ui/app-components";
 import { toast } from "@/components/ui/toast";
 import { defaultRuntimeSettings } from "@/modules/core/settings/defaults";
 import type { RuntimeSettings } from "@/modules/core/settings/types";
@@ -17,6 +17,28 @@ import type {
 
 type SettingsTab = (typeof TABS)[number];
 type PublicOpenListLoginResult = Omit<OpenListLoginResult, "token">;
+
+type DataResetSummary = {
+  comics: number;
+  localFiles: number;
+  chapters: number;
+  pages: number;
+  tags: number;
+  readingProgress: number;
+  comicSources: number;
+  comicResources: number;
+  collections: number;
+  collectionComics: number;
+  scanSessions: number;
+  mediaAssets: number;
+  cacheEntries: number;
+  downloadTasks: number;
+  cloudScanSessions: number;
+  operationLogs: number;
+  settings: number;
+  mangaRoots: number;
+};
+
 
 const TABS = ["常规设置", "阅读设置", "扫描设置", "下载设置", "安全设置"] as const;
 
@@ -953,6 +975,116 @@ function SecuritySettings({
   onSettingsChange: (settings: RuntimeSettings) => void;
   settings: RuntimeSettings;
 }) {
+  type ClearScope = "cache" | "library" | "downloads";
+
+  const CLEAR_SCOPE_META: Record<
+    ClearScope,
+    {
+      title: string;
+      description: string;
+      confirmMessage: string;
+      successLabel: string;
+    }
+  > = {
+    cache: {
+      title: "清空缓存",
+      description: "封面、缩略图、压缩包文件列表等生成缓存。",
+      confirmMessage: "确定清空缓存吗？不会删除漫画原文件，也不会改动设置与漫画根目录。",
+      successLabel: "缓存",
+    },
+    library: {
+      title: "清空漫画信息",
+      description: "漫画、章节、页面、标签、阅读进度、收藏、扫描记录与来源元数据。会连带清理依赖的缓存记录。",
+      confirmMessage: "确定清空漫画信息吗？会删除库内记录（含依赖缓存），但不会删除磁盘上的漫画原文件，也不会改动设置与漫画根目录。",
+      successLabel: "漫画信息",
+    },
+    downloads: {
+      title: "清空下载任务",
+      description: "下载任务及其准备/传输/落盘记录，以及云扫描会话。",
+      confirmMessage: "确定清空下载任务吗？不会删除已下载到磁盘的漫画文件，也不会改动设置与漫画根目录。",
+      successLabel: "下载任务",
+    },
+  };
+
+  const [summary, setSummary] = useState<DataResetSummary | null>(null);
+  const [pendingScope, setPendingScope] = useState<ClearScope | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+
+  async function loadSummary() {
+    setIsLoadingSummary(true);
+    try {
+      const response = await fetch("/api/settings/data-reset");
+      const payload = (await response.json().catch(() => ({}))) as { summary?: DataResetSummary; error?: string };
+      if (!response.ok || !payload.summary) {
+        throw new Error(payload.error ?? "读取数据摘要失败。");
+      }
+      setSummary(payload.summary);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "读取数据摘要失败。");
+    } finally {
+      setIsLoadingSummary(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadSummary();
+  }, []);
+
+  async function executeReset(scope: ClearScope) {
+    setIsResetting(true);
+    try {
+      const response = await fetch("/api/settings/data-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clearCache: scope === "cache",
+          clearLibrary: scope === "library",
+          clearDownloads: scope === "downloads",
+          confirm: true,
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        result?: {
+          deleted?: {
+            comics?: number;
+            downloadTasks?: number;
+            mediaAssets?: number;
+            cacheEntries?: number;
+          };
+        };
+      };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "清空数据失败。");
+      }
+
+      const deleted = payload.result?.deleted;
+      const meta = CLEAR_SCOPE_META[scope];
+      if (scope === "cache") {
+        toast.success(`已清空${meta.successLabel}：媒体 ${deleted?.mediaAssets ?? 0}，压缩包列表 ${deleted?.cacheEntries ?? 0}。`);
+      } else if (scope === "library") {
+        toast.success(`已清空${meta.successLabel}：漫画 ${deleted?.comics ?? 0} 条记录。设置与漫画根目录已保留。`);
+      } else {
+        toast.success(`已清空${meta.successLabel}：${deleted?.downloadTasks ?? 0} 个任务。`);
+      }
+
+      setPendingScope(null);
+      await loadSummary();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "清空数据失败。");
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
+  function scopeCount(scope: ClearScope) {
+    if (!summary) return null;
+    if (scope === "cache") return summary.mediaAssets + summary.cacheEntries;
+    if (scope === "library") return summary.comics;
+    return summary.downloadTasks;
+  }
+
   return (
     <>
       <SettingsGroup title="备份与恢复">
@@ -963,6 +1095,62 @@ function SecuritySettings({
         </SettingsRow>
         <SettingsRow label="备份范围" note="包含漫画记录、阅读进度、标签、设置、扫描和操作日志。">
           <AppInput value="mangatest.sqlite" readOnly style={{ width: 180 }} />
+        </SettingsRow>
+      </SettingsGroup>
+
+      <SettingsGroup title="数据清理">
+        <SettingsRow
+          label="当前数据量"
+          note="清空不会删除磁盘上的漫画原文件，也不会改动设置与漫画根目录。"
+        >
+          <AppButton variant="outline" loading={isLoadingSummary} onClick={() => void loadSummary()}>
+            刷新摘要
+          </AppButton>
+        </SettingsRow>
+        {summary ? (
+          <Box
+            mb="md"
+            p="md"
+            style={{
+              borderRadius: 12,
+              border: "1px solid #fde6ef",
+              background: "#fffafc",
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+              gap: 10,
+            }}
+          >
+            <SummaryStat label="漫画" value={summary.comics} />
+            <SummaryStat label="本地文件记录" value={summary.localFiles} />
+            <SummaryStat label="下载任务" value={summary.downloadTasks} />
+            <SummaryStat label="媒体缓存" value={summary.mediaAssets} />
+            <SummaryStat label="压缩包缓存" value={summary.cacheEntries} />
+            <SummaryStat label="设置项" value={summary.settings} />
+            <SummaryStat label="漫画根目录" value={summary.mangaRoots} />
+          </Box>
+        ) : null}
+
+        {(["cache", "library", "downloads"] as const).map((scope) => {
+          const meta = CLEAR_SCOPE_META[scope];
+          const count = scopeCount(scope);
+          const note = count === null ? meta.description : `${meta.description} 当前约 ${count} 项。`;
+          return (
+            <SettingsRow key={scope} label={meta.title} note={note}>
+              <AppButton
+                color="red"
+                variant="outline"
+                leftSection={<Trash2 size={15} />}
+                disabled={isResetting}
+                onClick={() => setPendingScope(scope)}
+              >
+                清空
+              </AppButton>
+            </SettingsRow>
+          );
+        })}
+
+        <SettingsRow label="保留范围" note="设置、OpenList/aria2 配置、漫画根目录路径始终保留。">
+          <ReadonlyValue value="设置 + 根目录" tone="on" />
         </SettingsRow>
       </SettingsGroup>
 
@@ -999,7 +1187,47 @@ function SecuritySettings({
         </SettingsRow>
       </SettingsGroup>
 
+      <AppModal
+        opened={pendingScope !== null}
+        onClose={() => !isResetting && setPendingScope(null)}
+        title={pendingScope ? `确认${CLEAR_SCOPE_META[pendingScope].title}` : "确认清空"}
+        size="md"
+      >
+        <Stack gap="md">
+          <Text size="sm" c="ink.6">
+            {pendingScope ? CLEAR_SCOPE_META[pendingScope].confirmMessage : ""}
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <AppButton variant="outline" disabled={isResetting} onClick={() => setPendingScope(null)}>
+              取消
+            </AppButton>
+            <AppButton
+              color="red"
+              loading={isResetting}
+              disabled={!pendingScope}
+              onClick={() => {
+                if (pendingScope) void executeReset(pendingScope);
+              }}
+            >
+              确定
+            </AppButton>
+          </Group>
+        </Stack>
+      </AppModal>
     </>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: number }) {
+  return (
+    <Box>
+      <Text size="xs" c="ink.5" mb={2}>
+        {label}
+      </Text>
+      <Text size="sm" fw={800}>
+        {value}
+      </Text>
+    </Box>
   );
 }
 

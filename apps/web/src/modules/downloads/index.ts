@@ -969,47 +969,25 @@ export async function runTransferWorkerTick(): Promise<DownloadWorkerTickResult>
 export async function runOfflineWorkerTick(): Promise<DownloadWorkerTickResult> {
   bootstrapDatabase();
 
+  // Offline OpenList submit happens at create/retry (dispatchTaskNow). Worker only polls.
   const pollResults = await pollOpenListDownloadStatus();
   if (pollResults.length > 0) {
-    const plan = await planNextDownloadDispatch("offline");
     return {
       executed: true,
       taskType: "offline",
       finalization: null,
       reason: pollResults.join("；"),
-      plan: plan ?? createDownloadDispatchPlan({ status: "idle", reason: "离线任务状态已更新" }),
+      plan: createDownloadDispatchPlan({ status: "idle", reason: "离线任务状态已更新" }),
       transfer: null,
     };
   }
 
-  let processed = 0;
-  const reasons: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    const plan = await planNextDownloadDispatch("offline");
-    if (plan.status !== "ready" || !plan.task) break;
-    const msg = await dispatchTaskNow(plan.task.id);
-    if (msg) { processed++; reasons.push(msg); }
-  }
-
-  if (processed > 0) {
-    const plan = await planNextDownloadDispatch("offline");
-    return {
-      executed: true,
-      taskType: "offline",
-      finalization: null,
-      reason: `处理了 ${processed} 个离线任务：${reasons.join("；")}`,
-      plan: plan ?? createDownloadDispatchPlan({ status: "idle", reason: "所有离线任务已处理" }),
-      transfer: null,
-    };
-  }
-
-  const plan = await planNextDownloadDispatch("offline");
   return {
     executed: false,
     taskType: "offline",
     finalization: null,
-    reason: plan.status === "idle" ? "没有排队中的离线任务" : plan.reason,
-    plan,
+    reason: "没有待轮询的已提交离线任务",
+    plan: createDownloadDispatchPlan({ status: "idle", reason: "没有待轮询的已提交离线任务" }),
     transfer: null,
   };
 }
@@ -1281,13 +1259,19 @@ export async function cancelDownloadTask(taskId: string): Promise<UpdateDownload
     .where(eq(downloadTasks.id, id))
     .run();
 
-  // Cancel aria2 download via RPC and clean up temp files
-  if (task.provider === "aria2" && (task.status === "downloading" || task.status === "running")) {
+  // Cancel active downloads via aria2 RPC when applicable, then clean incomplete targets.
+  if (task.status === "downloading" || task.status === "running") {
     try {
       const settings = await getRuntimeSettings();
-      await cancelAria2Download(id, settings.aria2RpcUrl?.trim() || undefined, settings.aria2RpcToken?.trim() || undefined);
+      if (task.provider === "aria2" || settings.aria2Enabled) {
+        await cancelAria2Download(id, settings.aria2RpcUrl?.trim() || undefined, settings.aria2RpcToken?.trim() || undefined);
+      }
       const tempDirectory = resolveDownloadTaskTempDirectory(settings, id);
       await cleanupAria2TempDir(tempDirectory);
+      const transfer = getDownloadTaskTransferByTaskId(id);
+      if (transfer?.tempFilePath) {
+        await cleanupIncompleteDownloadPath(transfer.tempFilePath, settings, id);
+      }
     } catch {
       // ignore cleanup errors during cancel
     }
@@ -1538,15 +1522,18 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
     await mkdir(tempDirectory, { recursive: true });
     await rm(finalPartialFilePath, { force: true });
 
-    // Use aria2 if configured, fall back to fetch
+    // Use aria2 if configured, fall back to fetch.
+    // aria2 writes directly into the import root so completed paths stay valid in aria2 logs.
     const aria2RpcUrl = settings.aria2RpcUrl?.trim();
     if (aria2RpcUrl && settings.aria2Enabled) {
+      const placement = await resolveAria2DirectPlacement(task, fileName);
+      await mkdir(placement.dir, { recursive: true });
       const result = await downloadWithAria2({
         rpcUrl: aria2RpcUrl,
         rpcToken: settings.aria2RpcToken?.trim() || undefined,
         uri: downloadUrl,
-        dir: tempDirectory,
-        out: fileName,
+        dir: placement.dir,
+        out: placement.out ?? fileName,
         taskId: task.id,
         // 115 等存储依赖 link 返回的 User-Agent/Referer；多连接 Range 也易 403。
         headers: link.headers,
@@ -1554,14 +1541,16 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
       });
 
       if (!result.success) {
+        await cleanupAria2DirectPlacement(placement).catch(() => undefined);
         throw new Error(`aria2 下载失败：${result.errorMessage}`);
       }
 
       if (!result.files || result.files.length === 0) {
+        await cleanupAria2DirectPlacement(placement).catch(() => undefined);
         throw new Error("aria2 下载完成后未返回文件路径。");
       }
 
-      const aria2FilePath = result.files[0];
+      const aria2FilePath = path.resolve(result.files[0]);
       const fileStat = await stat(aria2FilePath);
       const finishedAt = new Date().toISOString();
       transfer = upsertDownloadTaskTransfer({
@@ -1570,7 +1559,7 @@ async function downloadPreparedOpenListTask(task: DownloadTaskRecord, preparatio
         contentType: null,
         downloadTaskId: task.id,
         errorMessage: null,
-        fileName,
+        fileName: path.basename(aria2FilePath) || fileName,
         finishedAt,
         provider: task.provider,
         sizeBytes: link.resource.sizeBytes ?? fileStat.size,
@@ -1645,7 +1634,7 @@ async function downloadAria2Task(
   settings: RuntimeSettings,
 ): Promise<DownloadTaskTransferRecord> {
   const startedAt = new Date().toISOString();
-  const tempDirectory = resolveDownloadTaskTempDirectory(settings, task.id);
+  const placement = await resolveAria2DirectPlacement(task);
   const rpcUrl = settings.aria2RpcUrl?.trim();
 
   if (!rpcUrl) {
@@ -1702,17 +1691,18 @@ async function downloadAria2Task(
     sizeBytes: null,
     startedAt,
     status: "running",
-    tempFilePath: null,
+    tempFilePath: placement.expectedPath,
   });
 
   try {
-    await mkdir(tempDirectory, { recursive: true });
+    await mkdir(placement.dir, { recursive: true });
 
     const result = await downloadWithAria2({
       rpcUrl,
       rpcToken: settings.aria2RpcToken?.trim() || undefined,
       uri,
-      dir: tempDirectory,
+      dir: placement.dir,
+      out: placement.out,
       taskId: task.id,
     });
 
@@ -1724,8 +1714,8 @@ async function downloadAria2Task(
       throw new Error("aria2 下载完成后未返回文件路径。");
     }
 
-    const aria2FilePath = result.files[0];
-    const fileName = sanitizeDownloadFileName(aria2FilePath.split(/[/\\]/).pop() || task.resourceLabel);
+    const aria2FilePath = path.resolve(result.files[0]);
+    const fileName = sanitizeDownloadFileName(path.basename(aria2FilePath) || task.resourceLabel);
 
     const fileStat = await stat(aria2FilePath);
     const finishedAt = new Date().toISOString();
@@ -1745,9 +1735,11 @@ async function downloadAria2Task(
       tempFilePath: aria2FilePath,
     });
 
+    // Transfer completed; finalization scans without moving the file.
     markDownloadTaskFinished(task.id, "completed", null, finishedAt);
     return transfer;
   } catch (error) {
+    await cleanupAria2DirectPlacement(placement).catch(() => undefined);
     const currentTask = getDownloadTaskById(task.id);
     if (currentTask && (currentTask.status === "cancel_requested" || currentTask.status === "canceled")) {
       return upsertDownloadTaskTransfer({
@@ -1788,6 +1780,7 @@ async function downloadAria2Task(
     return transfer;
   }
 }
+
 
 function attachDownloadTaskTransfers(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
   if (tasks.length === 0) {
@@ -2011,22 +2004,29 @@ async function finalizeDownloadedTask(task: DownloadTaskRecord, transfer: Downlo
 
   try {
     if (!transfer.tempFilePath) {
-      throw new Error("下载临时文件路径缺失。");
+      throw new Error("下载文件路径缺失。");
     }
 
     const settings = await getRuntimeSettings();
     const tempDirectory = resolveDownloadTaskTempDirectory(settings, task.id);
-    const tempFilePath = path.resolve(transfer.tempFilePath);
-
-    assertPathInside(tempDirectory, tempFilePath);
-    await stat(tempFilePath);
+    const downloadedPath = path.resolve(transfer.tempFilePath);
+    await stat(downloadedPath);
 
     const importRoot = await resolveDownloadImportRoot(task);
-    const finalPath = await resolveUniqueFinalDownloadPath(importRoot.absolutePath, task, transfer);
+    let finalPath: string;
 
-    assertPathInside(importRoot.absolutePath, finalPath);
-    await mkdir(path.dirname(finalPath), { recursive: true });
-    await moveFileAcrossDevices(tempFilePath, finalPath);
+    if (isPathInsideParent(tempDirectory, downloadedPath)) {
+      // Legacy stream downloads still land in cache temp and must be moved into the import root.
+      finalPath = await resolveUniqueFinalDownloadPath(importRoot.absolutePath, task, transfer);
+      assertPathInside(importRoot.absolutePath, finalPath);
+      await mkdir(path.dirname(finalPath), { recursive: true });
+      await moveFileAcrossDevices(downloadedPath, finalPath);
+    } else if (isPathInsideParent(importRoot.absolutePath, downloadedPath)) {
+      // aria2 direct-to-library: keep the path aria2 wrote so its log remains valid.
+      finalPath = downloadedPath;
+    } else {
+      throw new Error("下载完成路径不在缓存临时目录或入库目录内，拒绝入库。");
+    }
 
     const scanResult = await scanMangaRoot(importRoot.id);
     const finalization = upsertDownloadTaskFinalization({
@@ -2209,7 +2209,13 @@ async function resolveDownloadImportRoot(task: DownloadTaskRecord): Promise<Mang
     targetDirectory ??
     (() => {
       const enabledRoots = roots.filter((root) => root.isEnabled);
-      const baseRoot = enabledRoots.find((root) => path.basename(root.absolutePath) !== DOWNLOAD_IMPORT_DIRECTORY_NAME) ?? enabledRoots[0];
+      const candidateRoots = enabledRoots.filter((root) => path.basename(root.absolutePath) !== DOWNLOAD_IMPORT_DIRECTORY_NAME);
+      // Prefer user manga roots for downloads so the system default library is not polluted by default.
+      const baseRoot =
+        candidateRoots.find((root) => root.kind === "user") ??
+        candidateRoots.find((root) => root.kind === "system") ??
+        candidateRoots[0] ??
+        enabledRoots[0];
 
       if (!baseRoot) {
         throw new Error("没有可用的 manga root，无法确定下载入库目录。");
@@ -2839,6 +2845,92 @@ function joinOpenListRemotePath(parentPath: string, name: string) {
 function redactOpenListRemotePath(remotePath: string, name: string) {
   const safeName = name.trim() || remotePath.split("/").filter(Boolean).pop() || "资源";
   return `openlist:/.../${safeName}`;
+}
+
+
+interface Aria2DirectPlacement {
+  importRootPath: string;
+  dir: string;
+  out: string | undefined;
+  expectedPath: string;
+  mode: "single_file" | "directory";
+}
+
+function isPathInsideParent(parentPath: string, childPath: string) {
+  const relativePath = path.relative(path.resolve(parentPath), path.resolve(childPath));
+  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+}
+
+async function resolveUniqueDirectory(candidatePath: string) {
+  let currentPath = candidatePath;
+  for (let index = 1; await pathExists(currentPath); index += 1) {
+    currentPath = `${candidatePath} (${index})`;
+  }
+  return currentPath;
+}
+
+async function resolveAria2DirectPlacement(task: DownloadTaskRecord, preferredFileName?: string): Promise<Aria2DirectPlacement> {
+  const importRoot = await resolveDownloadImportRoot(task);
+  const title = sanitizeDownloadFileName(task.comicTitle || task.resourceLabel || "download");
+  const preferred = preferredFileName ? sanitizeDownloadFileName(preferredFileName) : "";
+  const extension = path.extname(preferred).toLowerCase();
+
+  if (preferred && (extension === ".zip" || extension === ".cbz" || extension === ".rar" || extension === ".cbr" || extension === ".pdf" || extension === ".epub")) {
+    const archiveCandidate =
+      extension === ".zip" || extension === ".cbz"
+        ? path.join(importRoot.absolutePath, `${title}${extension}`)
+        : path.join(importRoot.absolutePath, preferred);
+    const finalPath = await resolveUniquePath(archiveCandidate);
+    return {
+      importRootPath: importRoot.absolutePath,
+      dir: path.dirname(finalPath),
+      out: path.basename(finalPath),
+      expectedPath: finalPath,
+      mode: "single_file",
+    };
+  }
+
+  const dir = await resolveUniqueDirectory(path.join(importRoot.absolutePath, title));
+  return {
+    importRootPath: importRoot.absolutePath,
+    dir,
+    out: preferred || undefined,
+    expectedPath: dir,
+    mode: "directory",
+  };
+}
+
+async function cleanupAria2DirectPlacement(placement: Aria2DirectPlacement) {
+  if (placement.mode === "single_file") {
+    await rm(placement.expectedPath, { force: true }).catch(() => undefined);
+    await rm(`${placement.expectedPath}.aria2`, { force: true }).catch(() => undefined);
+    return;
+  }
+
+  await rm(placement.dir, { recursive: true, force: true }).catch(() => undefined);
+}
+
+async function cleanupIncompleteDownloadPath(downloadPath: string, settings: RuntimeSettings, taskId: string) {
+  const resolved = path.resolve(downloadPath);
+  const tempDirectory = resolveDownloadTaskTempDirectory(settings, taskId);
+  if (isPathInsideParent(tempDirectory, resolved)) {
+    await cleanupAria2TempDir(tempDirectory);
+    return;
+  }
+
+  const statResult = await stat(resolved).catch(() => null);
+  if (!statResult) {
+    await rm(`${resolved}.aria2`, { force: true }).catch(() => undefined);
+    return;
+  }
+
+  if (statResult.isDirectory()) {
+    await rm(resolved, { recursive: true, force: true }).catch(() => undefined);
+    return;
+  }
+
+  await rm(resolved, { force: true }).catch(() => undefined);
+  await rm(`${resolved}.aria2`, { force: true }).catch(() => undefined);
 }
 
 function resolveDownloadTaskTempDirectory(settings: RuntimeSettings, taskId: string) {

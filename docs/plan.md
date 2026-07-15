@@ -33,6 +33,7 @@ MangaTest 是一个本地自托管的个人漫画库系统。
 - 多个本地版本先简单展示，reader 默认读取主 `local_file`。
 - 首次扫描只有一个文件时自动设为主文件，多个文件时后台可切换主文件。
 - 路径修复 MVP 只修改数据库路径，不移动真实文件。
+- 系统默认 manga root（`kind=system`）允许在后台修改绝对路径。修改时必须询问是否移动目录内漫画：选择“是”时执行物理迁移并更新 `local_files.absolute_path` 等关联路径；选择“否”时仅改写数据库路径。用户 manga root 暂不支持在此修改绝对路径。
 - 软删除或隐藏记录后，重新扫描同一路径时保持隐藏，并在扫描结果里提示可恢复。
 
 标题、标签和作者：
@@ -265,7 +266,8 @@ Downloads 负责资源获取。
 - 调用 provider 添加任务
 - 轮询任务
 - 获取下载链接
-- 下载到临时文件
+- 下载到临时文件（内置 HTTP / 非 aria2 流式路径）
+- aria2 下载直接写入入库目录（默认下载目录或 manga root/下载入库），完成后不再迁移文件，保证 aria2 日志路径仍可打开
 - 完成后移动到 manga root
 - 触发 Library / Local Files 重新扫描
 
@@ -276,7 +278,7 @@ OpenList 登录、OpenList token、115 离线任务、云端目录扫描都属�
 下载决策：
 
 - Downloads 只消费 `comic_resource`，不直接理解标签和漫画展示规则。
-- 下载完成后触发 Local Files / Library 重新扫描。
+- 下载完成后触发 Local Files / Library 重新扫描；aria2 直写入库时只登记 finalPath 并扫描，不移动文件。
 - 下载目标默认是 `manga root/下载入库/标题/`，后台允许修改目标目录。
 - 下载任务失败默认手动重试，自动重试次数后续可配置。
 

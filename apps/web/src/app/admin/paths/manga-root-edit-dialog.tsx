@@ -49,7 +49,7 @@ export function MangaRootEditDialog({ root }: { root: MangaRootWithStats }) {
               label="文件夹路径"
               value={root.absolutePath}
               readOnly
-              description="MVP 阶段不在这里批量改写路径；移动漫画文件后请用文件维护里的路径修复。"
+              description={root.kind === "system" ? "系统默认目录请使用旁边的「编辑路径」按钮修改绝对路径，并可选择是否移动文件。" : "用户路径不支持在此修改绝对路径；移动漫画文件后请用文件维护里的路径修复。"}
             />
             <AppInput label="描述" name="displayName" defaultValue={root.displayName ?? ""} placeholder="例如：主漫画库、下载待整理" />
             <AppSwitch name="isEnabled" label="启用扫描" defaultChecked={root.isEnabled} />

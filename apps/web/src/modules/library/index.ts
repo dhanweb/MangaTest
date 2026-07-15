@@ -21,3 +21,4 @@ export * from "./scan-all-manga-roots";
 export * from "./scan-library-root";
 export * from "./scan-sessions";
 export * from "./scan-sessions.repository";
+export * from "./relocate-system-manga-root";

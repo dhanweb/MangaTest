@@ -29,6 +29,7 @@ This document records features that are already implemented in `apps/web`.
 ### Local Library
 
 - Configure one or more manga roots with absolute filesystem paths.
+- The built-in system default manga root path can be edited from admin paths; a confirm step asks whether to physically move contained comics. Choosing yes moves children into the new empty directory and rewrites related local_files / finalization paths; choosing no rewrites database paths only. User manga roots still cannot change absolute path here.
 - Adding a manga root automatically starts one scan for that root.
 - Configured manga roots can also be scanned manually from the manga roots admin page.
 - The MVP scan mode treats each direct child directory, `.zip`, or `.cbz` file as one comic.
@@ -103,6 +104,8 @@ This document records features that are already implemented in `apps/web`.
 - OpenList cloud scan file entries can be imported as OpenList `comic_resource` records for the same comic without creating download tasks.
 - OpenList download worker preflight can persist per-task download preparation records for reachable file resources that expose a raw download URL, without storing the raw URL.
 - OpenList download worker execution can stream a prepared file resource into a local temporary download path under the configured cache directory without storing or returning the raw URL.
+- OpenList offline (magnet) tasks submit to OpenList once at create/retry via `dispatchTaskNow`; plugin `import-with-magnet` only calls `createDownloadTask` and does not re-submit. The offline worker tick only polls submitted OpenList tasks and creates transfer tasks when complete.
+- When aria2 is used (native magnet/torrent tasks or OpenList transfer via aria2), files are written directly under the download import root; finalization scans and records inalPath without moving the file so aria2 logs remain valid. Non-aria2 stream downloads still use cache temp + move.
 - Completed OpenList temporary downloads can be moved into a local download inbox manga root and trigger a library scan for the finalized file.
 - Download admin UI shows resource rows, provider compatibility, active task state, task status, target directory, and redacted resource display text.
 - Download admin UI can cancel queued/running tasks and retry failed/canceled tasks without invoking provider execution.
@@ -136,7 +139,9 @@ This document records features that are already implemented in `apps/web`.
 - Dangerous maintenance actions write operation log entries.
 - Admin collections management can create, update, enable/disable, and delete collections, and add/remove/reorder comics with redacted operation log entries.
 - SQLite backup can be exported from settings.
+- Settings can selectively clear cache, library/manga records, and download tasks while preserving runtime settings and manga roots; physical manga files are never deleted.
 - Cache summary and cleanup support media assets and archive file-list cache entries.
+- /api/settings/data-reset exposes data volume summary and confirmed selective wipe operations.
 
 ### Settings
 

@@ -524,6 +524,8 @@ export const operationLogs = sqliteTable(
         "collection_remove_comic",
         "collection_reorder",
         "ignore_file_issue",
+        "data_reset",
+        "system_root_relocate",
       ],
     }).notNull(),
     targetType: text("target_type").notNull(),
