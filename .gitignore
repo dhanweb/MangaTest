@@ -37,10 +37,20 @@ thumbnails/
 *.sqlite3
 *.sqlite-*
 
+# Local manga library / download landing zones (not source)
+apps/manga_store/
+manga_store/
+
+# Local one-off probe / fix scripts (keep repo scripts only when intentionally added)
+scripts/probe-*.mjs
+scripts/fix-*.mjs
+
 # Local agent/tool state
 .claude/
 .codex/
 .gstack/
+.opencode/
+opencode.json
 
 # OS and editor files
 .DS_Store
@@ -49,4 +59,5 @@ Desktop.ini
 .idea/
 .vscode/
 
-opencode.json
+# Local browser/dev helper state
+.playwright-mcp/
