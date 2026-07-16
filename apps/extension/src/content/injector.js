@@ -36,6 +36,18 @@
     // Cache gallery metadata early so torrent-page submit can attach tags without re-visiting.
     void cacheGalleryMetadataForTorrentFollowUp();
     injectGalleryButton(settings);
+    // Opening gallerytorrents.php often happens via popup; refresh cache when user clicks torrent entry links.
+    document.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) return;
+        const link = target.closest('a[href*="gallerytorrents.php"], a[onclick*="gallerytorrents"]');
+        if (!link) return;
+        void cacheGalleryMetadataForTorrentFollowUp();
+      },
+      true,
+    );
   } else if (adapter.id === "ehentai-torrents") {
     injectTorrentButtons(settings);
   }
@@ -73,6 +85,8 @@
     if (!cached || !sameGallerySource(pageMetadata, cached)) {
       return pageMetadata;
     }
+    const pageTags = Array.isArray(pageMetadata.tags) ? pageMetadata.tags : [];
+    const cachedTags = Array.isArray(cached.tags) ? cached.tags : [];
     return {
       ...cached,
       ...pageMetadata,
@@ -80,7 +94,7 @@
       title: pageMetadata.title || cached.title,
       originalTitle: pageMetadata.originalTitle || cached.originalTitle || null,
       coverUrl: pageMetadata.coverUrl || cached.coverUrl || null,
-      tags: Array.isArray(pageMetadata.tags) && pageMetadata.tags.length > 0 ? pageMetadata.tags : (cached.tags || []),
+      tags: pageTags.length > 0 ? pageTags : cachedTags,
       sourceId: pageMetadata.sourceId || cached.sourceId,
       sourceUrl: pageMetadata.sourceUrl || cached.sourceUrl,
       site: pageMetadata.site || cached.site,
