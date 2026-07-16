@@ -35,11 +35,23 @@ import {
 } from "./providers/openlist/connection";
 import {
   DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT,
-  buildDuplicateAmbiguousMessage,
-  buildDuplicateNotFoundMessage,
-  locateArchiveUnderOpenListRoot,
   normalizeOpenListLocateRoot,
 } from "./openlist-duplicate-locate";
+import {
+  buildIndexAmbiguousMessage,
+  buildIndexNotFoundMessage,
+  buildIndexRecoveredMessage,
+  buildPendingDuplicateRecoveryMessage,
+  isPendingDuplicateRecoveryError,
+} from "./openlist-duplicate-error";
+import {
+  DEFAULT_OPENLIST_LIBRARY_INDEX_TTL_MINUTES,
+  getLatestCompletedIndexSession,
+  isIndexSessionFresh,
+  startOpenListLibraryIndexInBackground,
+  __resetOpenListLibraryIndexInFlightForTests,
+} from "./openlist-library-index";
+import { matchTaskHintsAgainstIndex } from "./openlist-duplicate-recover";
 import { cancelAria2Download, cleanupAria2TempDir, downloadWithAria2 } from "./providers/aria2/client";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
@@ -977,13 +989,16 @@ export async function runOfflineWorkerTick(): Promise<DownloadWorkerTickResult> 
   bootstrapDatabase();
 
   // Offline OpenList submit happens at create/retry (dispatchTaskNow). Worker only polls.
+  // Safety net: drain pending 10008 recovery when a fresh index is available.
+  const recoveryResults = await drainPendingOpenListDuplicateRecoveries();
   const pollResults = await pollOpenListDownloadStatus();
-  if (pollResults.length > 0) {
+  const messages = [...recoveryResults, ...pollResults];
+  if (messages.length > 0) {
     return {
       executed: true,
       taskType: "offline",
       finalization: null,
-      reason: pollResults.join("；"),
+      reason: messages.join("；"),
       plan: createDownloadDispatchPlan({ status: "idle", reason: "离线任务状态已更新" }),
       transfer: null,
     };
@@ -1019,7 +1034,7 @@ export async function dispatchTaskNow(taskId: string): Promise<string | null> {
       return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
     }
     if (result.status === "duplicate_task") {
-      return recoverOpenListDuplicateOfflineTask(task, settings, result.message);
+      return enqueueOpenListDuplicateOfflineRecovery(task, settings);
     }
     const msg = result.message || "提交到 OpenList 失败";
     markDownloadTaskFinished(task.id, "failed", msg, now);
@@ -1962,21 +1977,20 @@ function markDownloadTaskRunning(taskId: string, updatedAt: string) {
 }
 
 
-async function recoverOpenListDuplicateOfflineTask(
+async function enqueueOpenListDuplicateOfflineRecovery(
   task: DownloadTaskRecord,
   settings: RuntimeSettings,
-  submitMessage: string | null | undefined,
 ): Promise<string> {
   const now = new Date().toISOString();
   const searchRoot = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+  const ttlMinutes = DEFAULT_OPENLIST_LIBRARY_INDEX_TTL_MINUTES;
 
   if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) {
-    const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage) + "（OpenList 未正确配置，无法搜索云端目录。）";
+    const msg = buildIndexNotFoundMessage(searchRoot) + "（OpenList 未正确配置，无法建立云端库索引。）";
     markDownloadTaskFinished(task.id, "failed", msg, now);
     return `${task.comicTitle}: ${msg}`;
   }
 
-  // Idempotency: an active transfer for this resource already covers recovery.
   if (task.comicResourceId) {
     const existingTransfer = getDb()
       .select({ id: downloadTasks.id })
@@ -2000,66 +2014,165 @@ async function recoverOpenListDuplicateOfflineTask(
     }
   }
 
+  const pendingMessage = buildPendingDuplicateRecoveryMessage(searchRoot);
+  markDownloadTaskFinished(task.id, "failed", pendingMessage, now);
+
   let listSettings = settings;
   if (!listSettings.openlistToken.trim()) {
     const ensured = await ensureOpenListToken(listSettings, { forceRefresh: true });
     if (!ensured.ok) {
-      const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage) + `（${ensured.message}）`;
+      const msg = buildIndexNotFoundMessage(searchRoot) + `（${ensured.message}）`;
       markDownloadTaskFinished(task.id, "failed", msg, now);
       return `${task.comicTitle}: ${msg}`;
     }
     listSettings = ensured.settings;
   }
 
-  const resourceLabel = getComicResourceDisplayLabel(task.comicResourceId);
-  const hints = [task.comicTitle, resourceLabel, task.resourceLabel].filter((value): value is string => Boolean(value && value.trim()));
+  const listDirectory = createOpenListLocateListDirectory(listSettings);
 
-  const locate = await locateArchiveUnderOpenListRoot({
+  const completed = getLatestCompletedIndexSession(searchRoot);
+  if (completed && isIndexSessionFresh(completed, ttlMinutes)) {
+    const batch = await batchRecoverPendingDuplicateTasks(searchRoot, completed.id);
+    if (batch.messages.length > 0) {
+      return batch.messages.find((m) => m.includes(task.comicTitle)) ?? `${task.comicTitle}: ${batch.messages[0]}`;
+    }
+    return `${task.comicTitle}: ${pendingMessage}`;
+  }
+
+  startOpenListLibraryIndexInBackground({
     root: searchRoot,
-    hints,
-    listDirectory: async (remotePath, options) => {
-      const listed = await listOpenListDirectory(remotePath, {
-        page: options.page,
-        perPage: options.perPage,
-        refresh: options.refresh,
-        settings: listSettings,
-      });
-      if (!listed.ok || !listed.directory) {
-        return {
-          ok: false,
-          entries: [],
-          hasMore: false,
-          message: listed.message,
-        };
+    listDirectory,
+    ttlMinutes,
+    onComplete: async (session) => {
+      if (session.status === "completed") {
+        await batchRecoverPendingDuplicateTasks(searchRoot, session.id);
       }
-      return {
-        ok: true,
-        entries: listed.directory.entries.map((entry) => ({
-          name: entry.name,
-          isDirectory: entry.isDirectory,
-          sizeBytes: entry.sizeBytes,
-        })),
-        hasMore: Boolean(listed.directory.hasMore),
-      };
     },
   });
 
-  if (locate.status === "found") {
+  return `${task.comicTitle}: ${pendingMessage}`;
+}
+
+function createOpenListLocateListDirectory(settings: RuntimeSettings) {
+  return async (remotePath: string, options: { page: number; perPage: number; refresh: boolean }) => {
+    const listed = await listOpenListDirectory(remotePath, {
+      page: options.page,
+      perPage: options.perPage,
+      refresh: options.refresh,
+      settings,
+    });
+    if (!listed.ok || !listed.directory) {
+      return {
+        ok: false as const,
+        entries: [],
+        hasMore: false,
+        message: listed.message,
+      };
+    }
+    return {
+      ok: true as const,
+      entries: listed.directory.entries.map((entry) => ({
+        name: entry.name,
+        isDirectory: entry.isDirectory,
+        sizeBytes: entry.sizeBytes,
+      })),
+      hasMore: Boolean(listed.directory.hasMore),
+    };
+  };
+}
+
+export function listPendingDuplicateRecoveryTasks(): DownloadTaskRecord[] {
+  bootstrapDatabase();
+  const rows = getDb()
+    .select()
+    .from(downloadTasks)
+    .where(and(eq(downloadTasks.taskType, "offline"), eq(downloadTasks.provider, "openlist"), eq(downloadTasks.status, "failed")))
+    .all();
+
+  return rows
+    .filter((row) => isPendingDuplicateRecoveryError(row.errorMessage))
+    .map((row) => getDownloadTaskById(row.id))
+    .filter((task): task is DownloadTaskRecord => Boolean(task));
+}
+
+export async function batchRecoverPendingDuplicateTasks(
+  root: string = DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT,
+  sessionId?: string,
+): Promise<{ recovered: number; ambiguous: number; notFound: number; messages: string[] }> {
+  bootstrapDatabase();
+  const searchRoot = normalizeOpenListLocateRoot(root);
+  const resolvedSessionId = sessionId ?? getLatestCompletedIndexSession(searchRoot)?.id;
+  if (!resolvedSessionId) {
+    return { recovered: 0, ambiguous: 0, notFound: 0, messages: [] };
+  }
+
+  const pending = listPendingDuplicateRecoveryTasks();
+  let recovered = 0;
+  let ambiguous = 0;
+  let notFound = 0;
+  const messages: string[] = [];
+
+  for (const task of pending) {
+    const result = await recoverOnePendingDuplicateTask(task, searchRoot, resolvedSessionId);
+    messages.push(result.message);
+    if (result.kind === "recovered") recovered += 1;
+    else if (result.kind === "ambiguous") ambiguous += 1;
+    else notFound += 1;
+  }
+
+  return { recovered, ambiguous, notFound, messages };
+}
+
+async function recoverOnePendingDuplicateTask(
+  task: DownloadTaskRecord,
+  searchRoot: string,
+  sessionId: string,
+): Promise<{ kind: "recovered" | "ambiguous" | "not_found"; message: string }> {
+  const now = new Date().toISOString();
+
+  if (task.comicResourceId) {
+    const existingTransfer = getDb()
+      .select({ id: downloadTasks.id })
+      .from(downloadTasks)
+      .where(
+        and(
+          eq(downloadTasks.comicResourceId, task.comicResourceId),
+          eq(downloadTasks.taskType, "transfer"),
+          inArray(downloadTasks.status, ACTIVE_TASK_STATUSES),
+        ),
+      )
+      .get();
+    if (existingTransfer) {
+      markDownloadTaskFinished(task.id, "completed", null, now);
+      getDb()
+        .update(downloadTasks)
+        .set({ remotePath: searchRoot, updatedAt: now, errorMessage: null })
+        .where(eq(downloadTasks.id, task.id))
+        .run();
+      return { kind: "recovered", message: `${task.comicTitle}: 已有进行中的传输任务` };
+    }
+  }
+
+  const resourceLabel = getComicResourceDisplayLabel(task.comicResourceId);
+  const hints = [task.comicTitle, resourceLabel, task.resourceLabel].filter((value): value is string => Boolean(value && value.trim()));
+  const match = matchTaskHintsAgainstIndex({ root: searchRoot, sessionId, hints });
+
+  if (match.status === "found") {
     const created = createTransferTaskFromResolvedRemoteFile(task, {
-      remotePath: locate.remotePath,
-      fileName: locate.fileName,
-      sizeBytes: locate.sizeBytes,
+      remotePath: match.remotePath,
+      fileName: match.fileName,
+      sizeBytes: match.sizeBytes,
     });
     if (!created.ok) {
       markDownloadTaskFinished(task.id, "failed", created.message, now);
-      return `${task.comicTitle}: ${created.message}`;
+      return { kind: "not_found", message: `${task.comicTitle}: ${created.message}` };
     }
 
     markDownloadTaskFinished(task.id, "completed", null, now);
     getDb()
       .update(downloadTasks)
       .set({
-        remotePath: locate.remotePath,
+        remotePath: match.remotePath,
         errorMessage: null,
         updatedAt: now,
       })
@@ -2067,29 +2180,39 @@ async function recoverOpenListDuplicateOfflineTask(
       .run();
 
     await dispatchTaskNow(created.task.id);
-    return `${task.comicTitle}: OpenList 任务已存在，已定位 ${locate.fileName} 并创建传输任务`;
+    const msg = buildIndexRecoveredMessage(match.fileName);
+    return { kind: "recovered", message: `${task.comicTitle}: ${msg}` };
   }
 
-  if (locate.status === "ambiguous") {
-    const msg = buildDuplicateAmbiguousMessage(searchRoot, locate.candidates);
+  if (match.status === "ambiguous") {
+    const msg = buildIndexAmbiguousMessage(
+      searchRoot,
+      match.candidates.map((c) => c.remotePath),
+    );
     markDownloadTaskFinished(task.id, "failed", msg, now);
-    return `${task.comicTitle}: ${msg}`;
+    return { kind: "ambiguous", message: `${task.comicTitle}: ${msg}` };
   }
 
-  if (locate.status === "incomplete" || locate.status === "error") {
-    const msg =
-      `OpenList 返回任务已存在（10008），搜索 ${searchRoot} 时失败：${locate.message}。` +
-      "请稍后重试，或手动确认云端目录后重试该任务。";
-    markDownloadTaskFinished(task.id, "failed", msg, now);
-    return `${task.comicTitle}: ${msg}`;
-  }
-
-  const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage);
+  const msg = match.message || buildIndexNotFoundMessage(searchRoot);
   markDownloadTaskFinished(task.id, "failed", msg, now);
-  return `${task.comicTitle}: ${msg}`;
+  return { kind: "not_found", message: `${task.comicTitle}: ${msg}` };
 }
 
-function createTransferTaskFromResolvedRemoteFile(
+async function drainPendingOpenListDuplicateRecoveries(): Promise<string[]> {
+  const searchRoot = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+  const pending = listPendingDuplicateRecoveryTasks();
+  if (pending.length === 0) return [];
+
+  const completed = getLatestCompletedIndexSession(searchRoot);
+  if (!completed || !isIndexSessionFresh(completed, DEFAULT_OPENLIST_LIBRARY_INDEX_TTL_MINUTES)) {
+    return [];
+  }
+
+  const batch = await batchRecoverPendingDuplicateTasks(searchRoot, completed.id);
+  return batch.messages;
+}
+
+export function createTransferTaskFromResolvedRemoteFile(
   offlineTask: DownloadTaskRecord,
   file: { remotePath: string; fileName: string; sizeBytes: number | null },
 ): { ok: true; task: DownloadTaskRecord } | { ok: false; message: string } {
@@ -2097,7 +2220,6 @@ function createTransferTaskFromResolvedRemoteFile(
     return { ok: false, message: "离线任务缺少资源记录，无法创建传输任务。" };
   }
 
-  // Idempotent: reuse active transfer for same offline task or resource+path.
   const existing = getDb()
     .select({ id: downloadTasks.id })
     .from(downloadTasks)
@@ -2147,6 +2269,28 @@ function createTransferTaskFromResolvedRemoteFile(
 
   return { ok: true, task: transferTask };
 }
+
+/** Test helper: wait for background library index scans and drain recovery. */
+export async function flushOpenListDuplicateRecoveryForTests(timeoutMs = 10_000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const pending = listPendingDuplicateRecoveryTasks();
+    if (pending.length === 0) return;
+    await drainPendingOpenListDuplicateRecoveries();
+    // Give background scan a beat.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const still = listPendingDuplicateRecoveryTasks();
+    if (still.length === 0) return;
+    const root = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+    const completed = getLatestCompletedIndexSession(root);
+    if (completed) {
+      await batchRecoverPendingDuplicateTasks(root, completed.id);
+      return;
+    }
+  }
+}
+
+export { __resetOpenListLibraryIndexInFlightForTests };
 
 function markDownloadTaskFinished(taskId: string, status: Extract<DownloadTaskStatus, "completed" | "failed">, errorMessage: string | null, updatedAt: string) {
   getDb()

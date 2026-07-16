@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 
 import { getRuntimeSettings, saveRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 
+import {
+  extractOpenListErrorCode,
+  isOpenListDuplicateOfflineError as isDuplicateByStructuredRules,
+  OPENLIST_DUPLICATE_OFFLINE_CODE,
+} from "../../openlist-duplicate-error";
+
 export const OPENLIST_PASSWORD_HASH_SALT = "-https://github.com/alist-org/alist";
 
 export type OpenListConnectionStatus = "disabled" | "missing_settings" | "reachable" | "unauthorized" | "unreachable" | "invalid_response";
@@ -598,14 +604,12 @@ export interface OpenListOfflineDownloadResult {
   openlistCode?: number | null;
 }
 
-/** Detect OpenList/115 "task already exists" (code 10008), including nested message text. */
+/** Detect OpenList/115 "task already exists" (code 10008). Code-first; no Chinese-only match. */
 export function isOpenListDuplicateOfflineError(code: number | null | undefined, message: string | null | undefined): boolean {
-  if (code === 10008) return true;
-  const text = String(message ?? "");
-  if (/code:\s*10008\b/i.test(text)) return true;
-  if (/任务已存在/.test(text) || /重复的链接/.test(text)) return true;
-  return false;
+  return isDuplicateByStructuredRules({ code, message });
 }
+
+export { extractOpenListErrorCode, OPENLIST_DUPLICATE_OFFLINE_CODE };
 
 export type OpenListOfflineTaskState = number; // 0=queued, 1=downloading, 2=done, 3=error
 
@@ -689,7 +693,8 @@ export async function submitOpenListOfflineDownload(
     }
     if (!response.ok || (payloadCode != null && payloadCode !== 200)) {
       const failMessage = payloadMessage || "离线下载提交失败。";
-      if (isOpenListDuplicateOfflineError(payloadCode, failMessage)) {
+      const resolvedCode = extractOpenListErrorCode(payload, response.status) ?? payloadCode;
+      if (isOpenListDuplicateOfflineError(resolvedCode, failMessage)) {
         return {
           ok: false,
           status: "duplicate_task",
@@ -699,7 +704,7 @@ export async function submitOpenListOfflineDownload(
           message: failMessage,
           taskId: null,
           apiCheck,
-          openlistCode: 10008,
+          openlistCode: OPENLIST_DUPLICATE_OFFLINE_CODE,
         };
       }
       return {
@@ -711,7 +716,7 @@ export async function submitOpenListOfflineDownload(
         message: failMessage,
         taskId: null,
         apiCheck,
-        openlistCode: payloadCode,
+        openlistCode: resolvedCode,
       };
     }
 

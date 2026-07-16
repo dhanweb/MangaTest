@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT } from "./openlist-duplicate-locate";
 import { isOpenListDuplicateOfflineError } from "./providers/openlist/connection";
+import { PENDING_DUPLICATE_RECOVERY_TAG } from "./openlist-duplicate-error";
 
 describe("OpenList offline duplicate recovery", () => {
   beforeEach(() => {
@@ -14,9 +15,15 @@ describe("OpenList offline duplicate recovery", () => {
     vi.unstubAllGlobals();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllGlobals();
     delete process.env.MANGATEST_DB_PATH;
+    try {
+      const { __resetOpenListLibraryIndexInFlightForTests } = await import("./openlist-library-index");
+      __resetOpenListLibraryIndexInFlightForTests();
+    } catch {
+      // ignore if module not loaded
+    }
   });
 
   it("classifies nested 10008 message text", () => {
@@ -28,9 +35,10 @@ describe("OpenList offline duplicate recovery", () => {
       ),
     ).toBe(true);
     expect(isOpenListDuplicateOfflineError(200, "ok")).toBe(false);
+    expect(isOpenListDuplicateOfflineError(500, "任务已存在，请勿输入重复的链接地址")).toBe(false);
   });
 
-  it("on 10008 locates archive under flat root and creates one transfer", async () => {
+  it("on 10008 indexes library root and creates one transfer", async () => {
     const root = DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT;
     const mangaName = "Recovered Comic";
     const requests: string[] = [];
@@ -86,7 +94,6 @@ describe("OpenList offline duplicate recovery", () => {
         return Response.json({ code: 200, data: { content: [], total: 0 }, message: "success" });
       }
 
-      // transfer may probe get/link later; keep offline recovery focused
       return Response.json({ code: 200, data: {}, message: "success" });
     });
 
@@ -98,7 +105,7 @@ describe("OpenList offline duplicate recovery", () => {
 
     const { bootstrapDatabase, getSqlite } = await import("../core/db");
     const { saveRuntimeSettings } = await import("../core/settings");
-    const { createDownloadTask, listDownloadTasks } = await import("./index");
+    const { createDownloadTask, listDownloadTasks, flushOpenListDuplicateRecoveryForTests } = await import("./index");
 
     bootstrapDatabase();
     const sqlite = getSqlite();
@@ -140,6 +147,8 @@ describe("OpenList offline duplicate recovery", () => {
     const created = await createDownloadTask({ comicResourceId: resourceId, provider: "openlist" });
     expect(created.created).toBe(true);
 
+    await flushOpenListDuplicateRecoveryForTests(5000);
+
     const tasks = await listDownloadTasks(20);
     const offline = tasks.find((task) => task.taskType === "offline");
     const transfers = tasks.filter((task) => task.taskType === "transfer");
@@ -151,7 +160,7 @@ describe("OpenList offline duplicate recovery", () => {
     expect(requests.filter((item) => item.includes("add_offline_download"))).toHaveLength(1);
   });
 
-  it("on 10008 with empty library fails with root guidance", async () => {
+  it("on 10008 with empty library fails with root guidance after index", async () => {
     const root = DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT;
 
     vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -180,7 +189,7 @@ describe("OpenList offline duplicate recovery", () => {
 
     const { bootstrapDatabase, getSqlite } = await import("../core/db");
     const { saveRuntimeSettings } = await import("../core/settings");
-    const { createDownloadTask, listDownloadTasks } = await import("./index");
+    const { createDownloadTask, listDownloadTasks, flushOpenListDuplicateRecoveryForTests } = await import("./index");
 
     bootstrapDatabase();
     const sqlite = getSqlite();
@@ -221,12 +230,15 @@ describe("OpenList offline duplicate recovery", () => {
     });
 
     await createDownloadTask({ comicResourceId: resourceId, provider: "openlist" });
+    await flushOpenListDuplicateRecoveryForTests(5000);
+
     const tasks = await listDownloadTasks(20);
     const offline = tasks.find((task) => task.taskType === "offline");
     expect(offline?.status).toBe("failed");
     expect(offline?.errorMessage).toContain("10008");
     expect(offline?.errorMessage).toContain(root);
-    expect(offline?.errorMessage).toContain("重试");
+    // After index miss, no longer pending tag
+    expect(offline?.errorMessage).not.toContain(PENDING_DUPLICATE_RECOVERY_TAG);
     expect(tasks.filter((task) => task.taskType === "transfer")).toHaveLength(0);
   });
 });

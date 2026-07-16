@@ -454,6 +454,55 @@ export const cloudScanEntries = sqliteTable(
   }),
 );
 
+/** Flat OpenList library root index for 10008 duplicate offline recovery. */
+export const openlistLibraryIndexStatuses = ["running", "completed", "failed"] as const;
+export const openlistLibraryIndexEntryKinds = ["file", "directory"] as const;
+
+export const openlistLibraryIndexSessions = sqliteTable(
+  "openlist_library_index_sessions",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider").notNull().default("openlist"),
+    rootPath: text("root_path").notNull(),
+    status: text("status", { enum: openlistLibraryIndexStatuses }).notNull().default("running"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    totalCount: integer("total_count").notNull().default(0),
+    fileCount: integer("file_count").notNull().default(0),
+    directoryCount: integer("directory_count").notNull().default(0),
+    archiveCount: integer("archive_count").notNull().default(0),
+    listCallCount: integer("list_call_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+    ...timestamps,
+  },
+  (table) => ({
+    providerRootIdx: index("openlist_library_index_sessions_provider_root_idx").on(table.provider, table.rootPath),
+    statusIdx: index("openlist_library_index_sessions_status_idx").on(table.status),
+  }),
+);
+
+export const openlistLibraryIndexEntries = sqliteTable(
+  "openlist_library_index_entries",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => openlistLibraryIndexSessions.id),
+    remotePath: text("remote_path").notNull(),
+    parentPath: text("parent_path").notNull(),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: openlistLibraryIndexEntryKinds }).notNull(),
+    depth: integer("depth").notNull().default(1),
+    sizeBytes: integer("size_bytes"),
+    ...timestamps,
+  },
+  (table) => ({
+    sessionIdx: index("openlist_library_index_entries_session_idx").on(table.sessionId),
+    remotePathIdx: index("openlist_library_index_entries_remote_path_idx").on(table.remotePath),
+    parentIdx: index("openlist_library_index_entries_parent_idx").on(table.parentPath),
+  }),
+);
+
 export const mediaAssets = sqliteTable(
   "media_assets",
   {

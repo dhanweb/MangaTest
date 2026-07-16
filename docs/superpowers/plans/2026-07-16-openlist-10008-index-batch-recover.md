@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** implemented on branch `feat/openlist-10008-index-batch-recover` (structured 10008, library index tables, single-flight scan, batch recover, offline-tick drain). Manual admin “扫描云端库” button still optional.
+
 **Goal:** Reliably detect OpenList offline duplicate error **10008**, maintain a single-flight paginated scan index of `/115Open/HENTAI/exhentai`, and batch-recover all pending 10008 offline tasks into transfer downloads of matching zip/cbz files.
 
 **Architecture:** Split into three layers: (1) **structured error classification** on OpenList submit responses; (2) **library-root index scan** (paginated `fs/list`, flat `{root}/{mangaName}/archive`, single-flight); (3) **batch recovery runner** that matches pending duplicate tasks against the latest completed index and creates transfer tasks with concrete archive `remotePath`. Concurrent 10008s never start a second scan; they enqueue and wait for the in-flight scan to finish, then run one batch pull.
@@ -267,54 +269,54 @@ Retry of pending/failed 10008:
 
 **Files:** `openlist-duplicate-error.ts`, `connection.ts`, tests
 
-- [ ] Implement `extractOpenListErrorCode` (top-level + nested message `code:\s*(\d+)`)
-- [ ] Change classifier to code-first; remove Chinese-only match
-- [ ] Unit tests: code 10008; wrapped message 10008; chinese-only false; other codes false
-- [ ] Ensure submit result `status=duplicate_task` + `openlistCode=10008`
+- [x] Implement `extractOpenListErrorCode` (top-level + nested message `code:\s*(\d+)`)
+- [x] Change classifier to code-first; remove Chinese-only match
+- [x] Unit tests: code 10008; wrapped message 10008; chinese-only false; other codes false
+- [x] Ensure submit result `status=duplicate_task` + `openlistCode=10008`
 
 ### Task 2: DB index tables + pending recovery query
 
 **Files:** schema, bootstrap, small helpers
 
-- [ ] Add `openlist_library_index_sessions` / `openlist_library_index_entries` (or approved reuse)
-- [ ] Session: rootPath, status running|completed|failed, counts, timestamps
-- [ ] Entry: sessionId, remotePath, parentPath, name, kind file|directory, depth, sizeBytes
-- [ ] Helper: `getRunningIndexSession(root)`, `getLatestCompletedIndexSession(root)`, `listIndexArchives(sessionId)`
-- [ ] Helper: `listPendingDuplicateRecoveryTasks()`
+- [x] Add `openlist_library_index_sessions` / `openlist_library_index_entries` (or approved reuse)
+- [x] Session: rootPath, status running|completed|failed, counts, timestamps
+- [x] Entry: sessionId, remotePath, parentPath, name, kind file|directory, depth, sizeBytes
+- [x] Helper: `getRunningIndexSession(root)`, `getLatestCompletedIndexSession(root)`, `listIndexArchives(sessionId)`
+- [x] Helper: `listPendingDuplicateRecoveryTasks()`
 
 ### Task 3: Single-flight paginated scanner
 
 **Files:** `openlist-library-index.ts`, tests with injected listDirectory
 
-- [ ] `ensureOpenListLibraryIndex(root)` single-flight
-- [ ] Paginate root + child dirs
-- [ ] Persist entries
-- [ ] Test: second ensure while running does not start second scan
-- [ ] Test: multi-page root merges entries
+- [x] `ensureOpenListLibraryIndex(root)` single-flight
+- [x] Paginate root + child dirs
+- [x] Persist entries
+- [x] Test: second ensure while running does not start second scan
+- [x] Test: multi-page root merges entries
 
 ### Task 4: Batch recover from index
 
 **Files:** recover module, downloads index wire
 
-- [ ] Match pending tasks to index archives
-- [ ] Create transfer with zip path; mark offline completed
-- [ ] Ambiguous/not found messages in Chinese
-- [ ] After scan complete automatically call batch recover
-- [ ] Tests: one scan recovers multiple pending 10008 tasks
+- [x] Match pending tasks to index archives
+- [x] Create transfer with zip path; mark offline completed
+- [x] Ambiguous/not found messages in Chinese
+- [x] After scan complete automatically call batch recover
+- [x] Tests: one scan recovers multiple pending 10008 tasks
 
 ### Task 5: Replace live-only recover in dispatchTaskNow
 
 **Files:** `modules/downloads/index.ts`
 
-- [ ] 10008 → enqueue + ensureIndex (non-blocking scan + then batch)
-- [ ] Remove or demote per-task live full-tree thrash as primary path
-- [ ] Optional: if completed index already present, recover immediately synchronously for that task
+- [x] 10008 → enqueue + ensureIndex (non-blocking scan + then batch)
+- [x] Remove or demote per-task live full-tree thrash as primary path
+- [x] Optional: if completed index already present, recover immediately synchronously for that task
 
 ### Task 6: Safety net tick + docs
 
-- [ ] offline worker or download tick: if pending recovery && completed index → batchRecover
-- [ ] Update docs/plan.md + implemented-features.md
-- [ ] Update this plan status when done
+- [x] offline worker or download tick: if pending recovery && completed index → batchRecover
+- [x] Update docs/plan.md + implemented-features.md
+- [x] Update this plan status when done
 
 ---
 
