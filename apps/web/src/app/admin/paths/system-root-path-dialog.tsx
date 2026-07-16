@@ -80,13 +80,13 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
 
   return (
     <>
-      <Tooltip label="编辑系统默认目录路径" withArrow>
+      <Tooltip label="修改系统默认目录路径" withArrow>
         <ActionIcon
           variant="subtle"
           color="pink"
           size="md"
           onClick={open}
-          aria-label={`编辑系统路径 ${root.absolutePath}`}
+          aria-label={`修改系统路径 ${root.absolutePath}`}
         >
           <FolderPen size={15} />
         </ActionIcon>
@@ -95,7 +95,7 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
       <AppModal
         opened={opened}
         onClose={handleClose}
-        title={step === "edit" ? "编辑系统默认目录路径" : "是否移动目录内的漫画？"}
+        title={step === "edit" ? "修改系统默认目录路径" : "是否移动目录内的漫画？"}
         size="lg"
       >
         <form ref={formRef} action={formAction}>
@@ -105,16 +105,17 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
 
           {step === "edit" ? (
             <Stack gap="md" py="sm">
+              <AppInput label="描述" value="系统默认目录" readOnly description="固定名称，不可修改。" />
               <AppInput label="当前路径" value={root.absolutePath} readOnly />
               <AppInput
                 label="新路径"
-                description="必须是绝对路径。仅系统默认目录可修改。"
+                description="必须是绝对路径。系统目录仅支持修改路径（可选择是否移动文件）。"
                 value={nextAbsolutePath}
                 onChange={(event) => setNextAbsolutePath(event.currentTarget.value)}
                 placeholder="例如 D:\MangaLibrary"
               />
               <Text size="sm" c="ink.5">
-                下一步会询问是否把目录内的漫画一起移动到新路径。设置与用户添加的其它根目录不受影响。
+                下一步会询问是否把目录内的漫画一起移动到新路径。用户添加的其它根目录不受影响。
               </Text>
               <Group justify="flex-end" mt="sm">
                 <AppButton type="button" variant="outline" disabled={isPending} onClick={handleClose}>

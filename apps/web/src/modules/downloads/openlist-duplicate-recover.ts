@@ -53,7 +53,7 @@ export function matchArchiveInIndex(input: {
   hints: string[];
   comicName?: string | null;
   archives: OpenListLibraryIndexArchive[];
-  entries?: Array<{ remotePath: string; parentPath: string; name: string; kind: "file" | "directory"; sizeBytes: number | null }>;
+  entries?: Array<{ remotePath: string; parentPath: string; name: string; kind: "file" | "directory"; sizeBytes: number | null; depth?: number }>;
 }): RecoverMatchResult {
   const root = normalizeOpenListLocateRoot(input.root);
   const hints = input.hints.map((h) => h.trim()).filter(Boolean);
@@ -93,7 +93,7 @@ export function matchArchiveInIndex(input: {
 
   // Also use directory entries if provided.
   for (const entry of input.entries ?? []) {
-    if (entry.kind === "directory" && entry.depth === 1) {
+    if (entry.kind === "directory" && (entry.depth == null || entry.depth === 1)) {
       dirs.set(entry.remotePath, { name: entry.name, remotePath: entry.remotePath });
     }
   }

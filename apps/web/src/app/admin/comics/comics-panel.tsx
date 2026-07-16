@@ -19,20 +19,27 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
   const [page, setPage] = useAdminTabState("page", 1);
   const [pageSize, setPageSize] = useAdminTabState("pageSize", "10");
   const [search, setSearch] = useAdminTabState("search", "");
+  const [statusFilter, setStatusFilter] = useAdminTabState("statusFilter", "all");
 
   const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) {
-      return comics;
+    // Server already excludes soft-deleted; client only filters remaining statuses.
+    let rows = comics;
+    if (statusFilter !== "all") {
+      rows = rows.filter((comic) => comic.status === statusFilter);
     }
 
-    return comics.filter((comic) =>
+    const query = search.trim().toLowerCase();
+    if (!query) {
+      return rows;
+    }
+
+    return rows.filter((comic) =>
       [comic.displayTitle, comic.fileTitle, comic.originalTitle ?? "", comic.metadataQueryTitle ?? "", comic.status, comic.localFileKind ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(query),
     );
-  }, [comics, search]);
+  }, [comics, search, statusFilter]);
 
   const limit = Number(pageSize);
   const total = filtered.length;
@@ -53,7 +60,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
         </Box>
       </Box>
 
-      <Group justify="space-between" mb="md">
+      <Group justify="space-between" mb="md" align="flex-end" wrap="wrap">
         <TextInput
           placeholder="搜索漫画名称、作者或状态..."
           leftSection={<Search size={16} style={{ color: "var(--mantine-color-ink-5)" }} />}
@@ -70,6 +77,24 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
               "&:focus": { borderColor: "var(--mantine-color-pink-5)" },
             },
           }}
+        />
+        <Select
+          label="状态"
+          data={[
+            { value: "all", label: "全部" },
+            { value: "readable", label: "可读" },
+            { value: "missing_local_file", label: "缺文件" },
+            { value: "remote_only", label: "仅远程" },
+            { value: "hidden", label: "已隐藏" },
+          ]}
+          value={statusFilter}
+          onChange={(value) => {
+            setStatusFilter(value || "all");
+            setPage(1);
+          }}
+          allowDeselect={false}
+          w={160}
+          size="sm"
         />
       </Group>
 

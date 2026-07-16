@@ -37,6 +37,9 @@ export interface LocalComicPage {
   height: number | null;
 }
 
+/** Staging folder for downloads under a manga root — never treat as a comic title. */
+export const DOWNLOAD_IMPORT_DIRECTORY_NAME = "下载入库";
+
 export async function enumerateMangaRootChildren(rootPath: string): Promise<LocalComicEntry[]> {
   const rootStat = await fs.stat(rootPath).catch(() => null);
 
@@ -49,6 +52,11 @@ export async function enumerateMangaRootChildren(rootPath: string): Promise<Loca
 
   for (const child of children.sort(compareDirentsByName)) {
     if (child.name.startsWith(".")) {
+      continue;
+    }
+
+    // Download landing zone under a library root is not a comic (zip files inside are comics of the dedicated import root).
+    if (child.isDirectory() && child.name === DOWNLOAD_IMPORT_DIRECTORY_NAME) {
       continue;
     }
 

@@ -29,6 +29,8 @@ This document records features that are already implemented in `apps/web`.
 ### Local Library
 
 - Configure one or more manga roots with absolute filesystem paths.
+- `下载入库` is a special download staging directory (and optional auto-created manga root for downloads only). Library scans never import a child folder named `下载入库` as a comic; public/admin comic lists never return a comic titled or pathed as `下载入库`; path management UI hides the download-import root so it is not managed like a normal library path.
+- Admin paths can open a registered manga root in the OS default file manager via `POST /api/admin/paths/[id]/open-folder`.
 - The built-in system default manga root path can be edited from admin paths; a confirm step asks whether to physically move contained comics. Choosing yes moves children into the new empty directory and rewrites related local_files / finalization paths; choosing no rewrites database paths only. User manga roots still cannot change absolute path here.
 - Adding a manga root automatically starts one scan for that root.
 - Configured manga roots can also be scanned manually from the manga roots admin page.
@@ -88,6 +90,7 @@ This document records features that are already implemented in `apps/web`.
 - `/api/downloads` lists imported downloadable resources and queued download tasks.
 - Admin download tasks can create queued `download_task` records from `comic_resource` records.
 - Transfer-task rows can open the local file/folder location through `POST /api/downloads/[id]/open-folder`, which launches the OS default folder handler (`start` / `open` / `xdg-open`) rather than hard-coding Windows Explorer.
+- Offline download task rows can expand for full details: complete error text, full resource URL (magnet), remote task id/path, create/update times, and retry count.
 - Download task creation uses the configured default download directory when no per-task target directory is provided.
 - Download task creation chooses the default provider from resource type: magnet/torrent uses aria2, HTTP uses builtin HTTP, and OpenList resources use OpenList.
 - Download task creation rejects incompatible resource/provider combinations and reuses an existing queued/running task for the same resource and provider.

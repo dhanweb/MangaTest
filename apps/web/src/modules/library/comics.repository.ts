@@ -115,7 +115,13 @@ export function createComicRepository(): ComicRepository {
       const pageSize = Math.max(12, Math.min(96, Math.trunc(input.pageSize ?? 48)));
       const query = input.query?.trim();
       const selectedTags = normalizeSelectedTags(input.tags);
-      const baseWhere = and(eq(comics.status, "readable"), eq(localFiles.isMissing, false));
+      const baseWhere = and(
+        eq(comics.status, "readable"),
+        eq(localFiles.isMissing, false),
+        // Staging folder "下载入库" is never a library comic.
+        sql`${comics.fileTitle} != '下载入库'`,
+        sql`${comics.displayTitle} != '下载入库'`,
+      );
       const queryWhere = query
         ? or(
             like(comics.displayTitle, `%${query}%`),
@@ -219,9 +225,21 @@ export function createComicRepository(): ComicRepository {
       }));
     },
 
-    async listAdminRows(limit = 200) {
+    async listAdminRows(limit = 200, options?: { includeDeleted?: boolean }) {
       bootstrapDatabase();
       const db = getDb();
+      // Soft-deleted stay in DB for recovery but are excluded by default.
+      // Also never list the download-staging folder as a comic (special system directory).
+      const notStagingFolderComic = and(
+        sql`${comics.fileTitle} != '下载入库'`,
+        sql`${comics.displayTitle} != '下载入库'`,
+        sql`coalesce(${localFiles.relativePath}, '') != '下载入库'`,
+        sql`coalesce(${localFiles.relativePath}, '') not like '%\\下载入库'`,
+        sql`coalesce(${localFiles.relativePath}, '') not like '%/下载入库'`,
+      );
+      const whereClause = options?.includeDeleted
+        ? notStagingFolderComic
+        : and(sql`${comics.status} != 'deleted'`, notStagingFolderComic);
 
       const rows = db
         .select({
@@ -246,6 +264,7 @@ export function createComicRepository(): ComicRepository {
         .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
         .leftJoin(chapters, eq(chapters.comicId, comics.id))
         .leftJoin(pages, eq(pages.chapterId, chapters.id))
+        .where(whereClause)
         .groupBy(comics.id)
         .orderBy(desc(comics.createdAt))
         .limit(limit)

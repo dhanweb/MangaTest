@@ -8,6 +8,40 @@ import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 
 describe("scanMangaRoot", () => {
+  it("does not import the download staging folder 下载入库 as a comic", async () => {
+    const workspace = path.join(os.tmpdir(), `mangatest-scan-import-skip-${randomUUID()}`);
+    const rootPath = path.join(workspace, "Root");
+    const stagingPath = path.join(rootPath, "下载入库");
+    const comicPath = path.join(rootPath, "Real Comic");
+    const dbPath = path.join(workspace, "test.sqlite");
+    const jpegFixture = await sharp({
+      create: { width: 8, height: 8, channels: 3, background: "#ef3b91" },
+    })
+      .jpeg()
+      .toBuffer();
+
+    await mkdir(comicPath, { recursive: true });
+    await mkdir(stagingPath, { recursive: true });
+    await writeFile(path.join(comicPath, "001.jpg"), jpegFixture);
+    await writeFile(path.join(stagingPath, "should-not-be-comic-title.txt"), "staging");
+
+    process.env.MANGATEST_DB_PATH = dbPath;
+    const { createAndScanMangaRoot } = await import("./create-and-scan-manga-root");
+    const result = await createAndScanMangaRoot({
+      absolutePath: rootPath,
+      displayName: "Skip staging",
+    });
+
+    expect(result.scanError).toBeNull();
+    expect(result.scanResult?.addedCount).toBe(1);
+
+    const sqlite = new Database(dbPath);
+    const titles = sqlite.prepare("select file_title as t from comics").all() as Array<{ t: string }>;
+    expect(titles.map((row) => row.t)).toEqual(["Real Comic"]);
+    expect(titles.some((row) => row.t === "下载入库")).toBe(false);
+    sqlite.close();
+  });
+
   it("imports directory and cbz comics, then marks missing local files on rescan", async () => {
     const workspace = path.join(os.tmpdir(), `mangatest-scan-${randomUUID()}`);
     const rootPath = path.join(workspace, "Root");

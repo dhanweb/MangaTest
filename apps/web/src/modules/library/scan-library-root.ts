@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 
 import { bootstrapDatabase, chapters, comics, getDb, localFiles, mangaRoots, pages, scanSessions } from "@/modules/core/db";
-import { enumerateMangaRootChildren } from "@/modules/local-files";
+import { DOWNLOAD_IMPORT_DIRECTORY_NAME, enumerateMangaRootChildren } from "@/modules/local-files";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
 
 export interface LibraryScanResult {
@@ -56,6 +56,31 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
       const existingFiles = tx.select().from(localFiles).where(eq(localFiles.mangaRootId, mangaRootId)).all();
 
       for (const file of existingFiles) {
+        // Retire mistaken "下载入库" directory comics (staging folder is not a comic).
+        const baseName = file.relativePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
+        if (baseName === DOWNLOAD_IMPORT_DIRECTORY_NAME || file.relativePath === DOWNLOAD_IMPORT_DIRECTORY_NAME) {
+          tx.update(localFiles)
+            .set({
+              isMissing: true,
+              missingSince: file.missingSince ?? now,
+              isIgnored: true,
+              ignoredAt: file.ignoredAt ?? now,
+              updatedAt: now,
+            })
+            .where(eq(localFiles.id, file.id))
+            .run();
+          if (file.comicId) {
+            tx.update(comics)
+              .set({
+                status: "deleted",
+                updatedAt: now,
+              })
+              .where(eq(comics.id, file.comicId))
+              .run();
+          }
+          continue;
+        }
+
         if (!scannedPaths.has(file.relativePath) && !file.isMissing) {
           missingCount += 1;
           tx.update(localFiles)

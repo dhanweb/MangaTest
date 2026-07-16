@@ -703,6 +703,7 @@ function providerPrepareInput(): DownloadProviderPrepareInput {
       offlineTaskId: null,
       provider: "openlist",
       redactedResource: "openlist:...",
+      resourceUrl: "/Library/Comic.cbz",
       remoteTaskId: null,
       remotePath: null,
       resourceLabel: "OpenList",

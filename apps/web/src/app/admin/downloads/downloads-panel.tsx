@@ -1,8 +1,9 @@
 "use client";
 
-import { Badge, Box, Group, Paper, Select, Stack, Table, Tabs, Text, Tooltip } from "@mantine/core";
-import { ArrowDownToLine, CloudDownload, FolderOpen, FolderSearch, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActionIcon, Badge, Box, Group, Paper, Select, Stack, Table, Tabs, Text, Tooltip } from "@mantine/core";
+import { ArrowDownToLine, BookOpen, ChevronDown, ChevronRight, CloudDownload, FolderOpen, FolderSearch, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput } from "@/components/ui/app-components";
@@ -69,6 +70,35 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
+}
+
+function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <Box>
+      <Text size="xs" c="ink.5" mb={2}>
+        {label}
+      </Text>
+      <Text
+        size="sm"
+        style={{
+          wordBreak: "break-all",
+          whiteSpace: "pre-wrap",
+          fontFamily: mono ? "var(--mantine-font-family-monospace)" : undefined,
+        }}
+      >
+        {value || "—"}
+      </Text>
+    </Box>
+  );
+}
+
 export function DownloadsPanel({
   dispatchPlan, resources, tasks,
 }: {
@@ -88,6 +118,7 @@ export function DownloadsPanel({
   const [pendingTick, setPendingTick] = useState(false);
   const [pendingRescan, setPendingRescan] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [expandedOfflineIds, setExpandedOfflineIds] = useState<Record<string, boolean>>({});
 
   const selected = useMemo(() => resourceItems.find((r) => r.id === selectedId) ?? null, [resourceItems, selectedId]);
   const providerOpts = useMemo(
@@ -362,71 +393,121 @@ export function DownloadsPanel({
               <Table striped highlightOnHover>
                 <Table.Thead>
                   <Table.Tr>
+                    <Table.Th w={36} />
                     <Table.Th>漫画</Table.Th>
                     <Table.Th w={90}>Provider</Table.Th>
                     <Table.Th w={80}>类型</Table.Th>
-                    <Table.Th w={100}>远程状态</Table.Th>
+                    <Table.Th w={100}>状态</Table.Th>
                     <Table.Th w={160}>操作</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {offlineTasks.map((task) => (
-                    <Table.Tr key={task.id}>
-                      <Table.Td>
-                        <Text size="sm" fw={600}>{task.comicTitle}</Text>
-                        <Text size="xs" c="ink.5">{task.resourceLabel}</Text>
-                      </Table.Td>
-                      <Table.Td>{PROVIDER_LABELS[task.provider] || task.provider}</Table.Td>
-                      <Table.Td>{TYPE_LABELS[task.resourceType ?? ""] || task.resourceType}</Table.Td>
-                      <Table.Td>
-                        <Stack gap={2}>
-                          <StatusBadge status={task.status} />
-                          {task.status === "failed" && task.errorMessage && !task.errorMessage.startsWith("{") && (
-                            <Text size="10px" c="red" style={{ maxWidth: 200, wordBreak: "break-all", lineHeight: 1.3 }}>
-                              {task.errorMessage}
-                            </Text>
-                          )}
-                        </Stack>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4} wrap="nowrap">
-                          {(task.status === "completed") && (
-                            <Tooltip label="拉回本地" withArrow>
-                              <AppButton size="xs" variant="outline"
-                                leftSection={<ArrowDownToLine size={12} />}
-                                loading={pendingAction === `pullback:${task.id}`}
-                                onClick={() => pullBackTask(task.id)}
-                              >拉回</AppButton>
+                  {offlineTasks.map((task) => {
+                    const expanded = Boolean(expandedOfflineIds[task.id]);
+                    return (
+                      <Fragment key={task.id}>
+                        <Table.Tr>
+                          <Table.Td>
+                            <Tooltip label={expanded ? "收起详情" : "展开详情"} withArrow>
+                              <ActionIcon
+                                variant="subtle"
+                                color="pink"
+                                size="sm"
+                                onClick={() =>
+                                  setExpandedOfflineIds((prev) => ({
+                                    ...prev,
+                                    [task.id]: !prev[task.id],
+                                  }))
+                                }
+                                aria-label={expanded ? "收起详情" : "展开详情"}
+                              >
+                                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </ActionIcon>
                             </Tooltip>
-                          )}
-                          {(task.status === "queued" || task.status === "submitted" || task.status === "running") && (
-                            <Tooltip label="取消任务" withArrow>
-                              <AppButton size="xs" variant="outline" color="red"
-                                loading={pendingAction === `cancel:${task.id}`}
-                                onClick={() => cancelTask(task.id)}
-                              >取消</AppButton>
-                            </Tooltip>
-                          )}
-                          {(task.status === "failed" || task.status === "canceled") && (
-                            <Tooltip label="重新排队" withArrow>
-                              <AppButton size="xs" variant="outline"
-                                leftSection={<RotateCcw size={12} />}
-                                loading={pendingAction === `retry:${task.id}`}
-                                onClick={() => retryTask(task.id)}
-                              >重试</AppButton>
-                            </Tooltip>
-                          )}
-                          <Tooltip label="删除任务" withArrow>
-                            <AppButton size="xs" variant="outline" color="red"
-                              leftSection={<Trash2 size={12} />}
-                              loading={pendingAction === `delete:${task.id}`}
-                              onClick={() => deleteTask(task.id)}
-                            >删除</AppButton>
-                          </Tooltip>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
+                          </Table.Td>
+                          <Table.Td>
+                            <Text size="sm" fw={600}>{task.comicTitle}</Text>
+                            <Text size="xs" c="ink.5">{task.resourceLabel}</Text>
+                            {task.status === "failed" && task.errorMessage ? (
+                              <Text size="xs" c="red.7" lineClamp={1} mt={2}>
+                                {task.errorMessage}
+                              </Text>
+                            ) : null}
+                          </Table.Td>
+                          <Table.Td>{PROVIDER_LABELS[task.provider] || task.provider}</Table.Td>
+                          <Table.Td>{TYPE_LABELS[task.resourceType ?? ""] || task.resourceType}</Table.Td>
+                          <Table.Td>
+                            <StatusBadge status={task.status} />
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={4} wrap="nowrap">
+                              {(task.status === "completed") && (
+                                <Tooltip label="拉回本地" withArrow>
+                                  <AppButton size="xs" variant="outline"
+                                    leftSection={<ArrowDownToLine size={12} />}
+                                    loading={pendingAction === `pullback:${task.id}`}
+                                    onClick={() => pullBackTask(task.id)}
+                                  >拉回</AppButton>
+                                </Tooltip>
+                              )}
+                              {(task.status === "queued" || task.status === "submitted" || task.status === "running") && (
+                                <Tooltip label="取消任务" withArrow>
+                                  <AppButton size="xs" variant="outline" color="red"
+                                    loading={pendingAction === `cancel:${task.id}`}
+                                    onClick={() => cancelTask(task.id)}
+                                  >取消</AppButton>
+                                </Tooltip>
+                              )}
+                              {(task.status === "failed" || task.status === "canceled") && (
+                                <Tooltip label="重新排队" withArrow>
+                                  <AppButton size="xs" variant="outline"
+                                    leftSection={<RotateCcw size={12} />}
+                                    loading={pendingAction === `retry:${task.id}`}
+                                    onClick={() => retryTask(task.id)}
+                                  >重试</AppButton>
+                                </Tooltip>
+                              )}
+                              <Tooltip label="删除任务" withArrow>
+                                <AppButton size="xs" variant="outline" color="red"
+                                  leftSection={<Trash2 size={12} />}
+                                  loading={pendingAction === `delete:${task.id}`}
+                                  onClick={() => deleteTask(task.id)}
+                                >删除</AppButton>
+                              </Tooltip>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                        {expanded ? (
+                          <Table.Tr>
+                            <Table.Td colSpan={6} style={{ background: "var(--mantine-color-pink-0)" }}>
+                              <Stack gap="sm" p="sm">
+                                <Group gap="xl" align="flex-start" wrap="wrap">
+                                  <DetailRow label="任务 ID" value={task.id} mono />
+                                  <DetailRow label="创建时间" value={formatDateTime(task.createdAt)} />
+                                  <DetailRow label="最后更新" value={formatDateTime(task.updatedAt)} />
+                                  <DetailRow label="重试次数" value={String(task.retryCount)} />
+                                </Group>
+                                <Group gap="xl" align="flex-start" wrap="wrap">
+                                  <DetailRow label="远程任务 ID" value={task.remoteTaskId || "—"} mono />
+                                  <DetailRow label="远程路径" value={task.remotePath || "—"} mono />
+                                  <DetailRow label="目标目录" value={task.targetDirectory || "—"} mono />
+                                  <DetailRow label="来源站" value={task.sourceSite || "—"} />
+                                </Group>
+                                <DetailRow
+                                  label="资源链接（完整）"
+                                  value={task.resourceUrl || task.redactedResource || "—"}
+                                  mono
+                                />
+                                {task.errorMessage ? (
+                                  <DetailRow label="错误信息" value={task.errorMessage} />
+                                ) : null}
+                              </Stack>
+                            </Table.Td>
+                          </Table.Tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </Table.Tbody>
               </Table>
             ) : (
@@ -487,8 +568,21 @@ export function DownloadsPanel({
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="nowrap">
+                          {task.status === "completed" && task.finalization?.status === "completed" && task.importedComicId && (
+                            <Tooltip label="查看漫画详情" withArrow>
+                              <AppButton
+                                component={Link}
+                                href={`/admin/comics/${task.importedComicId}`}
+                                size="xs"
+                                variant="outline"
+                                leftSection={<BookOpen size={12} />}
+                              >
+                                详情
+                              </AppButton>
+                            </Tooltip>
+                          )}
                           {(task.finalization?.finalPath || task.transfer?.tempFilePath || task.targetDirectory) && (
-                            <Tooltip label="在系统默认文件管理器中打开" withArrow>
+                            <Tooltip label="在资源管理器打开" withArrow>
                               <AppButton size="xs" variant="outline"
                                 leftSection={<FolderOpen size={12} />}
                                 loading={pendingAction === `openfolder:${task.id}`}

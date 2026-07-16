@@ -21,10 +21,12 @@ import {
   downloadTaskTransfers,
   downloadTasks,
   getDb,
+  localFiles,
   operationLogs,
 } from "@/modules/core/db";
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
+import { DOWNLOAD_IMPORT_DIRECTORY_NAME } from "@/modules/local-files";
 
 import {
   ensureOpenListToken,
@@ -183,6 +185,8 @@ export interface DownloadTaskRecord {
   resourceType: ComicResourceType | null;
   resourceLabel: string;
   redactedResource: string;
+  /** Full resource URL (e.g. magnet) for local admin display; not for public pages. */
+  resourceUrl: string | null;
   sourceSite: string | null;
   provider: DownloadProvider;
   taskType: DownloadTaskType;
@@ -195,6 +199,8 @@ export interface DownloadTaskRecord {
   retryCount: number;
   createdAt: string;
   updatedAt: string;
+  /** Local library comic created/matched after successful download finalization scan. */
+  importedComicId?: string | null;
   finalization?: DownloadTaskFinalizationRecord | null;
   preparation?: DownloadTaskPreparationRecord | null;
   transfer?: DownloadTaskTransferRecord | null;
@@ -372,7 +378,6 @@ const COMPATIBLE_PROVIDERS: Record<ComicResourceType, DownloadProvider[]> = {
 };
 
 const ACTIVE_TASK_STATUSES: DownloadTaskStatus[] = ["queued", "running", "submitted", "downloading", "cancel_requested"];
-const DOWNLOAD_IMPORT_DIRECTORY_NAME = "下载入库";
 const OPENLIST_CLOUD_SCAN_MAX_PAGES = 5;
 const OPENLIST_CLOUD_SCAN_PER_PAGE = 50;
 
@@ -481,6 +486,7 @@ export async function listDownloadTasks(limit = 100, taskType?: DownloadTaskType
       resourceType: comicResources.resourceType,
       displayLabel: comicResources.displayLabel,
       redactedResource: comicResources.redactedResource,
+      resourceUrl: comicResources.resourceUrl,
       sourceSite: comicSources.site,
     })
     .from(downloadTasks)
@@ -500,6 +506,7 @@ export async function listDownloadTasks(limit = 100, taskType?: DownloadTaskType
     resourceType: row.resourceType && isComicResourceType(row.resourceType) ? row.resourceType : null,
     resourceLabel: row.displayLabel?.trim() || row.resourceType || "资源",
     redactedResource: row.redactedResource?.trim() || "资源已脱敏",
+    resourceUrl: row.resourceUrl ?? null,
     sourceSite: row.sourceSite,
     provider: normalizeProvider(row.provider),
     taskType: normalizeDownloadTaskType(row.taskType ?? "transfer"),
@@ -1245,7 +1252,6 @@ export async function retryDownloadTask(taskId: string): Promise<UpdateDownloadT
     recordDownloadTaskEvent(recovered, "download_task_retry", {
       previousStatus: task.status,
       status: recovered.status,
-      openlistDuplicateRecovery: true,
     });
     return { task: recovered };
   }
@@ -1425,7 +1431,7 @@ export async function openDownloadTaskInFileManager(taskId: string): Promise<Ope
       ok: true,
       openedPath: openPath,
       targetKind,
-      message: `已在系统默认文件管理器中打开：${openPath}`,
+      message: `已在资源管理器打开：${openPath}`,
     };
   } catch (error) {
     return {
@@ -1494,6 +1500,7 @@ export function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
       resourceType: comicResources.resourceType,
       displayLabel: comicResources.displayLabel,
       redactedResource: comicResources.redactedResource,
+      resourceUrl: comicResources.resourceUrl,
       sourceSite: comicSources.site,
     })
     .from(downloadTasks)
@@ -1515,6 +1522,7 @@ export function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
     resourceType: row.resourceType && isComicResourceType(row.resourceType) ? row.resourceType : null,
     resourceLabel: row.displayLabel?.trim() || row.resourceType || "资源",
     redactedResource: row.redactedResource?.trim() || "资源已脱敏",
+    resourceUrl: row.resourceUrl ?? null,
     sourceSite: row.sourceSite,
     provider: normalizeProvider(row.provider),
     taskType: normalizeDownloadTaskType(row.taskType ?? "transfer"),
@@ -1529,12 +1537,13 @@ export function getDownloadTaskById(taskId: string): DownloadTaskRecord | null {
     updatedAt: row.updatedAt,
   };
 
-  return {
+  const withParts = {
     ...task,
     finalization: getDownloadTaskFinalizationByTaskId(task.id),
     preparation: getDownloadTaskPreparationByTaskId(task.id),
     transfer: getDownloadTaskTransferByTaskId(task.id),
   };
+  return attachImportedComicIds([withParts])[0] ?? withParts;
 }
 
 function attachDownloadTaskPreparations(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
@@ -2565,11 +2574,6 @@ export function createTransferTaskFromResolvedRemoteFile(
 
   recordDownloadTaskEvent(transferTask, "download_task_create", {
     status: transferTask.status,
-    fromOfflineDuplicateLocate: true,
-    offlineTaskId: offlineTask.id,
-    remotePath: file.remotePath,
-    fileName: file.fileName,
-    sizeBytes: file.sizeBytes,
   });
 
   return { ok: true, task: transferTask };
@@ -2714,11 +2718,51 @@ function attachDownloadTaskFinalizations(tasks: DownloadTaskRecord[]): DownloadT
   }
 
   const finalizationsByTaskId = listDownloadTaskFinalizationMap(tasks.map((task) => task.id));
-
-  return tasks.map((task) => ({
+  const withFinalization = tasks.map((task) => ({
     ...task,
     finalization: finalizationsByTaskId.get(task.id) ?? null,
   }));
+
+  return attachImportedComicIds(withFinalization);
+}
+
+function attachImportedComicIds(tasks: DownloadTaskRecord[]): DownloadTaskRecord[] {
+  const paths = tasks
+    .map((task) => task.finalization?.finalPath?.trim())
+    .filter((value): value is string => Boolean(value));
+
+  if (paths.length === 0) {
+    return tasks.map((task) => ({ ...task, importedComicId: task.importedComicId ?? null }));
+  }
+
+  const uniquePaths = [...new Set(paths.map((value) => path.resolve(value)))];
+  const rows = getDb()
+    .select({
+      absolutePath: localFiles.absolutePath,
+      comicId: localFiles.comicId,
+    })
+    .from(localFiles)
+    .where(inArray(localFiles.absolutePath, uniquePaths))
+    .all();
+
+  const comicIdByPath = new Map<string, string>();
+  for (const row of rows) {
+    if (row.comicId) {
+      // Store both raw and resolved keys so Windows path forms still match.
+      comicIdByPath.set(row.absolutePath, row.comicId);
+      comicIdByPath.set(path.resolve(row.absolutePath), row.comicId);
+    }
+  }
+
+  return tasks.map((task) => {
+    const finalPath = task.finalization?.finalPath?.trim();
+    if (!finalPath) {
+      return { ...task, importedComicId: null };
+    }
+    const importedComicId =
+      comicIdByPath.get(finalPath) ?? comicIdByPath.get(path.resolve(finalPath)) ?? null;
+    return { ...task, importedComicId };
+  });
 }
 
 function listDownloadTaskFinalizationMap(taskIds: string[]) {

@@ -3,7 +3,14 @@ import { asc, eq, sql } from "drizzle-orm";
 import { bootstrapDatabase, getDb } from "@/modules/core/db";
 import { localFiles, mangaRoots, scanSessions } from "@/modules/core/db/schema";
 
+import { DOWNLOAD_IMPORT_DIRECTORY_NAME } from "@/modules/local-files";
+
 import { createMangaRootRecord, type MangaRootDraft, type MangaRootRecord, type MangaRootWithStats } from "./manga-roots";
+
+function isDownloadImportRoot(root: { absolutePath: string; displayName: string | null }) {
+  const base = root.absolutePath.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
+  return base === DOWNLOAD_IMPORT_DIRECTORY_NAME || root.displayName === DOWNLOAD_IMPORT_DIRECTORY_NAME;
+}
 
 export interface MangaRootRepository {
   list(): Promise<MangaRootRecord[]>;
@@ -26,6 +33,7 @@ export function createMangaRootRepository(): MangaRootRepository {
       const db = getDb();
       const rows = db.select().from(mangaRoots).orderBy(asc(mangaRoots.createdAt)).all();
 
+      // Keep download-import root for downloads module (caller can filter further); include all here.
       return rows.map((row) => ({
         id: row.id,
         absolutePath: row.absolutePath,
@@ -57,16 +65,19 @@ export function createMangaRootRepository(): MangaRootRepository {
         .orderBy(asc(mangaRoots.createdAt))
         .all();
 
-      return rows.map((row) => ({
-        id: row.id,
-        absolutePath: row.absolutePath,
-        displayName: row.displayName,
-        scanMode: row.scanMode,
-        kind: row.kind,
-        isEnabled: row.isEnabled,
-        lastScanSessionId: row.lastScanSessionId,
-        comicCount: Number(row.comicCount),
-      }));
+      // Path management UI: hide download staging root so it is not treated as a user library path.
+      return rows
+        .filter((row) => !isDownloadImportRoot(row))
+        .map((row) => ({
+          id: row.id,
+          absolutePath: row.absolutePath,
+          displayName: row.displayName,
+          scanMode: row.scanMode,
+          kind: row.kind,
+          isEnabled: row.isEnabled,
+          lastScanSessionId: row.lastScanSessionId,
+          comicCount: Number(row.comicCount),
+        }));
     },
 
     async create(input) {
