@@ -1,6 +1,7 @@
 /**
  * Single-flight paginated scan of the flat OpenList library root for 10008 recovery.
- * Layout: {root}/{mangaName}/{archive}.zip|cbz
+ * Layout (115 common): {root}/{fileName.zip}/{fileName.zip}
+ * Also: {root}/{mangaName}/{archive}.zip|cbz
  */
 
 import { randomUUID } from "node:crypto";

@@ -51,13 +51,15 @@ export type RecoverMatchResult = RecoverMatchFound | RecoverMatchAmbiguous | Rec
 export function matchArchiveInIndex(input: {
   root: string;
   hints: string[];
+  comicName?: string | null;
   archives: OpenListLibraryIndexArchive[];
   entries?: Array<{ remotePath: string; parentPath: string; name: string; kind: "file" | "directory"; sizeBytes: number | null }>;
 }): RecoverMatchResult {
   const root = normalizeOpenListLocateRoot(input.root);
   const hints = input.hints.map((h) => h.trim()).filter(Boolean);
+  const msgOpts = { comicName: input.comicName, hints };
   if (hints.length === 0) {
-    return { status: "not_found", message: buildIndexNotFoundMessage(root) };
+    return { status: "not_found", message: buildIndexNotFoundMessage(root, msgOpts) };
   }
 
   // Score directories and loose archives at root depth.
@@ -108,7 +110,7 @@ export function matchArchiveInIndex(input: {
 
   const high = scored.filter((s) => s.score >= HIGH_SCORE).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
   if (high.length === 0) {
-    return { status: "not_found", message: buildIndexNotFoundMessage(root) };
+    return { status: "not_found", message: buildIndexNotFoundMessage(root, msgOpts) };
   }
 
   const bestScore = high[0]!.score;
@@ -158,7 +160,7 @@ export function matchArchiveInIndex(input: {
 
   const archivesInDir = input.archives.filter((a) => a.parentPath === winner.remotePath && isOpenListArchiveName(a.name));
   if (archivesInDir.length === 0) {
-    return { status: "not_found", message: buildIndexNotFoundMessage(root) };
+    return { status: "not_found", message: buildIndexNotFoundMessage(root, msgOpts) };
   }
   if (archivesInDir.length === 1) {
     const a = archivesInDir[0]!;
@@ -227,12 +229,14 @@ export function matchTaskHintsAgainstIndex(input: {
   root: string;
   sessionId: string;
   hints: string[];
+  comicName?: string | null;
 }): RecoverMatchResult {
   const archives = listIndexArchives(input.sessionId);
   const entries = listIndexEntries(input.sessionId);
   return matchArchiveInIndex({
     root: input.root,
     hints: input.hints,
+    comicName: input.comicName,
     archives,
     entries,
   });

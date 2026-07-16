@@ -11,8 +11,8 @@ describe("matchArchiveInIndex", () => {
       hints: ["My Comic Title"],
       archives: [
         {
-          remotePath: `${root}/My Comic Title/My Comic Title.zip`,
-          parentPath: `${root}/My Comic Title`,
+          remotePath: `${root}/My Comic Title.zip/My Comic Title.zip`,
+          parentPath: `${root}/My Comic Title.zip`,
           name: "My Comic Title.zip",
           sizeBytes: 1000,
           depth: 2,
@@ -20,9 +20,9 @@ describe("matchArchiveInIndex", () => {
       ],
       entries: [
         {
-          remotePath: `${root}/My Comic Title`,
+          remotePath: `${root}/My Comic Title.zip`,
           parentPath: root,
-          name: "My Comic Title",
+          name: "My Comic Title.zip",
           kind: "directory",
           sizeBytes: null,
         },
@@ -30,7 +30,7 @@ describe("matchArchiveInIndex", () => {
     });
     expect(result.status).toBe("found");
     if (result.status === "found") {
-      expect(result.remotePath.endsWith(".zip")).toBe(true);
+      expect(result.remotePath).toBe(`${root}/My Comic Title.zip/My Comic Title.zip`);
       expect(result.fileName).toBe("My Comic Title.zip");
     }
   });

@@ -63,7 +63,7 @@ describe("OpenList offline duplicate recovery", () => {
             data: {
               content: [
                 {
-                  name: mangaName,
+                  name: `${mangaName}.zip`,
                   is_dir: true,
                   size: 0,
                   modified: "2026-01-01T00:00:00Z",
@@ -74,7 +74,8 @@ describe("OpenList offline duplicate recovery", () => {
             message: "success",
           });
         }
-        if (listPath === `${root}/${mangaName}`) {
+        // 115: directory name is the archive name including .zip
+        if (listPath === `${root}/${mangaName}.zip` || listPath === `${root}/${mangaName}`) {
           return Response.json({
             code: 200,
             data: {
@@ -154,9 +155,9 @@ describe("OpenList offline duplicate recovery", () => {
     const transfers = tasks.filter((task) => task.taskType === "transfer");
 
     expect(offline?.status).toBe("completed");
-    expect(offline?.remotePath).toBe(`${root}/${mangaName}/${mangaName}.zip`);
+    expect(offline?.remotePath).toBe(`${root}/${mangaName}.zip/${mangaName}.zip`);
     expect(transfers).toHaveLength(1);
-    expect(transfers[0]?.remotePath).toBe(`${root}/${mangaName}/${mangaName}.zip`);
+    expect(transfers[0]?.remotePath).toBe(`${root}/${mangaName}.zip/${mangaName}.zip`);
     expect(requests.filter((item) => item.includes("add_offline_download"))).toHaveLength(1);
   });
 
@@ -235,9 +236,10 @@ describe("OpenList offline duplicate recovery", () => {
     const tasks = await listDownloadTasks(20);
     const offline = tasks.find((task) => task.taskType === "offline");
     expect(offline?.status).toBe("failed");
-    expect(offline?.errorMessage).toContain("10008");
+    expect(offline?.errorMessage).toContain("index_not_found");
     expect(offline?.errorMessage).toContain(root);
-    // After index miss, no longer pending tag
+    // Final miss: no 10008 / pending tag (do not re-queue as duplicate forever)
+    expect(offline?.errorMessage).not.toContain("10008");
     expect(offline?.errorMessage).not.toContain(PENDING_DUPLICATE_RECOVERY_TAG);
     expect(tasks.filter((task) => task.taskType === "transfer")).toHaveLength(0);
   });

@@ -2,7 +2,9 @@
  * Locate an existing OpenList archive under a flat library root when offline
  * submit returns "task already exists" (10008).
  *
- * Expected layout:
+ * Expected layout (115 often uses archive-named folder including suffix):
+ *   {root}/{fileName.zip}/{fileName.zip}
+ * also accepts:
  *   {root}/{mangaName}/{file}.zip|cbz
  */
 export const DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT = "/115Open/HENTAI/exhentai";

@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, Box, Group, Paper, Select, Stack, Table, Tabs, Text, Tooltip } from "@mantine/core";
-import { ArrowDownToLine, CloudDownload, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, CloudDownload, FolderOpen, FolderSearch, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
@@ -86,6 +86,7 @@ export function DownloadsPanel({
   const [targetDir, setTargetDir] = useAdminTabState("targetDir", "");
   const [pendingCreate, setPendingCreate] = useState(false);
   const [pendingTick, setPendingTick] = useState(false);
+  const [pendingRescan, setPendingRescan] = useState(false);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
   const selected = useMemo(() => resourceItems.find((r) => r.id === selectedId) ?? null, [resourceItems, selectedId]);
@@ -239,6 +240,38 @@ export function DownloadsPanel({
     setPendingAction(null);
   }
 
+  async function openTaskFolder(taskId: string) {
+    setPendingAction(`openfolder:${taskId}`);
+    const d = await fetchApi(`/api/downloads/${taskId}/open-folder`, { method: "POST" });
+    if (d?.message) {
+      toast.success(d.message);
+    }
+    setPendingAction(null);
+  }
+
+  async function rescanCloudLibrary() {
+    setPendingRescan(true);
+    try {
+      const res = await fetch("/api/downloads/openlist/library-index/rescan", { method: "POST" });
+      const d = (await res.json()) as ApiData & {
+        ok?: boolean;
+        recovered?: number;
+        notFound?: number;
+        ambiguous?: number;
+        candidateCount?: number;
+      };
+      if (!res.ok) {
+        toast.error(d.error || d.message || "重扫云端库失败");
+      } else {
+        toast.success(d.message || "云端库已重扫");
+      }
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "重扫云端库失败");
+    }
+    setPendingRescan(false);
+  }
+
   return (
     <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
       <Group justify="space-between" mb="lg">
@@ -247,6 +280,14 @@ export function DownloadsPanel({
           <Text size="sm" c="ink.5">管理离线下载和本地传输任务。</Text>
         </Box>
         <Group gap="sm">
+          <AppButton
+            variant="light"
+            leftSection={<FolderSearch size={15} />}
+            loading={pendingRescan}
+            onClick={rescanCloudLibrary}
+          >
+            重扫云端库
+          </AppButton>
           <AppButton leftSection={<Play size={15} />} loading={pendingTick} onClick={activeTab === "offline" ? runOfflineWorker : runTransferWorker}>
             运行 Worker
           </AppButton>
@@ -415,7 +456,7 @@ export function DownloadsPanel({
                     <Table.Th w={100}>来源</Table.Th>
                     <Table.Th w={90}>Provider</Table.Th>
                     <Table.Th w={100}>状态</Table.Th>
-                    <Table.Th w={140}>操作</Table.Th>
+                    <Table.Th w={200}>操作</Table.Th>
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -424,6 +465,11 @@ export function DownloadsPanel({
                       <Table.Td>
                         <Text size="sm" fw={600}>{task.comicTitle}</Text>
                         <Text size="xs" c="ink.5">{task.resourceLabel}</Text>
+                        {(task.finalization?.finalPath || task.transfer?.tempFilePath || task.targetDirectory) && (
+                          <Text size="10px" c="ink.4" style={{ maxWidth: 320, wordBreak: "break-all", lineHeight: 1.3 }}>
+                            {task.finalization?.finalPath || task.transfer?.tempFilePath || task.targetDirectory}
+                          </Text>
+                        )}
                       </Table.Td>
                       <Table.Td>
                         <Text size="xs">{task.offlineTaskId ? "离线任务" : "直接下载"}</Text>
@@ -441,6 +487,15 @@ export function DownloadsPanel({
                       </Table.Td>
                       <Table.Td>
                         <Group gap={4} wrap="nowrap">
+                          {(task.finalization?.finalPath || task.transfer?.tempFilePath || task.targetDirectory) && (
+                            <Tooltip label="在系统默认文件管理器中打开" withArrow>
+                              <AppButton size="xs" variant="outline"
+                                leftSection={<FolderOpen size={12} />}
+                                loading={pendingAction === `openfolder:${task.id}`}
+                                onClick={() => openTaskFolder(task.id)}
+                              >打开</AppButton>
+                            </Tooltip>
+                          )}
                           {(task.status === "queued" || task.status === "downloading" || task.status === "running") && (
                             <Tooltip label="取消任务" withArrow>
                               <AppButton size="xs" variant="outline" color="red"

@@ -5,7 +5,10 @@ import {
   extractOpenListErrorCode,
   isOpenListDuplicateOfflineError,
   isPendingDuplicateRecoveryError,
+  isRecoverableDuplicateOfflineError,
   buildPendingDuplicateRecoveryMessage,
+  buildIndexNotFoundMessage,
+  buildIndexAmbiguousMessage,
   OPENLIST_DUPLICATE_OFFLINE_CODE,
   PENDING_DUPLICATE_RECOVERY_TAG,
 } from "./openlist-duplicate-error";
@@ -52,5 +55,24 @@ describe("openlist-duplicate-error", () => {
     expect(isPendingDuplicateRecoveryError(msg)).toBe(true);
     expect(isPendingDuplicateRecoveryError("plain fail")).toBe(false);
     expect(OPENLIST_DUPLICATE_OFFLINE_CODE).toBe(10008);
+  });
+
+  it("index miss/ambiguous messages do not look like OpenList 10008", () => {
+    const miss = buildIndexNotFoundMessage("/115Open/HENTAI/exhentai", {
+      comicName: "[作者]真实漫画标题",
+      hints: ["[作者] 别的资源标签.zip"],
+    });
+    const amb = buildIndexAmbiguousMessage("/115Open/HENTAI/exhentai", ["/a/b.zip"], {
+      comicName: "[作者]真实漫画标题",
+    });
+    expect(miss).not.toMatch(/10008/);
+    expect(amb).not.toMatch(/10008/);
+    expect(miss).toContain("[作者]真实漫画标题");
+    // 115: folder name includes .zip (from comic title), file inside same name — not resource-label variant
+    expect(miss).toContain(
+      "/115Open/HENTAI/exhentai/[作者]真实漫画标题.zip/[作者]真实漫画标题.zip",
+    );
+    expect(isRecoverableDuplicateOfflineError(miss)).toBe(false);
+    expect(isRecoverableDuplicateOfflineError(amb)).toBe(false);
   });
 });

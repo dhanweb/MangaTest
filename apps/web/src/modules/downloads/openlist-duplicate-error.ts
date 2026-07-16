@@ -6,6 +6,8 @@
 export const OPENLIST_DUPLICATE_OFFLINE_CODE = 10008;
 
 export const PENDING_DUPLICATE_RECOVERY_TAG = "[openlist:10008] pending_index_recovery";
+export const INDEX_NOT_FOUND_TAG = "[openlist:index_not_found]";
+export const INDEX_AMBIGUOUS_TAG = "[openlist:index_ambiguous]";
 
 /** Extract nested `code: N` from OpenList/115 error messages. */
 export function extractCodeFromMessage(message: string | null | undefined): number | null {
@@ -82,10 +84,73 @@ export function isPendingDuplicateRecoveryError(errorMessage: string | null | un
   return String(errorMessage ?? "").includes(PENDING_DUPLICATE_RECOVERY_TAG);
 }
 
-export function buildIndexNotFoundMessage(root: string): string {
+/**
+ * True when a failed offline task should enter (or re-enter) library-index recovery.
+ * Covers both our pending tag and raw OpenList 10008 messages written by older poll/submit paths.
+ */
+export function isRecoverableDuplicateOfflineError(errorMessage: string | null | undefined): boolean {
+  if (isPendingDuplicateRecoveryError(errorMessage)) return true;
+  return isOpenListDuplicateOfflineError({ code: null, message: errorMessage });
+}
+
+/** Tasks eligible for manual rescan re-match (pending 10008 + previous index miss/ambiguous). */
+export function isLibraryIndexRematchCandidateError(errorMessage: string | null | undefined): boolean {
+  const text = String(errorMessage ?? "");
+  if (isRecoverableDuplicateOfflineError(text)) return true;
+  if (text.includes(INDEX_NOT_FOUND_TAG) || text.includes(INDEX_AMBIGUOUS_TAG)) return true;
+  return false;
+}
+
+function pickComicDisplayName(comicName?: string | null, hints?: string[]): string | null {
+  const fromName = comicName?.trim();
+  if (fromName) return fromName;
+  for (const hint of hints ?? []) {
+    const t = hint?.trim();
+    if (t) return t;
+  }
+  return null;
+}
+
+/**
+ * 115 offline often lands as:
+ *   {root}/{fileName.zip}/{fileName.zip}
+ * i.e. a folder named exactly like the archive (including .zip/.cbz), then the file inside.
+ */
+export function buildExpectedArchiveFileName(comicName?: string | null, hints?: string[]): string | null {
+  // Prefer comic display title + .zip — 115 folder is usually that full archive name.
+  const title = comicName?.trim();
+  if (title) {
+    if (/\.(zip|cbz)$/i.test(title)) return title;
+    return `${title}.zip`;
+  }
+  for (const hint of hints ?? []) {
+    const t = hint?.trim();
+    if (t && /\.(zip|cbz)$/i.test(t)) return t;
+  }
+  const name = pickComicDisplayName(null, hints);
+  if (!name) return null;
+  if (/\.(zip|cbz)$/i.test(name)) return name;
+  return `${name}.zip`;
+}
+
+/** Expected layout example: 115 same-name directory + archive file. */
+export function buildExpectedLibraryPathExample(root: string, comicName?: string | null, hints?: string[]): string {
+  const archiveName = buildExpectedArchiveFileName(comicName, hints);
+  if (archiveName) return `${root}/${archiveName}/${archiveName}`;
+  return `${root}/<文件名>.zip/<文件名>.zip`;
+}
+
+/** Final state after index recovery failed to match — do not include 10008 (not re-queued as duplicate recovery). */
+export function buildIndexNotFoundMessage(
+  root: string,
+  options?: { comicName?: string | null; hints?: string[] },
+): string {
+  const example = buildExpectedLibraryPathExample(root, options?.comicName, options?.hints);
+  const name = pickComicDisplayName(options?.comicName, options?.hints);
+  const namePart = name ? `「${name}」` : "该漫画";
   return (
-    `[openlist:10008] 10008：云端库索引中未找到匹配漫画。` +
-    `请确认文件在 ${root}/[漫画名]/ 下后重试（将触发/复用扫描）。`
+    `${INDEX_NOT_FOUND_TAG} 云端库索引中未找到与${namePart}匹配的压缩包。` +
+    `115 常见路径为「与 zip 同名的目录/同名 zip」，例如 ${example}。请放到该位置后，在下载页点「重扫云端库」再试。`
   );
 }
 
@@ -93,10 +158,17 @@ export function buildIndexRecoveredMessage(fileName: string): string {
   return `已从云端库索引定位到 ${fileName}，已创建传输任务。`;
 }
 
-export function buildIndexAmbiguousMessage(root: string, paths: string[]): string {
+/** Final state when multiple candidates match — no 10008 so UI/retry won't treat as raw OpenList duplicate. */
+export function buildIndexAmbiguousMessage(
+  root: string,
+  paths: string[],
+  options?: { comicName?: string | null },
+): string {
   const preview = paths.slice(0, 5).join("；");
+  const name = pickComicDisplayName(options?.comicName);
+  const namePart = name ? `「${name}」` : "该漫画";
   return (
-    `[openlist:10008] OpenList 任务已存在(10008)，在 ${root} 索引中找到多个相似漫画：${preview}。` +
-    "请手动确认正确路径后重试，或整理云端目录名称避免重名。"
+    `${INDEX_AMBIGUOUS_TAG} 云端库索引中为${namePart}找到多个相似路径：${preview}。` +
+    `请整理 ${root} 下目录名称避免重名，确认唯一路径后点「重扫云端库」。`
   );
 }
