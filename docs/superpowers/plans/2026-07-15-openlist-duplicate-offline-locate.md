@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** implemented in this session.
+
 **Goal:** When OpenList rejects offline submit with code `10008` (“任务已存在，请勿输入重复的链接地址”), automatically search a configured library root (default `/115Open/HENTAI/exhentai`) for the matching comic zip and create a transfer/download path; if not found, fail with a clear manual-recovery message.
 
 **Architecture:** Keep create-time OpenList submit as the happy path. On submit failure classified as “duplicate offline task”, run a **live limited-depth locator** under one configured remote root: **flat** `{root}/{mangaName}/…`. Do **not** require a prebuilt full-tree index for correctness. Reuse existing transfer creation + download pipeline once a concrete remote file path is known.

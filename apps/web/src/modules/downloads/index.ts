@@ -33,6 +33,13 @@ import {
   resolveOpenListDownloadLink,
   submitOpenListOfflineDownload,
 } from "./providers/openlist/connection";
+import {
+  DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT,
+  buildDuplicateAmbiguousMessage,
+  buildDuplicateNotFoundMessage,
+  locateArchiveUnderOpenListRoot,
+  normalizeOpenListLocateRoot,
+} from "./openlist-duplicate-locate";
 import { cancelAria2Download, cleanupAria2TempDir, downloadWithAria2 } from "./providers/aria2/client";
 import { getDownloadProviderAdapter, listDownloadProviderAdapters } from "./providers/registry";
 import type { DownloadProviderReadiness, DownloadProviderResourceSnapshot } from "./providers/types";
@@ -1011,6 +1018,9 @@ export async function dispatchTaskNow(taskId: string): Promise<string | null> {
       db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: "/115Open/Temp", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
       return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
     }
+    if (result.status === "duplicate_task") {
+      return recoverOpenListDuplicateOfflineTask(task, settings, result.message);
+    }
     const msg = result.message || "提交到 OpenList 失败";
     markDownloadTaskFinished(task.id, "failed", msg, now);
     return `${task.comicTitle}: ${msg}`;
@@ -1949,6 +1959,193 @@ function markDownloadTaskRunning(taskId: string, updatedAt: string) {
     })
     .where(eq(downloadTasks.id, taskId))
     .run();
+}
+
+
+async function recoverOpenListDuplicateOfflineTask(
+  task: DownloadTaskRecord,
+  settings: RuntimeSettings,
+  submitMessage: string | null | undefined,
+): Promise<string> {
+  const now = new Date().toISOString();
+  const searchRoot = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+
+  if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) {
+    const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage) + "（OpenList 未正确配置，无法搜索云端目录。）";
+    markDownloadTaskFinished(task.id, "failed", msg, now);
+    return `${task.comicTitle}: ${msg}`;
+  }
+
+  // Idempotency: an active transfer for this resource already covers recovery.
+  if (task.comicResourceId) {
+    const existingTransfer = getDb()
+      .select({ id: downloadTasks.id })
+      .from(downloadTasks)
+      .where(
+        and(
+          eq(downloadTasks.comicResourceId, task.comicResourceId),
+          eq(downloadTasks.taskType, "transfer"),
+          inArray(downloadTasks.status, ACTIVE_TASK_STATUSES),
+        ),
+      )
+      .get();
+    if (existingTransfer) {
+      markDownloadTaskFinished(task.id, "completed", null, now);
+      getDb()
+        .update(downloadTasks)
+        .set({ remotePath: searchRoot, updatedAt: now, errorMessage: null })
+        .where(eq(downloadTasks.id, task.id))
+        .run();
+      return `${task.comicTitle}: OpenList 任务已存在，已有进行中的传输任务`;
+    }
+  }
+
+  let listSettings = settings;
+  if (!listSettings.openlistToken.trim()) {
+    const ensured = await ensureOpenListToken(listSettings, { forceRefresh: true });
+    if (!ensured.ok) {
+      const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage) + `（${ensured.message}）`;
+      markDownloadTaskFinished(task.id, "failed", msg, now);
+      return `${task.comicTitle}: ${msg}`;
+    }
+    listSettings = ensured.settings;
+  }
+
+  const resourceLabel = getComicResourceDisplayLabel(task.comicResourceId);
+  const hints = [task.comicTitle, resourceLabel, task.resourceLabel].filter((value): value is string => Boolean(value && value.trim()));
+
+  const locate = await locateArchiveUnderOpenListRoot({
+    root: searchRoot,
+    hints,
+    listDirectory: async (remotePath, options) => {
+      const listed = await listOpenListDirectory(remotePath, {
+        page: options.page,
+        perPage: options.perPage,
+        refresh: options.refresh,
+        settings: listSettings,
+      });
+      if (!listed.ok || !listed.directory) {
+        return {
+          ok: false,
+          entries: [],
+          hasMore: false,
+          message: listed.message,
+        };
+      }
+      return {
+        ok: true,
+        entries: listed.directory.entries.map((entry) => ({
+          name: entry.name,
+          isDirectory: entry.isDirectory,
+          sizeBytes: entry.sizeBytes,
+        })),
+        hasMore: Boolean(listed.directory.hasMore),
+      };
+    },
+  });
+
+  if (locate.status === "found") {
+    const created = createTransferTaskFromResolvedRemoteFile(task, {
+      remotePath: locate.remotePath,
+      fileName: locate.fileName,
+      sizeBytes: locate.sizeBytes,
+    });
+    if (!created.ok) {
+      markDownloadTaskFinished(task.id, "failed", created.message, now);
+      return `${task.comicTitle}: ${created.message}`;
+    }
+
+    markDownloadTaskFinished(task.id, "completed", null, now);
+    getDb()
+      .update(downloadTasks)
+      .set({
+        remotePath: locate.remotePath,
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(downloadTasks.id, task.id))
+      .run();
+
+    await dispatchTaskNow(created.task.id);
+    return `${task.comicTitle}: OpenList 任务已存在，已定位 ${locate.fileName} 并创建传输任务`;
+  }
+
+  if (locate.status === "ambiguous") {
+    const msg = buildDuplicateAmbiguousMessage(searchRoot, locate.candidates);
+    markDownloadTaskFinished(task.id, "failed", msg, now);
+    return `${task.comicTitle}: ${msg}`;
+  }
+
+  if (locate.status === "incomplete" || locate.status === "error") {
+    const msg =
+      `OpenList 返回任务已存在（10008），搜索 ${searchRoot} 时失败：${locate.message}。` +
+      "请稍后重试，或手动确认云端目录后重试该任务。";
+    markDownloadTaskFinished(task.id, "failed", msg, now);
+    return `${task.comicTitle}: ${msg}`;
+  }
+
+  const msg = buildDuplicateNotFoundMessage(searchRoot, submitMessage);
+  markDownloadTaskFinished(task.id, "failed", msg, now);
+  return `${task.comicTitle}: ${msg}`;
+}
+
+function createTransferTaskFromResolvedRemoteFile(
+  offlineTask: DownloadTaskRecord,
+  file: { remotePath: string; fileName: string; sizeBytes: number | null },
+): { ok: true; task: DownloadTaskRecord } | { ok: false; message: string } {
+  if (!offlineTask.comicResourceId) {
+    return { ok: false, message: "离线任务缺少资源记录，无法创建传输任务。" };
+  }
+
+  // Idempotent: reuse active transfer for same offline task or resource+path.
+  const existing = getDb()
+    .select({ id: downloadTasks.id })
+    .from(downloadTasks)
+    .where(
+      and(
+        eq(downloadTasks.comicResourceId, offlineTask.comicResourceId),
+        eq(downloadTasks.taskType, "transfer"),
+        inArray(downloadTasks.status, ACTIVE_TASK_STATUSES),
+      ),
+    )
+    .get();
+  if (existing) {
+    const task = getDownloadTaskById(existing.id);
+    if (task) return { ok: true, task };
+  }
+
+  const transferTaskId = randomUUID();
+  const now = new Date().toISOString();
+  getDb()
+    .insert(downloadTasks)
+    .values({
+      id: transferTaskId,
+      comicResourceId: offlineTask.comicResourceId,
+      provider: "openlist",
+      taskType: "transfer",
+      offlineTaskId: offlineTask.id,
+      remotePath: file.remotePath,
+      status: "queued",
+      targetDirectory: offlineTask.targetDirectory,
+      updatedAt: now,
+    })
+    .run();
+
+  const transferTask = getDownloadTaskById(transferTaskId);
+  if (!transferTask) {
+    return { ok: false, message: "传输任务写入数据库后读取失败。" };
+  }
+
+  recordDownloadTaskEvent(transferTask, "download_task_create", {
+    status: transferTask.status,
+    fromOfflineDuplicateLocate: true,
+    offlineTaskId: offlineTask.id,
+    remotePath: file.remotePath,
+    fileName: file.fileName,
+    sizeBytes: file.sizeBytes,
+  });
+
+  return { ok: true, task: transferTask };
 }
 
 function markDownloadTaskFinished(taskId: string, status: Extract<DownloadTaskStatus, "completed" | "failed">, errorMessage: string | null, updatedAt: string) {

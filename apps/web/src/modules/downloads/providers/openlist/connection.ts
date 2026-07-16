@@ -104,6 +104,8 @@ interface OpenListResourceProbeOptions {
   page?: number;
   settings?: RuntimeSettings;
   perPage?: number;
+  /** Force OpenList/storage to refresh listing (hits upstream more). */
+  refresh?: boolean;
   /** 内部重试标记，防止自动刷新 token 死循环。 */
   skipAuthRefresh?: boolean;
 }
@@ -579,6 +581,7 @@ export type OpenListOfflineDownloadStatus =
   | "disabled"
   | "missing_settings"
   | "submitted"
+  | "duplicate_task"
   | "unauthorized"
   | "unreachable"
   | "invalid_response";
@@ -592,6 +595,16 @@ export interface OpenListOfflineDownloadResult {
   message: string;
   taskId: string | null;
   apiCheck: OpenListEndpointCheck | null;
+  openlistCode?: number | null;
+}
+
+/** Detect OpenList/115 "task already exists" (code 10008), including nested message text. */
+export function isOpenListDuplicateOfflineError(code: number | null | undefined, message: string | null | undefined): boolean {
+  if (code === 10008) return true;
+  const text = String(message ?? "");
+  if (/code:\s*10008\b/i.test(text)) return true;
+  if (/任务已存在/.test(text) || /重复的链接/.test(text)) return true;
+  return false;
 }
 
 export type OpenListOfflineTaskState = number; // 0=queued, 1=downloading, 2=done, 3=error
@@ -675,7 +688,31 @@ export async function submitOpenListOfflineDownload(
       };
     }
     if (!response.ok || (payloadCode != null && payloadCode !== 200)) {
-      return { ok: false, status: "invalid_response", checkedAt, baseUrl, tokenConfigured, message: payloadMessage || "离线下载提交失败。", taskId: null, apiCheck };
+      const failMessage = payloadMessage || "离线下载提交失败。";
+      if (isOpenListDuplicateOfflineError(payloadCode, failMessage)) {
+        return {
+          ok: false,
+          status: "duplicate_task",
+          checkedAt,
+          baseUrl,
+          tokenConfigured,
+          message: failMessage,
+          taskId: null,
+          apiCheck,
+          openlistCode: 10008,
+        };
+      }
+      return {
+        ok: false,
+        status: "invalid_response",
+        checkedAt,
+        baseUrl,
+        tokenConfigured,
+        message: failMessage,
+        taskId: null,
+        apiCheck,
+        openlistCode: payloadCode,
+      };
     }
 
     const tasks: OpenListOfflineTaskItem[] = Array.isArray(payload?.data?.tasks) ? payload.data.tasks : [];
@@ -1050,6 +1087,7 @@ export async function listOpenListDirectory(resourceUrl: string | null | undefin
     resourcePath,
     normalizePage(options.page),
     normalizePerPage(options.perPage),
+    Boolean(options.refresh),
   );
   const publicListApi = toPublicEndpointCheck(listApi);
 
@@ -1154,6 +1192,7 @@ async function postOpenListDirectoryList(
   resourcePath: string,
   page: number,
   perPage: number,
+  refresh = false,
 ): Promise<OpenListEndpointCheck & { directory: OpenListDirectorySnapshot | null }> {
   const endpoint = redactOpenListEndpoint(url);
 
@@ -1164,7 +1203,7 @@ async function postOpenListDirectoryList(
         password: "",
         path: resourcePath,
         per_page: perPage,
-        refresh: false,
+        refresh,
       }),
       cache: "no-store",
       headers: {

@@ -60,9 +60,10 @@ export default function SettingsPage() {
   const [openListCheckResult, setOpenListCheckResult] = useState<OpenListConnectionCheckResult | null>(null);
   const [aria2CheckResult, setAria2CheckResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [isCheckingAria2, setIsCheckingAria2] = useState(false);
-  const [openListLoginUsername, setOpenListLoginUsername] = useState(() => localStorage.getItem("openlist_login_username") ?? "");
-  const [openListLoginPassword, setOpenListLoginPassword] = useState(() => localStorage.getItem("openlist_login_password") ?? "");
-  const [openListLoginOtp, setOpenListLoginOtp] = useState(() => localStorage.getItem("openlist_login_otp") ?? "");
+  // Avoid reading localStorage during SSR (client components still pre-render on server).
+  const [openListLoginUsername, setOpenListLoginUsername] = useState("");
+  const [openListLoginPassword, setOpenListLoginPassword] = useState("");
+  const [openListLoginOtp, setOpenListLoginOtp] = useState("");
   const [savedBaselineJson, setSavedBaselineJson] = useState("");
 
   function updateDirtyBaseline(settings: RuntimeSettings) {
