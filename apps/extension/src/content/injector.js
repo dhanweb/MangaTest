@@ -33,9 +33,59 @@
   console.log("[MangaTest] 服务器连接正常");
 
   if (adapter.id === "ehentai-gallery" || adapter.id === "nhentai-gallery") {
+    // Cache gallery metadata early so torrent-page submit can attach tags without re-visiting.
+    void cacheGalleryMetadataForTorrentFollowUp();
     injectGalleryButton(settings);
   } else if (adapter.id === "ehentai-torrents") {
     injectTorrentButtons(settings);
+  }
+
+  async function cacheGalleryMetadataForTorrentFollowUp() {
+    try {
+      const raw = COLLECTOR.collectPageMetadata();
+      const metadata = COLLECTOR.normalizeMetadata(raw);
+      if (!metadata?.sourceId) return;
+      await chrome.storage.local.set({ lastExhentaiMetadata: metadata });
+      console.log("[MangaTest] 已缓存详情页元数据供种子页使用", {
+        sourceId: metadata.sourceId,
+        标签数: metadata.tags?.length ?? 0,
+        标题: metadata.title,
+      });
+    } catch (error) {
+      console.warn("[MangaTest] 缓存详情页元数据失败", error);
+    }
+  }
+
+  function sameGallerySource(a, b) {
+    if (!a || !b) return false;
+    if (a.sourceId && b.sourceId && a.sourceId === b.sourceId) return true;
+    const gidOf = (value) => {
+      const id = String(value?.sourceId || value?.sourceUrl || "");
+      const m = /\/g\/(\d+)/.exec(id);
+      return m?.[1] || null;
+    };
+    const ga = gidOf(a);
+    const gb = gidOf(b);
+    return Boolean(ga && gb && ga === gb);
+  }
+
+  function mergeGalleryMetadataIntoTorrentPayload(pageMetadata, cached) {
+    if (!cached || !sameGallerySource(pageMetadata, cached)) {
+      return pageMetadata;
+    }
+    return {
+      ...cached,
+      ...pageMetadata,
+      // Prefer non-empty tags/title/cover from cache when torrent page has none.
+      title: pageMetadata.title || cached.title,
+      originalTitle: pageMetadata.originalTitle || cached.originalTitle || null,
+      coverUrl: pageMetadata.coverUrl || cached.coverUrl || null,
+      tags: Array.isArray(pageMetadata.tags) && pageMetadata.tags.length > 0 ? pageMetadata.tags : (cached.tags || []),
+      sourceId: pageMetadata.sourceId || cached.sourceId,
+      sourceUrl: pageMetadata.sourceUrl || cached.sourceUrl,
+      site: pageMetadata.site || cached.site,
+      adapterId: pageMetadata.adapterId,
+    };
   }
 
   async function checkServer(serverUrl) {
@@ -132,6 +182,17 @@
       // 详情页只提交元数据（标题/标签/封面），不提交资源链接
       metadata.resources = [];
 
+      // Persist for later torrent-page magnet import (tags/title/cover).
+      try {
+        await chrome.storage.local.set({ lastExhentaiMetadata: metadata });
+        console.log("[MangaTest] 提交前已写入 lastExhentaiMetadata", {
+          sourceId: metadata.sourceId,
+          标签数: metadata.tags?.length ?? 0,
+        });
+      } catch (error) {
+        console.warn("[MangaTest] 写入 lastExhentaiMetadata 失败", error);
+      }
+
       console.log("[MangaTest] 规范化后的元数据", { 站点: metadata.site, 来源ID: metadata.sourceId, 标题: metadata.title, 标签数: metadata.tags?.length });
       console.log("[MangaTest] 通过后台线程提交");
 
@@ -213,11 +274,15 @@
       let metadata = COLLECTOR.normalizeMetadata(raw);
       if (!metadata) throw new Error("采集失败");
 
-      // Merge with stored gallery metadata if available
+      // Merge tags/title/cover from gallery page cache (torrent page has no #taglist).
       const stored = await chrome.storage.local.get({ lastExhentaiMetadata: null });
-      if (stored.lastExhentaiMetadata && stored.lastExhentaiMetadata.sourceId === metadata.sourceId) {
-        metadata = { ...stored.lastExhentaiMetadata, adapterId: metadata.adapterId };
-      }
+      metadata = mergeGalleryMetadataIntoTorrentPayload(metadata, stored.lastExhentaiMetadata);
+      console.log("[MangaTest] 种子页合并详情缓存后", {
+        sourceId: metadata.sourceId,
+        标签数: metadata.tags?.length ?? 0,
+        有缓存: Boolean(stored.lastExhentaiMetadata),
+        缓存sourceId: stored.lastExhentaiMetadata?.sourceId,
+      });
 
       // Only keep the clicked torrent resource
       metadata.resources = [{ type: "torrent", url: clickedUrl, label: (anchor.textContent || "").trim() || "Torrent" }];
