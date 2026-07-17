@@ -28,12 +28,17 @@
         <span>打开种子页时自动下载（默认开启）</span>
       </label>
 
+      <label>
+        <span>自动提交种子数（默认 1，最大 10）</span>
+        <input id="auto-torrent-count" type="number" min="1" max="10" step="1" />
+      </label>
+
       <p id="status" role="status" data-tone="info">🔄 修改后自动保存</p>
 
       <footer>
         <p>详情页底部自动出现 📥 按钮，一键提交</p>
         <p>种子页下载链接旁自动出现 📥 MT 按钮，提交磁链+信息</p>
-        <p>开启自动下载后，进入 gallerytorrents 页会自动点第一个 MT 按钮</p>
+        <p>开启自动下载后，进入 gallerytorrents 页会自动提交前 N 个种子；无种子则提示并保持页面打开</p>
       </footer>
     </main>
 

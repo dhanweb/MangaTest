@@ -10,6 +10,7 @@ chrome.runtime.onInstalled.addListener(async () => {
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
     autoDownloadOnTorrentPage: true,
+    autoTorrentSubmitCount: 1,
   };
   const current = await chrome.storage.local.get(defaults);
   await chrome.storage.local.set({ ...defaults, ...current });

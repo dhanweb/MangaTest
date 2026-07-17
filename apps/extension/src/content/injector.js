@@ -10,14 +10,24 @@
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
-    /** When true (default), opening gallerytorrents page auto-clicks first MT button. */
+    /** When true (default), opening gallerytorrents page auto-submits torrents. */
     autoDownloadOnTorrentPage: true,
+    /** How many torrent rows to auto-submit (default 1). */
+    autoTorrentSubmitCount: 1,
   });
+  const autoTorrentSubmitCount = normalizeAutoTorrentSubmitCount(settings.autoTorrentSubmitCount);
   console.log("[MangaTest] 设置", {
     服务地址: settings.serverUrl,
     有令牌: Boolean(settings.importToken),
     种子页自动下载: settings.autoDownloadOnTorrentPage !== false,
+    自动提交种子数: autoTorrentSubmitCount,
   });
+
+  function normalizeAutoTorrentSubmitCount(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 1;
+    return Math.max(1, Math.min(10, Math.trunc(n)));
+  }
 
   const adapter = (window.MangaTestSiteAdapters || []).find((a) => {
     try { return a.matches(); } catch { return false; }
@@ -242,8 +252,10 @@
   }
 
   function injectTorrentButtons(settings) {
-    let count = 0;
+    /** @type {Array<{ anchor: HTMLAnchorElement, btn: HTMLElement }>} */
+    const items = [];
     for (const anchor of document.querySelectorAll('a[href*="/torrent/"]')) {
+      if (!(anchor instanceof HTMLAnchorElement)) continue;
       if (anchor.parentElement?.querySelector(".mangatest-torrent-btn")) continue;
       const btn = document.createElement("span");
       btn.className = "mangatest-torrent-btn";
@@ -263,44 +275,67 @@
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        handleTorrentSubmit(settings, anchor, btn);
+        void handleTorrentSubmit(settings, anchor, btn, { closeOnSuccess: true });
       });
       anchor.parentElement?.insertBefore(btn, anchor.nextSibling);
-      count++;
+      items.push({ anchor, btn });
     }
-    console.log("[MangaTest] 种子页按钮已注入", { 数量: count });
+    console.log("[MangaTest] 种子页按钮已注入", { 数量: items.length });
 
-    if (settings.autoDownloadOnTorrentPage !== false && count > 0) {
-      scheduleAutoTorrentDownload();
+    if (settings.autoDownloadOnTorrentPage === false) {
+      return;
     }
+
+    if (items.length === 0) {
+      scheduleNoTorrentNotice();
+      return;
+    }
+
+    scheduleAutoTorrentDownload(settings, items);
   }
 
-  function scheduleAutoTorrentDownload() {
-    // Debounce + short delay so layout/buttons settle; only once per page load.
+  function scheduleNoTorrentNotice() {
+    if (window.__mangatestAutoTorrentStarted) return;
+    window.__mangatestAutoTorrentStarted = true;
+    setTimeout(() => {
+      console.log("[MangaTest] 自动下载：本页没有可用种子，保持页面打开");
+      showToast("⚠️ 本页没有可用种子，页面保持打开", "error");
+    }, 400);
+  }
+
+  function scheduleAutoTorrentDownload(settings, items) {
+    // Only once per page load.
     if (window.__mangatestAutoTorrentStarted) return;
     window.__mangatestAutoTorrentStarted = true;
 
-    const run = () => {
-      const buttons = [...document.querySelectorAll(".mangatest-torrent-btn")];
-      if (buttons.length === 0) {
-        console.log("[MangaTest] 自动下载：尚未找到 .mangatest-torrent-btn，稍后重试");
-        setTimeout(run, 400);
-        return;
-      }
-      // Prefer first real torrent row button (DOM order matches page listing).
-      const btn = buttons[0];
-      if (!(btn instanceof HTMLElement)) return;
-      if (btn.dataset.mangatestAutoClicked === "1") return;
-      btn.dataset.mangatestAutoClicked = "1";
-      console.log("[MangaTest] 自动下载：触发 .mangatest-torrent-btn 点击", {
-        按钮数: buttons.length,
-        文案: btn.textContent,
-      });
-      showToast("⚡ 自动下载：正在提交首个种子…", "success");
-      btn.click();
-    };
+    const limit = normalizeAutoTorrentSubmitCount(settings.autoTorrentSubmitCount);
+    const targets = items.slice(0, limit);
 
-    setTimeout(run, 500);
+    setTimeout(async () => {
+      console.log("[MangaTest] 自动下载：开始提交", { 计划: targets.length, 页面共有: items.length });
+      showToast(
+        targets.length === 1
+          ? "⚡ 自动下载：正在提交 1 个种子…"
+          : `⚡ 自动下载：正在提交前 ${targets.length} 个种子…`,
+        "success",
+      );
+
+      let successCount = 0;
+      for (const item of targets) {
+        if (item.btn.dataset.mangatestAutoClicked === "1") continue;
+        item.btn.dataset.mangatestAutoClicked = "1";
+        const ok = await handleTorrentSubmit(settings, item.anchor, item.btn, { closeOnSuccess: false });
+        if (ok) successCount += 1;
+      }
+
+      if (successCount > 0) {
+        showToast(`✅ 自动提交成功 ${successCount}/${targets.length}，即将关闭页面`, "success");
+        void closeTorrentPopupTabAfterSuccess();
+      } else {
+        console.log("[MangaTest] 自动下载：全部失败，保持页面打开");
+        showToast("❌ 自动提交失败，页面保持打开", "error");
+      }
+    }, 500);
   }
 
   function extractTorrentUrl(anchor) {
@@ -310,7 +345,11 @@
     return m?.[1] || anchor.getAttribute("href") || anchor.href || "";
   }
 
-  async function handleTorrentSubmit(settings, anchor, btn) {
+  /**
+   * @returns {Promise<boolean>} true if submit succeeded
+   */
+  async function handleTorrentSubmit(settings, anchor, btn, options = {}) {
+    const closeOnSuccess = options.closeOnSuccess !== false;
     console.log("[MangaTest] 点击了种子提交按钮");
     const originalText = btn.textContent;
     btn.textContent = "⏳...";
@@ -350,6 +389,9 @@
       if (resp?.ok) {
         metadata.resources = resp.resources;
       }
+      if (!Array.isArray(metadata.resources) || metadata.resources.length === 0) {
+        throw new Error("没有可用种子/磁链");
+      }
 
       console.log("[MangaTest] 通过后台线程提交元数据和磁链（直发 OpenList）");
       const res = await chrome.runtime.sendMessage({
@@ -363,13 +405,17 @@
 
       showToast("✅ 已提交磁链和信息到 MangaTest", "success");
       btn.textContent = "✅ 已提交";
-      // gallerytorrents is usually a small popup tab; close it after successful submit.
-      void closeTorrentPopupTabAfterSuccess();
+      // gallerytorrents is usually a small popup tab; close after successful submit (manual path).
+      if (closeOnSuccess) {
+        void closeTorrentPopupTabAfterSuccess();
+      }
+      return true;
     } catch (err) {
       console.error("[MangaTest] 种子提交失败", err);
       showToast("❌ " + (err instanceof Error ? err.message : "提交失败"), "error");
       btn.textContent = originalText;
       btn.style.pointerEvents = "auto";
+      return false;
     }
   }
 
