@@ -46,7 +46,8 @@ label {
   font-weight: 700;
 }
 
-.checkbox-label {
+.checkbox-label,
+.checkbox-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -54,11 +55,19 @@ label {
   cursor: pointer;
 }
 
-.checkbox-label input {
+.checkbox-label input,
+.checkbox-row input {
   width: 16px;
   min-height: 16px;
   margin: 0;
   cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.checkbox-row span {
+  font-weight: 600;
+  color: #5e4051;
+  line-height: 1.35;
 }
 
 input {

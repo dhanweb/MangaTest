@@ -10,8 +10,14 @@
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
+    /** When true (default), opening gallerytorrents page auto-clicks first MT button. */
+    autoDownloadOnTorrentPage: true,
   });
-  console.log("[MangaTest] 设置", { 服务地址: settings.serverUrl, 有令牌: Boolean(settings.importToken) });
+  console.log("[MangaTest] 设置", {
+    服务地址: settings.serverUrl,
+    有令牌: Boolean(settings.importToken),
+    种子页自动下载: settings.autoDownloadOnTorrentPage !== false,
+  });
 
   const adapter = (window.MangaTestSiteAdapters || []).find((a) => {
     try { return a.matches(); } catch { return false; }
@@ -238,7 +244,7 @@
   function injectTorrentButtons(settings) {
     let count = 0;
     for (const anchor of document.querySelectorAll('a[href*="/torrent/"]')) {
-      if (anchor.querySelector(".mangatest-torrent-btn")) continue;
+      if (anchor.parentElement?.querySelector(".mangatest-torrent-btn")) continue;
       const btn = document.createElement("span");
       btn.className = "mangatest-torrent-btn";
       btn.textContent = "📥 MT";
@@ -263,6 +269,38 @@
       count++;
     }
     console.log("[MangaTest] 种子页按钮已注入", { 数量: count });
+
+    if (settings.autoDownloadOnTorrentPage !== false && count > 0) {
+      scheduleAutoTorrentDownload();
+    }
+  }
+
+  function scheduleAutoTorrentDownload() {
+    // Debounce + short delay so layout/buttons settle; only once per page load.
+    if (window.__mangatestAutoTorrentStarted) return;
+    window.__mangatestAutoTorrentStarted = true;
+
+    const run = () => {
+      const buttons = [...document.querySelectorAll(".mangatest-torrent-btn")];
+      if (buttons.length === 0) {
+        console.log("[MangaTest] 自动下载：尚未找到 .mangatest-torrent-btn，稍后重试");
+        setTimeout(run, 400);
+        return;
+      }
+      // Prefer first real torrent row button (DOM order matches page listing).
+      const btn = buttons[0];
+      if (!(btn instanceof HTMLElement)) return;
+      if (btn.dataset.mangatestAutoClicked === "1") return;
+      btn.dataset.mangatestAutoClicked = "1";
+      console.log("[MangaTest] 自动下载：触发 .mangatest-torrent-btn 点击", {
+        按钮数: buttons.length,
+        文案: btn.textContent,
+      });
+      showToast("⚡ 自动下载：正在提交首个种子…", "success");
+      btn.click();
+    };
+
+    setTimeout(run, 500);
   }
 
   function extractTorrentUrl(anchor) {
