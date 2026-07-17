@@ -1040,9 +1040,10 @@ export async function dispatchTaskNow(taskId: string): Promise<string | null> {
     const uri = task.comicResourceId
       ? db.select({ url: comicResources.resourceUrl }).from(comicResources).where(eq(comicResources.id, task.comicResourceId)).get()?.url ?? ""
       : "";
-    const result = await submitOpenListOfflineDownload(uri, "/115Open/Temp", "115 Open");
+    const offlineSavePath = resolveOpenListOfflineSavePath(settings);
+    const result = await submitOpenListOfflineDownload(uri, offlineSavePath, "115 Open");
     if (result.ok) {
-      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: "/115Open/Temp", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: offlineSavePath, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
       return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
     }
     if (result.status === "duplicate_task") {
@@ -1066,9 +1067,10 @@ export async function dispatchTaskNow(taskId: string): Promise<string | null> {
       return `${task.comicTitle}: ${readiness?.reason || "资源准备失败"}`;
     }
     const remotePath = String(readiness.details.remotePath);
-    const result = await submitOpenListOfflineDownload(remotePath, "/115Open/Temp", "115 Open");
+    const offlineSavePath = resolveOpenListOfflineSavePath(settings);
+    const result = await submitOpenListOfflineDownload(remotePath, offlineSavePath, "115 Open");
     if (result.ok) {
-      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: "/115Open/Temp", updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
+      db.update(downloadTasks).set({ status: "submitted", remoteTaskId: result.taskId, remotePath: offlineSavePath, updatedAt: now }).where(eq(downloadTasks.id, task.id)).run();
       return `${task.comicTitle}: 已提交到 OpenList (任务: ${result.taskId})`;
     }
     const msg = result.message || "提交到 OpenList 失败";
@@ -2119,12 +2121,28 @@ function markDownloadTaskRunning(taskId: string, updatedAt: string) {
 }
 
 
+function resolveOpenListOfflineSavePath(settings: RuntimeSettings): string {
+  const configured = settings.openlistOfflineSavePath?.trim();
+  if (configured) {
+    return normalizeOpenListLocateRoot(configured);
+  }
+  return "/115Open/Temp";
+}
+
+function resolveOpenListLibraryScanRoot(settings?: RuntimeSettings | null): string {
+  const configured = settings?.openlistLibraryScanRoot?.trim();
+  if (configured) {
+    return normalizeOpenListLocateRoot(configured);
+  }
+  return normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+}
+
 async function enqueueOpenListDuplicateOfflineRecovery(
   task: DownloadTaskRecord,
   settings: RuntimeSettings,
 ): Promise<string> {
   const now = new Date().toISOString();
-  const searchRoot = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+  const searchRoot = resolveOpenListLibraryScanRoot(settings);
   const ttlMinutes = DEFAULT_OPENLIST_LIBRARY_INDEX_TTL_MINUTES;
 
   if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) {
@@ -2256,12 +2274,13 @@ export function listLibraryIndexRematchTasks(): DownloadTaskRecord[] {
 }
 
 export async function batchRecoverPendingDuplicateTasks(
-  root: string = DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT,
+  root?: string,
   sessionId?: string,
   options?: { includeIndexMisses?: boolean },
 ): Promise<{ recovered: number; ambiguous: number; notFound: number; messages: string[] }> {
   bootstrapDatabase();
-  const searchRoot = normalizeOpenListLocateRoot(root);
+  const settings = await getRuntimeSettings();
+  const searchRoot = normalizeOpenListLocateRoot(root ?? resolveOpenListLibraryScanRoot(settings));
   const resolvedSessionId = sessionId ?? getLatestCompletedIndexSession(searchRoot)?.id;
   if (!resolvedSessionId) {
     return { recovered: 0, ambiguous: 0, notFound: 0, messages: [] };
@@ -2291,7 +2310,7 @@ export async function batchRecoverPendingDuplicateTasks(
  * pending 10008 + previous index_not_found / index_ambiguous offline tasks.
  */
 export async function rescanOpenListLibraryIndexAndRecover(
-  root: string = DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT,
+  root?: string,
 ): Promise<{
   ok: boolean;
   started: boolean;
@@ -2306,8 +2325,8 @@ export async function rescanOpenListLibraryIndexAndRecover(
   messages: string[];
 }> {
   bootstrapDatabase();
-  const searchRoot = normalizeOpenListLocateRoot(root);
   let settings = await getRuntimeSettings();
+  const searchRoot = normalizeOpenListLocateRoot(root ?? resolveOpenListLibraryScanRoot(settings));
 
   if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) {
     return {
@@ -2483,7 +2502,8 @@ async function recoverOnePendingDuplicateTask(
 }
 
 async function drainPendingOpenListDuplicateRecoveries(): Promise<string[]> {
-  const searchRoot = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+  let settings = await getRuntimeSettings();
+  const searchRoot = resolveOpenListLibraryScanRoot(settings);
   const pending = listPendingDuplicateRecoveryTasks();
   if (pending.length === 0) return [];
 
@@ -2494,7 +2514,6 @@ async function drainPendingOpenListDuplicateRecoveries(): Promise<string[]> {
   }
 
   // Promote raw 10008 failures into recovery + start/join background index scan.
-  let settings = await getRuntimeSettings();
   if (!settings.openlistEnabled || !settings.openlistBaseUrl.trim()) {
     return [];
   }
@@ -2590,7 +2609,8 @@ export async function flushOpenListDuplicateRecoveryForTests(timeoutMs = 10_000)
     await new Promise((resolve) => setTimeout(resolve, 30));
     const still = listPendingDuplicateRecoveryTasks();
     if (still.length === 0) return;
-    const root = normalizeOpenListLocateRoot(DEFAULT_OPENLIST_DUPLICATE_SEARCH_ROOT);
+    const settings = await getRuntimeSettings();
+    const root = resolveOpenListLibraryScanRoot(settings);
     const completed = getLatestCompletedIndexSession(root);
     if (completed) {
       await batchRecoverPendingDuplicateTasks(root, completed.id);
@@ -3782,7 +3802,8 @@ export async function createTransferTaskFromOfflineTask(
   bootstrapDatabase();
 
   const comicTitle = offlineTask.comicTitle;
-  const remotePath = offlineTask.remotePath ?? "/115Open/Temp";
+  const settingsForPath = await getRuntimeSettings();
+  const remotePath = offlineTask.remotePath ?? resolveOpenListOfflineSavePath(settingsForPath);
   const resourceLabel = getComicResourceDisplayLabel(offlineTask.comicResourceId);
 
   if (offlineTask.taskType !== "offline") {

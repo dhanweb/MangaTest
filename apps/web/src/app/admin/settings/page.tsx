@@ -839,6 +839,22 @@ function DownloadSettings({
             />
           </Group>
         </SettingsRow>
+        <SettingsRow label="离线保存路径" note="提交 115/OpenList 离线任务时的云端目录。">
+          <AppInput
+            value={settings.openlistOfflineSavePath}
+            onChange={(event) => onSettingsChange({ ...settings, openlistOfflineSavePath: event.currentTarget.value })}
+            placeholder="/115Open/Temp"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
+        <SettingsRow label="云端库扫描路径" note="重扫云端库 / 10008 恢复使用的扁平库根目录。">
+          <AppInput
+            value={settings.openlistLibraryScanRoot}
+            onChange={(event) => onSettingsChange({ ...settings, openlistLibraryScanRoot: event.currentTarget.value })}
+            placeholder="/115Open/HENTAI/exhentai"
+            style={{ width: 320 }}
+          />
+        </SettingsRow>
         <SettingsRow label="访问 token" note="直接填入已有的 token，或通过下方账号登录自动获取。">
           <Group gap="xs" wrap="nowrap" align="center">
             {settings.openlistToken.trim() ? (

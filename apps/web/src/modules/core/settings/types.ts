@@ -27,6 +27,10 @@ export interface RuntimeSettings {
   openlistUsername: string;
   /** 用于 token 过期时服务端自动重新登录（本地自托管）。 */
   openlistPassword: string;
+  /** OpenList 离线下载提交的云端保存路径，如 /115Open/Temp。 */
+  openlistOfflineSavePath: string;
+  /** OpenList 云端库索引/10008 恢复扫描根路径，如 /115Open/HENTAI/exhentai。 */
+  openlistLibraryScanRoot: string;
   aria2Enabled: boolean;
   aria2RpcUrl: string;
   aria2RpcToken: string;

@@ -663,6 +663,8 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     openlistToken: "",
     openlistUsername: "",
     openlistPassword: "",
+    openlistOfflineSavePath: "/115Open/Temp",
+    openlistLibraryScanRoot: "/115Open/HENTAI/exhentai",
     readerImmersiveDefault: false,
     readerPreloadAheadPages: 2,
     readerPreloadEnabled: true,

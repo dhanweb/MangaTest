@@ -101,6 +101,7 @@ This document records features that are already implemented in `apps/web`.
 - Download provider adapters are registered for OpenList, aria2, and builtin HTTP as provider-boundary stubs.
 - Download worker preflight can select the next queued task and report provider readiness without executing external downloads.
 - OpenList settings include a read-only connection check that probes public and account APIs without creating download tasks or returning tokens to the client.
+- OpenList settings can configure offline cloud save path (`openlistOfflineSavePath`, default `/115Open/Temp`) and library scan root (`openlistLibraryScanRoot`, default `/115Open/HENTAI/exhentai`) used by offline submit, 10008 recovery, and manual cloud rescan.
 - OpenList settings can exchange a username/password/OTP login for a token, storing only the token in local runtime settings.
 - OpenList dispatch preflight can read-only probe a configured remote path through `/api/fs/get` and report safe file metadata without executing downloads.
 - OpenList dispatch preflight can read-only list the first page of a configured remote directory through `/api/fs/list` and report safe directory preview metadata.

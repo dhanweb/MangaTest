@@ -91,6 +91,22 @@ export async function PATCH(request: Request) {
     input.openlistPassword = payload.openlistPassword;
   }
 
+  if (typeof payload.openlistOfflineSavePath === "string") {
+    const normalized = normalizeOptionalOpenListRemotePath(payload.openlistOfflineSavePath, "OpenList 离线保存路径");
+    if (normalized.error) {
+      return Response.json({ error: normalized.error }, { status: 400 });
+    }
+    input.openlistOfflineSavePath = normalized.value;
+  }
+
+  if (typeof payload.openlistLibraryScanRoot === "string") {
+    const normalized = normalizeOptionalOpenListRemotePath(payload.openlistLibraryScanRoot, "OpenList 云端库扫描路径");
+    if (normalized.error) {
+      return Response.json({ error: normalized.error }, { status: 400 });
+    }
+    input.openlistLibraryScanRoot = normalized.value;
+  }
+
   if (typeof payload.aria2Enabled === "boolean") {
     input.aria2Enabled = payload.aria2Enabled;
   }
@@ -152,4 +168,17 @@ function normalizeOptionalHttpUrl(value: string) {
   } catch {
     return { value: "", error: "OpenList 服务地址必须是有效 URL。" };
   }
+}
+
+function normalizeOptionalOpenListRemotePath(value: string, label: string) {
+  const text = value.trim().replace(/\\/g, "/");
+  if (!text) {
+    return { value: "", error: null };
+  }
+  if (text.includes("://") || text.includes("..")) {
+    return { value: "", error: `${label} 必须是 OpenList 远程目录路径，不能是 URL 或包含 ..。` };
+  }
+  const withSlash = text.startsWith("/") ? text : `/${text}`;
+  const normalized = withSlash.replace(/\/{2,}/g, "/").replace(/\/+$/, "") || "/";
+  return { value: normalized, error: null };
 }
