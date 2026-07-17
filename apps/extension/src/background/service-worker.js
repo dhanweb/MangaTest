@@ -9,6 +9,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   const defaults = {
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
+    autoDownloadOnTorrentPage: true,
   };
   const current = await chrome.storage.local.get(defaults);
   await chrome.storage.local.set({ ...defaults, ...current });
@@ -16,6 +17,23 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   log("收到消息", { 类型: message?.type });
+
+  if (message?.type === "MANGATEST_CLOSE_TAB") {
+    const tabId = sender.tab?.id;
+    if (typeof tabId !== "number") {
+      sendResponse({ ok: false, error: "no tab" });
+      return false;
+    }
+    const delayMs = typeof message.delayMs === "number" ? message.delayMs : 800;
+    log("准备关闭标签", { tabId, delayMs, url: sender.tab?.url });
+    setTimeout(() => {
+      chrome.tabs.remove(tabId).catch((error) => {
+        log("关闭标签失败", { tabId, error: error instanceof Error ? error.message : String(error) });
+      });
+    }, Math.max(0, delayMs));
+    sendResponse({ ok: true, tabId });
+    return false;
+  }
 
   if (message?.type === "MANGATEST_RESOLVE_TORRENTS") {
     log("开始转换种子为磁链", { 数量: message.resources?.length });

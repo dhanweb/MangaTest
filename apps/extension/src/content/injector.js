@@ -363,12 +363,34 @@
 
       showToast("✅ 已提交磁链和信息到 MangaTest", "success");
       btn.textContent = "✅ 已提交";
-      setTimeout(() => { btn.textContent = originalText; btn.style.pointerEvents = "auto"; }, 3000);
+      // gallerytorrents is usually a small popup tab; close it after successful submit.
+      void closeTorrentPopupTabAfterSuccess();
     } catch (err) {
       console.error("[MangaTest] 种子提交失败", err);
       showToast("❌ " + (err instanceof Error ? err.message : "提交失败"), "error");
       btn.textContent = originalText;
       btn.style.pointerEvents = "auto";
+    }
+  }
+
+  async function closeTorrentPopupTabAfterSuccess() {
+    try {
+      // Only auto-close seed listing pages opened as popups / dedicated torrent tabs.
+      if (!/gallerytorrents\.php/i.test(location.pathname + location.search + location.href)) {
+        return;
+      }
+      const resp = await chrome.runtime.sendMessage({
+        type: "MANGATEST_CLOSE_TAB",
+        delayMs: 900,
+      });
+      console.log("[MangaTest] 请求关闭种子页", resp);
+    } catch (error) {
+      console.warn("[MangaTest] 关闭种子页失败，尝试 window.close()", error);
+      try {
+        window.close();
+      } catch {
+        // ignore
+      }
     }
   }
 
