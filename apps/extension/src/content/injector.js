@@ -64,8 +64,65 @@
       },
       true,
     );
+    // Full auto chain: gallery -> open torrent page popup (then torrent page auto-submits).
+    if (adapter.id === "ehentai-gallery" && settings.autoDownloadOnTorrentPage !== false) {
+      scheduleOpenTorrentPageFromGallery();
+    }
   } else if (adapter.id === "ehentai-torrents") {
     injectTorrentButtons(settings);
+  }
+
+  function findGalleryTorrentPageLink() {
+    // User-provided preferred selector (ExHentai/E-Hentai sidebar torrent entry).
+    const preferred = document.querySelector("#gd5 > p:nth-child(3) > a");
+    if (preferred instanceof HTMLAnchorElement) return preferred;
+
+    // Fallbacks if DOM order differs.
+    const byHref = document.querySelector('#gd5 a[href*="gallerytorrents.php"], a[href*="gallerytorrents.php"]');
+    if (byHref instanceof HTMLAnchorElement) return byHref;
+
+    const byOnclick = [...document.querySelectorAll("#gd5 a, #gd5 p a")].find((el) => {
+      const onclick = el.getAttribute("onclick") || "";
+      return /gallerytorrents/i.test(onclick) || /gallerytorrents/i.test(el.getAttribute("href") || "");
+    });
+    return byOnclick instanceof HTMLAnchorElement ? byOnclick : null;
+  }
+
+  function scheduleOpenTorrentPageFromGallery() {
+    if (window.__mangatestAutoOpenTorrentStarted) return;
+    window.__mangatestAutoOpenTorrentStarted = true;
+
+    let attempts = 0;
+    const maxAttempts = 25;
+
+    const tryOpen = () => {
+      attempts += 1;
+      const link = findGalleryTorrentPageLink();
+      if (!link) {
+        if (attempts < maxAttempts) {
+          setTimeout(tryOpen, 300);
+          return;
+        }
+        console.log("[MangaTest] 自动打开种子页：未找到 #gd5 种子入口");
+        showToast("⚠️ 未找到种子入口链接，请手动打开下载页", "error");
+        return;
+      }
+
+      // Ensure tags/title are cached before leaving for popup.
+      void cacheGalleryMetadataForTorrentFollowUp().finally(() => {
+        console.log("[MangaTest] 自动打开种子页：点击入口", {
+          href: link.href,
+          text: (link.textContent || "").trim(),
+          selector: link.matches("#gd5 > p:nth-child(3) > a") ? "#gd5 > p:nth-child(3) > a" : "fallback",
+        });
+        showToast("⚡ 自动打开种子下载页…", "success");
+        // Prefer real click so site onclick/popup handlers run.
+        link.click();
+      });
+    };
+
+    // Wait for gallery sidebar (#gd5) to finish rendering.
+    setTimeout(tryOpen, 600);
   }
 
   async function cacheGalleryMetadataForTorrentFollowUp() {
