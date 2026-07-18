@@ -278,7 +278,7 @@
     });
 
     root.innerHTML = `
-      <div id="mangatest-panel" style="display:none;margin-bottom:10px;background:#fff8fb;border:1px solid #f7c9dc;border-radius:12px;box-shadow:0 8px 24px rgba(239,59,145,0.2);overflow:hidden;">
+      <div id="mangatest-panel" style="display:block;margin-bottom:10px;background:#fff8fb;border:1px solid #f7c9dc;border-radius:12px;box-shadow:0 8px 24px rgba(239,59,145,0.2);overflow:hidden;">
         <div style="padding:12px 14px;border-bottom:1px solid #fde0eb;">
           <div style="font-weight:800;font-size:14px;color:#24141f;">操作</div>
         </div>

@@ -1,6 +1,6 @@
 {
   "name": "extension",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "scripts": {
     "check": "node scripts/check-extension.mjs && node --check src/background/service-worker.js && node --check src/background/torrent-magnet.js && node --check src/content/site-adapters.js && node --check src/content/metadata-contract.js && node --check src/content/collect-page-metadata.js && node --check src/popup/popup.js",
