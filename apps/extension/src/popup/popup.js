@@ -24,12 +24,17 @@ async function initializePopup() {
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",
-    autoDownloadOnTorrentPage: true,
+    autoDownloadOnGalleryOpen: false,
+    autoDownloadOnTorrentPage: false,
     autoTorrentSubmitCount: 1,
   });
+  let auto = settings.autoDownloadOnGalleryOpen === true;
+  if (settings.autoDownloadOnGalleryOpen === undefined && settings.autoDownloadOnTorrentPage === true) {
+    auto = true;
+  }
   elements.serverUrl.value = settings.serverUrl || "http://127.0.0.1:4317";
   elements.importToken.value = settings.importToken || "";
-  elements.autoDownloadTorrent.checked = settings.autoDownloadOnTorrentPage !== false;
+  elements.autoDownloadTorrent.checked = auto;
   elements.autoTorrentCount.value = String(normalizeAutoTorrentSubmitCount(settings.autoTorrentSubmitCount));
 }
 
@@ -39,13 +44,15 @@ async function autoSave() {
     try {
       const serverUrl = normalizeServerUrl(elements.serverUrl.value);
       const importToken = elements.importToken.value.trim();
-      const autoDownloadOnTorrentPage = elements.autoDownloadTorrent.checked;
+      const autoDownloadOnGalleryOpen = elements.autoDownloadTorrent.checked;
       const autoTorrentSubmitCount = normalizeAutoTorrentSubmitCount(elements.autoTorrentCount.value);
       elements.autoTorrentCount.value = String(autoTorrentSubmitCount);
       await chrome.storage.local.set({
         serverUrl,
         importToken,
-        autoDownloadOnTorrentPage,
+        autoDownloadOnGalleryOpen,
+        // keep legacy key in sync for older content-script sessions
+        autoDownloadOnTorrentPage: autoDownloadOnGalleryOpen,
         autoTorrentSubmitCount,
       });
       setStatus("✅ 已保存", "success");
