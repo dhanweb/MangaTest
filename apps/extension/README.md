@@ -4,7 +4,11 @@ Chrome Manifest V3 extension for submitting manga detail-page metadata to the lo
 
 ## Development
 
-Load `apps/extension` as an unpacked extension in Chrome.
+Load `apps/extension` as an **unpacked** extension in Chrome (Load unpacked → select this folder).
+
+**No rebuild is required** for day-to-day changes: edit files, then **Reload** the extension on `chrome://extensions`, and refresh open site tabs. Optional zip packaging: `npm run build` → `dist/MangaTest-Extension-v{version}.zip`.
+
+**Version:** every change under `apps/extension/` must bump `manifest.json` `version` (and keep `package.json` in sync). The popup shows `vX.Y.Z` so you can confirm the loaded build.
 
 Before submitting metadata:
 

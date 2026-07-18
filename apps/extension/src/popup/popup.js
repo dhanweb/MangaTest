@@ -21,6 +21,12 @@ function normalizeAutoTorrentSubmitCount(value) {
 }
 
 async function initializePopup() {
+  const versionEl = document.querySelector("#ext-version");
+  if (versionEl) {
+    const manifest = chrome.runtime.getManifest();
+    versionEl.textContent = `v${manifest.version || "?"}`;
+  }
+
   const settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4317",
     importToken: "",

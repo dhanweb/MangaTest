@@ -141,6 +141,18 @@ route / page / component
 - Deleting a comic record must not imply deleting real local files.
 - Physical file deletion must be a separate, explicit, confirmed operation showing absolute paths.
 
+## Browser Extension (`apps/extension`)
+
+- Load the extension for development as **unpacked** from `apps/extension` (not only from a zip). Chrome reads `manifest.json` and `src/**` directly.
+- **Daily development does not require rebuild/repack.** After code changes: open `chrome://extensions` → click **Reload** on MangaTest → hard-refresh open ExHentai/e-hentai tabs (or close and reopen them). Content scripts and service worker do not update until reload.
+- `npm run build -w apps/extension` only packages `dist/MangaTest-Extension-v{version}.zip` for distribution; it is optional for local unpacked loads.
+- **Version bump is mandatory on every extension change.** When editing any file under `apps/extension/` (including docs/scripts that ship with the extension), bump the Chrome extension version before finishing the change:
+  1. Bump `apps/extension/manifest.json` → `version` (semver: patch for fixes/behavior, minor for features).
+  2. Keep `apps/extension/package.json` → `version` the same as `manifest.json`.
+  3. Prefer showing the version in the extension popup UI so the user can confirm they loaded the latest build.
+- Do not claim an extension change is done without a version bump when extension sources changed.
+- After extension work, run `npm run check -w apps/extension` when feasible.
+
 ## Development Practices
 
 - Prefer small, focused files and clear module boundaries.
