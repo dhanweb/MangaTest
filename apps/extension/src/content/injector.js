@@ -239,6 +239,33 @@
   function injectGalleryPanel() {
     if (document.getElementById("mangatest-panel-root")) return;
 
+    // Fixed top-right status (always visible; not inside the action panel).
+    const badge = document.createElement("div");
+    badge.id = "mangatest-status-badge";
+    Object.assign(badge.style, {
+      position: "fixed",
+      top: "16px",
+      right: "16px",
+      zIndex: 999999,
+      maxWidth: "min(420px, calc(100vw - 32px))",
+      padding: "10px 14px",
+      borderRadius: "10px",
+      background: "rgba(255, 248, 251, 0.96)",
+      border: "1px solid #f7c9dc",
+      boxShadow: "0 6px 20px rgba(36, 20, 31, 0.12)",
+      fontFamily: "system-ui, sans-serif",
+      fontSize: "12px",
+      lineHeight: "1.45",
+      color: "#7c5166",
+      pointerEvents: "none",
+    });
+    badge.innerHTML = `
+      <div style="font-weight:800;font-size:12px;color:#24141f;margin-bottom:4px;">MangaTest</div>
+      <div id="mangatest-status-main">检查库状态…</div>
+      <div id="mangatest-status-extra" style="margin-top:4px;opacity:0.9;"></div>
+    `;
+    document.body.appendChild(badge);
+
     const root = document.createElement("div");
     root.id = "mangatest-panel-root";
     Object.assign(root.style, {
@@ -253,8 +280,7 @@
     root.innerHTML = `
       <div id="mangatest-panel" style="display:none;margin-bottom:10px;background:#fff8fb;border:1px solid #f7c9dc;border-radius:12px;box-shadow:0 8px 24px rgba(239,59,145,0.2);overflow:hidden;">
         <div style="padding:12px 14px;border-bottom:1px solid #fde0eb;">
-          <div style="font-weight:800;font-size:14px;color:#24141f;">MangaTest</div>
-          <div id="mangatest-panel-status" style="margin-top:6px;font-size:12px;line-height:1.45;color:#7c5166;">检查库状态…</div>
+          <div style="font-weight:800;font-size:14px;color:#24141f;">操作</div>
         </div>
         <div style="padding:10px 14px;display:grid;gap:8px;">
           <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#5e4051;font-weight:600;cursor:pointer;">
@@ -303,23 +329,36 @@
       void startDownloadFlow({ fromAuto: false });
     });
 
-    console.log("[MangaTest] 详情页面板已注入");
+    console.log("[MangaTest] 详情页面板与右上角状态已注入");
   }
 
   function updatePanelStatusUi() {
-    const el = panelRoot?.querySelector("#mangatest-panel-status");
-    if (!(el instanceof HTMLElement)) return;
+    const mainEl = document.querySelector("#mangatest-status-main");
+    const extraEl = document.querySelector("#mangatest-status-extra");
+    const badge = document.querySelector("#mangatest-status-badge");
+    if (!(mainEl instanceof HTMLElement) || !(extraEl instanceof HTMLElement)) return;
 
-    const parts = [];
+    let main = "未在库中";
+    let border = "#f7c9dc";
+    let color = "#7c5166";
+
     if (isLocallyDownloaded(libraryStatus)) {
-      parts.push(`📚 已入库可阅读${libraryStatus?.displayTitle ? `：${libraryStatus.displayTitle}` : ""}`);
-      parts.push("不会自动下载");
+      main = `📚 已入库可阅读${libraryStatus?.displayTitle ? `：${libraryStatus.displayTitle}` : ""}`;
+      border = "#8ce99a";
+      color = "#087f5b";
     } else if (libraryStatus?.imported) {
-      parts.push(libraryStatus.hasLocalFile ? "已导入（本地文件可能缺失）" : "已导入元数据，本地尚无文件");
-    } else {
-      parts.push("未在库中");
+      main = libraryStatus.hasLocalFile
+        ? "已导入（本地文件可能缺失）"
+        : "已导入元数据，本地尚无文件";
+      border = "#ffe066";
+      color = "#e67700";
     }
-    parts.push(settings.autoDownloadOnGalleryOpen ? "自动下载：开" : "自动下载：关");
+
+    const extras = [];
+    extras.push(settings.autoDownloadOnGalleryOpen ? "自动下载：开" : "自动下载：关");
+    if (isLocallyDownloaded(libraryStatus)) {
+      extras.push("不会自动下载");
+    }
 
     try {
       const meta = collectNormalizedMetadata();
@@ -327,17 +366,24 @@
       const last = meta.sourceId ? map[meta.sourceId] : null;
       if (last?.at) {
         const t = new Date(last.at).toLocaleString();
-        parts.push(last.kind === "download" ? `最近下载提交：${t}` : `最近元数据提交：${t}`);
         if (last.kind === "download" && last.ok) {
-          parts.push("✅ 下载已提交（种子页已关闭时请看这里）");
+          extras.push(`✅ 下载已提交 ${t}`);
+        } else if (last.kind === "download") {
+          extras.push(`下载提交失败 ${t}`);
+        } else {
+          extras.push(`元数据已提交 ${t}`);
         }
       }
     } catch {
       // ignore
     }
 
-    el.textContent = parts.join(" · ");
-    el.style.color = isLocallyDownloaded(libraryStatus) ? "#087f5b" : "#7c5166";
+    mainEl.textContent = main;
+    mainEl.style.color = color;
+    extraEl.textContent = extras.join(" · ");
+    if (badge instanceof HTMLElement) {
+      badge.style.borderColor = border;
+    }
   }
 
   async function recordLastSubmit(sourceId, kind, ok, message) {

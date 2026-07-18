@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MangaTest Metadata Collector",
   "description": "一键采集漫画信息并提交到 MangaTest。在详情页注入浮动按钮，在种子页克隆下载元素。",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "MangaTest 设置"
