@@ -211,7 +211,8 @@
     badge.innerHTML = `
       <div id="mangatest-status-main" style="font-weight:800;font-size:13px;color:#24141f;">检查状态…</div>
     `;
-    document.body.appendChild(badge);
+    const mounted = window.MangaTestStatusPlacement?.mount(badge, page.statusPlacement, { document, location });
+    if (!mounted) document.body.appendChild(badge);
 
     const root = document.createElement("div");
     root.id = "mangatest-panel-root";

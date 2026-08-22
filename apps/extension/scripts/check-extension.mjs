@@ -21,6 +21,7 @@ const referencedFiles = [
   manifest.action.default_popup,
   manifest.background?.service_worker,
   "src/background/nhentai-download-capture.js",
+  "src/runtime/status-placement.js",
   "src/adapters/exhentai/adapter.js",
   "src/adapters/nhentai/adapter.js",
   "src/runtime/adapter-registry.js",
@@ -110,6 +111,7 @@ checkFixture({
 
 await checkTorrentMagnet();
 checkNhentaiDownloadCapture();
+checkStatusPlacement();
 
 console.log("Extension manifest and collector checks passed.");
 
@@ -313,6 +315,74 @@ function checkNhentaiDownloadCapture() {
 
   const pending = new Map([[42, { createdAt: 1000 }]]);
   assert(capture.activePendingTabIds(pending, 1000)[0] === 42, "pending torrent intent must retain its tab ID");
+}
+
+function checkStatusPlacement() {
+  const context = { self: {}, window: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/runtime/status-placement.js"), "utf8"), context, {
+    filename: "src/runtime/status-placement.js",
+  });
+
+  const placement = context.window.MangaTestStatusPlacement;
+  assert(placement, "status placement runtime must be exposed");
+
+  const document = createPlacementDocument();
+  const element = createPlacementElement();
+  placement.mount(element, undefined, { document, location: new URL("https://example.test/gallery/1") });
+  assert(element.style.position === "fixed", "default status placement must use fixed positioning");
+  assert(element.style.top === "16px", "default status placement must use the top-right offset");
+  assert(element.style.right === "16px", "default status placement must use the right offset");
+  assert(document.body.children.includes(element), "default status placement must append to body");
+
+  const offsetElement = createPlacementElement();
+  placement.mount(
+    offsetElement,
+    { mode: "viewport", top: 40, left: "12%", bottom: "8px" },
+    { document, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(offsetElement.style.top === "40px", "numeric status offsets must become pixels");
+  assert(offsetElement.style.left === "12%", "custom left status offset must be preserved");
+  assert(offsetElement.style.right === "auto", "unspecified right offset must be reset");
+
+  const customTarget = { children: [], appendChild(elementToMount) { this.children.push(elementToMount); } };
+  const customDocument = createPlacementDocument(customTarget);
+  const customElement = createPlacementElement();
+  let customCalled = false;
+  placement.mount(
+    customElement,
+    {
+      mode: "custom",
+      mount({ element: elementToMount, document: documentToUse, location }) {
+        customCalled = location.hostname === "example.test";
+        documentToUse.querySelector(".site-status").appendChild(elementToMount);
+        return true;
+      },
+    },
+    { document: customDocument, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(customCalled, "custom status placement must receive the page context");
+  assert(customTarget.children.includes(customElement), "custom status placement must own DOM insertion");
+
+  const fallbackElement = createPlacementElement();
+  placement.mount(
+    fallbackElement,
+    { mode: "custom", mount: () => false },
+    { document, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(document.body.children.includes(fallbackElement), "failed custom placement must fall back to body mounting");
+}
+
+function createPlacementDocument(customTarget = null) {
+  const body = { children: [], appendChild(element) { this.children.push(element); } };
+  return {
+    body,
+    querySelector: () => customTarget,
+  };
+}
+
+function createPlacementElement() {
+  return { style: {} };
 }
 
 function findElementByAttr(html, tag, attrName, attrValue, location) {

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MangaTest Metadata Collector",
   "description": "通过站点适配器采集漫画信息和下载资源并提交到 MangaTest。",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "MangaTest 设置"
@@ -24,6 +24,7 @@
         "src/backend/client.js",
         "src/features/metadata/submit.js",
         "src/features/download-resources/submit.js",
+        "src/runtime/status-placement.js",
         "src/content/injector.js"
       ],
       "run_at": "document_idle"
