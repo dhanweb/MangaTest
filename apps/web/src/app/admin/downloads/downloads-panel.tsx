@@ -54,7 +54,7 @@ type ApiData = {
 };
 
 const TRANSFER_TICK_INTERVAL = 5000;
-const OFFLINE_TICK_INTERVAL = 300000;
+const OFFLINE_TICK_INTERVAL = 10_000;
 
 function StatusBadge({ status }: { status: string }) {
   const [label, color] = STATUS_BADGE[status] ?? [status, "gray"];

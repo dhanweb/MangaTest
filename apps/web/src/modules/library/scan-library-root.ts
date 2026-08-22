@@ -1,8 +1,22 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, max } from "drizzle-orm";
 
-import { bootstrapDatabase, chapters, comics, getDb, localFiles, mangaRoots, pages, scanSessions } from "@/modules/core/db";
+import {
+  bootstrapDatabase,
+  chapters,
+  comicResources,
+  comicSources,
+  comicTags,
+  comics,
+  getDb,
+  localFiles,
+  mangaRoots,
+  operationLogs,
+  pages,
+  readingProgress,
+  scanSessions,
+} from "@/modules/core/db";
 import { DOWNLOAD_IMPORT_DIRECTORY_NAME, enumerateMangaRootChildren } from "@/modules/local-files";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
 
@@ -108,40 +122,183 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
       }
 
       for (const entry of entries) {
+        const sortTitle = normalizeSortTitle(entry.fileTitle);
         const existingLocalFile = tx
           .select()
           .from(localFiles)
           .where(and(eq(localFiles.mangaRootId, mangaRootId), eq(localFiles.relativePath, entry.relativePath)))
           .get();
 
-        if (existingLocalFile) {
-          continue;
-        }
+        const comicCandidates = tx
+          .select({
+            id: comics.id,
+            status: comics.status,
+            primaryLocalFileId: comics.primaryLocalFileId,
+            primaryLocalFileMissing: localFiles.isMissing,
+            parentComicId: comics.parentComicId,
+            mergedAsChapterId: comics.mergedAsChapterId,
+            createdAt: comics.createdAt,
+          })
+          .from(comics)
+          .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+          .where(eq(comics.sortTitle, sortTitle))
+          .orderBy(asc(comics.createdAt))
+          .all();
+        const activeCandidates = comicCandidates.filter(
+          (candidate) =>
+            (candidate.status === "readable" || candidate.status === "missing_local_file" || candidate.status === "remote_only") &&
+            !candidate.parentComicId &&
+            !candidate.mergedAsChapterId,
+        );
+        const matchedComic = [...activeCandidates].sort((left, right) => {
+          const priority = (candidate: (typeof activeCandidates)[number]) => {
+            if (candidate.status === "remote_only" && !candidate.primaryLocalFileId) return 0;
+            if (candidate.primaryLocalFileId && !candidate.primaryLocalFileMissing) return 1;
+            if (candidate.primaryLocalFileId) return 2;
+            return 3;
+          };
 
-        const sortTitle = normalizeSortTitle(entry.fileTitle);
-        const duplicateComic = tx.select().from(comics).where(eq(comics.sortTitle, sortTitle)).get();
+          return priority(left) - priority(right) || left.createdAt.localeCompare(right.createdAt);
+        })[0];
 
-        if (duplicateComic) {
+        const hasDifferentMatchedComic = Boolean(existingLocalFile && matchedComic && matchedComic.id !== existingLocalFile.comicId);
+        if (comicCandidates.length > 0 && (!existingLocalFile || hasDifferentMatchedComic)) {
           duplicateCandidateCount += 1;
-          if (duplicateComic.status === "hidden" || duplicateComic.status === "deleted") {
+          if (comicCandidates.some((candidate) => candidate.status === "hidden" || candidate.status === "deleted")) {
             recoverableCount += 1;
           }
         }
 
-        const comicId = randomUUID();
+        if (existingLocalFile) {
+          if (
+            existingLocalFile.comicId &&
+            matchedComic &&
+            matchedComic.id !== existingLocalFile.comicId &&
+            matchedComic.status === "remote_only" &&
+            !matchedComic.primaryLocalFileId
+          ) {
+            const existingComic = tx
+              .select({
+                id: comics.id,
+                status: comics.status,
+                primaryLocalFileId: comics.primaryLocalFileId,
+                parentComicId: comics.parentComicId,
+                mergedAsChapterId: comics.mergedAsChapterId,
+                lastReadPageId: comics.lastReadPageId,
+              })
+              .from(comics)
+              .where(eq(comics.id, existingLocalFile.comicId))
+              .get();
+            const existingFileCount = tx
+              .select({ id: localFiles.id })
+              .from(localFiles)
+              .where(eq(localFiles.comicId, existingLocalFile.comicId))
+              .all().length;
+            const existingChapterCount = tx
+              .select({ id: chapters.id })
+              .from(chapters)
+              .where(eq(chapters.comicId, existingLocalFile.comicId))
+              .all().length;
+            const hasMetadata = Boolean(
+              tx.select({ id: comicSources.id }).from(comicSources).where(eq(comicSources.comicId, existingLocalFile.comicId)).get() ||
+                tx.select({ id: comicResources.id }).from(comicResources).where(eq(comicResources.comicId, existingLocalFile.comicId)).get() ||
+                tx.select({ id: comicTags.comicId }).from(comicTags).where(eq(comicTags.comicId, existingLocalFile.comicId)).get() ||
+                tx.select({ id: readingProgress.id }).from(readingProgress).where(eq(readingProgress.comicId, existingLocalFile.comicId)).get(),
+            );
+
+            if (
+              existingComic &&
+              (existingComic.status === "readable" || existingComic.status === "missing_local_file") &&
+              !existingComic.parentComicId &&
+              !existingComic.mergedAsChapterId &&
+              !existingComic.lastReadPageId &&
+              existingFileCount === 1 &&
+              existingChapterCount === 1 &&
+              !hasMetadata
+            ) {
+              tx.update(localFiles)
+                .set({
+                  comicId: matchedComic.id,
+                  isPrimary: true,
+                  updatedAt: now,
+                })
+                .where(eq(localFiles.id, existingLocalFile.id))
+                .run();
+              tx.update(chapters)
+                .set({
+                  comicId: matchedComic.id,
+                  updatedAt: now,
+                })
+                .where(eq(chapters.comicId, existingLocalFile.comicId))
+                .run();
+              tx.update(comics)
+                .set({
+                  status: "readable",
+                  primaryLocalFileId: existingLocalFile.id,
+                  updatedAt: now,
+                })
+                .where(eq(comics.id, matchedComic.id))
+                .run();
+              tx.update(comics)
+                .set({
+                  status: "deleted",
+                  primaryLocalFileId: null,
+                  deletedAt: now,
+                  updatedAt: now,
+                })
+                .where(eq(comics.id, existingLocalFile.comicId))
+                .run();
+              tx.insert(operationLogs)
+                .values({
+                  id: randomUUID(),
+                  operation: "soft_delete",
+                  targetType: "comic",
+                  targetId: existingLocalFile.comicId,
+                  summary: `扫描时收敛重复漫画记录：${entry.fileTitle}`,
+                  detailJson: JSON.stringify({
+                    sourceComicId: existingLocalFile.comicId,
+                    targetComicId: matchedComic.id,
+                    relativePath: entry.relativePath,
+                    physicalFilesTouched: false,
+                  }),
+                  createdAt: now,
+                })
+                .run();
+            }
+          }
+
+          continue;
+        }
+
+        const comicId = matchedComic?.id ?? randomUUID();
         const localFileId = randomUUID();
         const chapterId = randomUUID();
+        const shouldBecomePrimary = !matchedComic?.primaryLocalFileId || Boolean(matchedComic.primaryLocalFileMissing);
+        const nextSortOrder = matchedComic
+          ? Number(tx.select({ value: max(chapters.sortOrder) }).from(chapters).where(eq(chapters.comicId, matchedComic.id)).get()?.value ?? -1) + 1
+          : 0;
 
-        tx.insert(comics)
-          .values({
-            id: comicId,
-            displayTitle: entry.fileTitle,
-            fileTitle: entry.fileTitle,
-            sortTitle,
-            status: "readable",
-            primaryLocalFileId: localFileId,
-          })
-          .run();
+        if (matchedComic) {
+          tx.update(comics)
+            .set({
+              status: "readable",
+              primaryLocalFileId: shouldBecomePrimary ? localFileId : matchedComic.primaryLocalFileId,
+              updatedAt: now,
+            })
+            .where(eq(comics.id, matchedComic.id))
+            .run();
+        } else {
+          tx.insert(comics)
+            .values({
+              id: comicId,
+              displayTitle: entry.fileTitle,
+              fileTitle: entry.fileTitle,
+              sortTitle,
+              status: "readable",
+              primaryLocalFileId: localFileId,
+            })
+            .run();
+        }
 
         tx.insert(localFiles)
           .values({
@@ -153,7 +310,7 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
             relativePath: entry.relativePath,
             sizeBytes: entry.sizeBytes,
             mtimeMs: entry.mtimeMs,
-            isPrimary: true,
+            isPrimary: shouldBecomePrimary,
             isMissing: false,
           })
           .run();
@@ -164,7 +321,7 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
             comicId,
             localFileId,
             title: null,
-            sortOrder: 0,
+            sortOrder: nextSortOrder,
             pageCount: entry.pages.length,
           })
           .run();

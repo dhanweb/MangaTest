@@ -5,7 +5,15 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+beforeEach(() => {
+  vi.resetModules();
+});
+
+afterEach(() => {
+  delete process.env.MANGATEST_DB_PATH;
+});
 
 describe("scanMangaRoot", () => {
   it("does not import the download staging folder 下载入库 as a comic", async () => {
@@ -39,6 +47,131 @@ describe("scanMangaRoot", () => {
     const titles = sqlite.prepare("select file_title as t from comics").all() as Array<{ t: string }>;
     expect(titles.map((row) => row.t)).toEqual(["Real Comic"]);
     expect(titles.some((row) => row.t === "下载入库")).toBe(false);
+    sqlite.close();
+  });
+
+  it("attaches a scanned archive to an existing remote-only comic and stays idempotent", async () => {
+    const workspace = path.join(os.tmpdir(), `mangatest-scan-remote-match-${randomUUID()}`);
+    const rootPath = path.join(workspace, "Root");
+    const dbPath = path.join(workspace, "test.sqlite");
+    const archivePath = path.join(rootPath, "Matched Comic.cbz");
+    const jpegFixture = await sharp({
+      create: { width: 8, height: 12, channels: 3, background: "#ef3b91" },
+    })
+      .jpeg()
+      .toBuffer();
+
+    await mkdir(rootPath, { recursive: true });
+    await writeFile(
+      archivePath,
+      createStoredZip([
+        { name: "001.jpg", data: jpegFixture },
+        { name: "002.jpg", data: jpegFixture },
+      ]),
+    );
+
+    process.env.MANGATEST_DB_PATH = dbPath;
+    const { bootstrapDatabase, getSqlite } = await import("../core/db");
+    const { scanMangaRoot } = await import("./scan-library-root");
+    bootstrapDatabase();
+    const sqlite = getSqlite();
+    const rootId = randomUUID();
+    const remoteComicId = randomUUID();
+    const sourceId = randomUUID();
+
+    sqlite
+      .prepare("insert into manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) values (?, ?, ?, ?, ?)")
+      .run(rootId, rootPath, "Root", "children_as_comics", 1);
+    sqlite
+      .prepare(
+        "insert into comics (id, display_title, file_title, sort_title, metadata_query_title, status) values (?, ?, ?, ?, ?, ?)",
+      )
+      .run(remoteComicId, "Matched Comic", "Matched Comic", "matched comic", "Matched Comic", "remote_only");
+    sqlite
+      .prepare("insert into comic_sources (id, comic_id, site, source_url, original_title) values (?, ?, ?, ?, ?)")
+      .run(sourceId, remoteComicId, "examplesite", "https://example.test/matched-comic", "Matched Comic");
+    sqlite
+      .prepare(
+        "insert into comic_resources (id, comic_id, comic_source_id, resource_type, display_label, resource_url, redacted_resource) values (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(randomUUID(), remoteComicId, sourceId, "magnet", "Matched Comic", "magnet:?xt=urn:btih:matched", "magnet:?... ");
+
+    const firstScan = await scanMangaRoot(rootId);
+    expect(firstScan.addedCount).toBe(1);
+    expect(sqlite.prepare("select count(*) as c from comics").get()).toMatchObject({ c: 1 });
+    expect(sqlite.prepare("select status, primary_local_file_id as primaryLocalFileId from comics where id = ?").get(remoteComicId)).toMatchObject({
+      status: "readable",
+    });
+    expect(sqlite.prepare("select count(*) as c from local_files where comic_id = ?").get(remoteComicId)).toMatchObject({ c: 1 });
+    expect(
+      sqlite
+        .prepare("select count(*) as c from pages p join chapters c on c.id = p.chapter_id where c.comic_id = ?")
+        .get(remoteComicId),
+    ).toMatchObject({ c: 2 });
+
+    const secondScan = await scanMangaRoot(rootId);
+    expect(secondScan.addedCount).toBe(0);
+    expect(sqlite.prepare("select count(*) as c from comics").get()).toMatchObject({ c: 1 });
+    expect(sqlite.prepare("select count(*) as c from local_files").get()).toMatchObject({ c: 1 });
+    expect(sqlite.prepare("select count(*) as c from pages").get()).toMatchObject({ c: 2 });
+    sqlite.close();
+  });
+
+  it("reconciles a one-file local duplicate back to an existing remote-only comic", async () => {
+    const workspace = path.join(os.tmpdir(), `mangatest-scan-duplicate-reconcile-${randomUUID()}`);
+    const rootPath = path.join(workspace, "Root");
+    const dbPath = path.join(workspace, "test.sqlite");
+    const archivePath = path.join(rootPath, "Reconciled Comic.cbz");
+    const jpegFixture = await sharp({
+      create: { width: 8, height: 12, channels: 3, background: "#ef3b91" },
+    })
+      .jpeg()
+      .toBuffer();
+
+    await mkdir(rootPath, { recursive: true });
+    await writeFile(
+      archivePath,
+      createStoredZip([
+        { name: "001.jpg", data: jpegFixture },
+        { name: "002.jpg", data: jpegFixture },
+      ]),
+    );
+
+    process.env.MANGATEST_DB_PATH = dbPath;
+    const { createAndScanMangaRoot } = await import("./create-and-scan-manga-root");
+    const { bootstrapDatabase, getSqlite } = await import("../core/db");
+    const { scanMangaRoot } = await import("./scan-library-root");
+    const initial = await createAndScanMangaRoot({ absolutePath: rootPath, displayName: "Root" });
+    expect(initial.scanError).toBeNull();
+    const sqlite = getSqlite();
+    const localComicId = selectComicIdByFileTitle(sqlite, "Reconciled Comic");
+    const remoteComicId = randomUUID();
+    const sourceId = randomUUID();
+
+    bootstrapDatabase();
+    sqlite
+      .prepare(
+        "insert into comics (id, display_title, file_title, sort_title, metadata_query_title, status) values (?, ?, ?, ?, ?, ?)",
+      )
+      .run(remoteComicId, "Reconciled Comic", "Reconciled Comic", "reconciled comic", "Reconciled Comic", "remote_only");
+    sqlite
+      .prepare("insert into comic_sources (id, comic_id, site, source_url, original_title) values (?, ?, ?, ?, ?)")
+      .run(sourceId, remoteComicId, "examplesite", "https://example.test/reconciled-comic", "Reconciled Comic");
+
+    const scan = await scanMangaRoot(initial.root.id);
+    expect(scan.addedCount).toBe(0);
+    expect(sqlite.prepare("select status, primary_local_file_id as primaryLocalFileId from comics where id = ?").get(remoteComicId)).toMatchObject({
+      status: "readable",
+    });
+    expect(sqlite.prepare("select status, primary_local_file_id as primaryLocalFileId from comics where id = ?").get(localComicId)).toMatchObject({
+      status: "deleted",
+      primaryLocalFileId: null,
+    });
+    expect(sqlite.prepare("select count(*) as c from local_files where comic_id = ?").get(remoteComicId)).toMatchObject({ c: 1 });
+    expect(sqlite.prepare("select count(*) as c from chapters where comic_id = ?").get(remoteComicId)).toMatchObject({ c: 1 });
+    expect(sqlite.prepare("select count(*) as c from pages p join chapters c on c.id = p.chapter_id where c.comic_id = ?").get(remoteComicId)).toMatchObject({ c: 2 });
+    expect(sqlite.prepare("select count(*) as c from comics").get()).toMatchObject({ c: 2 });
+    expect(await import("node:fs/promises").then(({ access }) => access(archivePath))).toBeUndefined();
     sqlite.close();
   });
 

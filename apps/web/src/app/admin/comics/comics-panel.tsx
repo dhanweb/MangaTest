@@ -1,9 +1,9 @@
 "use client";
 
-import { Box, Group, Pagination, Select, Table, Text, TextInput } from "@mantine/core";
+import { Box, Group, Pagination, Select, Table, Text, TextInput, Tooltip, type TextProps } from "@mantine/core";
 import { Library, Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton } from "@/components/ui/app-components";
@@ -99,64 +99,87 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
       </Group>
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
-        <Table striped highlightOnHover verticalSpacing="sm" horizontalSpacing="md">
-          <Table.Thead>
-            <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
-              <Table.Th fw={900} c="#8d5a6e">
-                标题
-              </Table.Th>
-              <Table.Th fw={900} c="#8d5a6e" w={110}>
-                格式
-              </Table.Th>
-              <Table.Th fw={900} c="#8d5a6e" w={80}>
-                页数
-              </Table.Th>
-              <Table.Th fw={900} c="#8d5a6e" w={100}>
-                状态
-              </Table.Th>
-              <Table.Th fw={900} c="#8d5a6e" w={86}>
-                操作
-              </Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {paginated.map((comic) => (
-              <Table.Tr key={comic.id}>
-                <Table.Td>
-                  <Text fw={700} size="sm" truncate>
-                    {comic.displayTitle}
-                  </Text>
-                  <Text size="xs" c="ink.5" truncate>
-                    {comic.fileTitle}
-                  </Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm">{formatKind(comic.localFileKind)}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <Text size="sm">{comic.pageCount}</Text>
-                </Table.Td>
-                <Table.Td>
-                  <StatusBadge status={comic.status} missing={comic.isPrimaryFileMissing} merged={Boolean(comic.parentComicId || comic.mergedAsChapterId)} />
-                </Table.Td>
-                <Table.Td>
-                  <AppButton component={Link} href={`/admin/comics/${comic.id}`} variant="outline" size="xs">
-                    查看
-                  </AppButton>
-                </Table.Td>
+        <Table.ScrollContainer minWidth={760} type="native">
+          <Table striped highlightOnHover layout="fixed" verticalSpacing="sm" horizontalSpacing="md" style={{ minWidth: 760 }}>
+            <Table.Thead>
+              <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
+                <Table.Th fw={900} c="#8d5a6e" w={380}>
+                  标题
+                </Table.Th>
+                <Table.Th fw={900} c="#8d5a6e" w={110}>
+                  格式
+                </Table.Th>
+                <Table.Th fw={900} c="#8d5a6e" w={80}>
+                  页数
+                </Table.Th>
+                <Table.Th fw={900} c="#8d5a6e" w={100}>
+                  状态
+                </Table.Th>
+                <Table.Th
+                  fw={900}
+                  c="#8d5a6e"
+                  w={86}
+                  style={{
+                    position: "sticky",
+                    right: 0,
+                    zIndex: 2,
+                    background: "var(--mantine-color-pink-0)",
+                    boxShadow: "-8px 0 12px -12px rgba(38, 25, 40, 0.4)",
+                  }}
+                >
+                  操作
+                </Table.Th>
               </Table.Tr>
-            ))}
-            {paginated.length === 0 && (
-              <Table.Tr>
-                <Table.Td colSpan={5}>
-                  <Text size="sm" c="ink.5" ta="center" py="md">
-                    没有找到匹配的漫画
-                  </Text>
-                </Table.Td>
-              </Table.Tr>
-            )}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {paginated.map((comic) => (
+                <Table.Tr key={comic.id}>
+                  <Table.Td style={{ minWidth: 0 }}>
+                    <Box style={{ minWidth: 0, width: "100%" }}>
+                      <OverflowTooltipText fw={700} size="sm">
+                        {comic.displayTitle}
+                      </OverflowTooltipText>
+                      <OverflowTooltipText size="xs" c="ink.5">
+                        {comic.fileTitle}
+                      </OverflowTooltipText>
+                    </Box>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">{formatKind(comic.localFileKind)}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">{comic.pageCount}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <StatusBadge status={comic.status} missing={comic.isPrimaryFileMissing} merged={Boolean(comic.parentComicId || comic.mergedAsChapterId)} />
+                  </Table.Td>
+                  <Table.Td
+                    style={{
+                      position: "sticky",
+                      right: 0,
+                      zIndex: 1,
+                      background: "inherit",
+                      boxShadow: "-8px 0 12px -12px rgba(38, 25, 40, 0.4)",
+                    }}
+                  >
+                    <AppButton component={Link} href={`/admin/comics/${comic.id}`} variant="outline" size="xs">
+                      查看
+                    </AppButton>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+              {paginated.length === 0 && (
+                <Table.Tr>
+                  <Table.Td colSpan={5}>
+                    <Text size="sm" c="ink.5" ta="center" py="md">
+                      没有找到匹配的漫画
+                    </Text>
+                  </Table.Td>
+                </Table.Tr>
+              )}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       </Box>
 
       <Group justify="flex-end" mt="md" gap="md" wrap="wrap">
@@ -184,6 +207,39 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
         {totalPages > 1 && <Pagination total={totalPages} value={page} onChange={setPage} color="pink" withEdges />}
       </Group>
     </Box>
+  );
+}
+
+function OverflowTooltipText({ children, ...props }: { children: string } & Omit<TextProps, "children">) {
+  const textRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const element = textRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateOverflow = () => {
+      setIsOverflowing(element.scrollWidth > element.clientWidth);
+    };
+
+    updateOverflow();
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [children]);
+
+  return (
+    <Tooltip label={children} disabled={!isOverflowing} multiline maw={420} withArrow>
+      <Text ref={textRef} component="div" truncate {...props}>
+        {children}
+      </Text>
+    </Tooltip>
   );
 }
 
