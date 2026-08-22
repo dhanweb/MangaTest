@@ -1,0 +1,267 @@
+import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
+
+import { bootstrapDatabase, getDb, tags, videoEpisodes, videoProgress, videoRoots, videos, videoTags } from "@/modules/core/db";
+
+export interface VideoCardRecord {
+  id: string;
+  displayTitle: string;
+  fileTitle: string;
+  status: "readable" | "missing_local_file" | "hidden" | "deleted";
+  episodeCount: number;
+  totalDurationSeconds: number;
+  watchedPercent: number;
+  lastWatchedEpisodeId: string | null;
+  addedAt: string;
+}
+
+export interface VideoEpisodeRecord {
+  id: string;
+  title: string;
+  sortTitle: string;
+  sortOrder: number;
+  relativePath: string;
+  absolutePath: string;
+  extension: string;
+  sizeBytes: number | null;
+  durationSeconds: number | null;
+  isMissing: boolean;
+  progressSeconds: number;
+  progressPercent: number;
+  isCompleted: boolean;
+}
+
+export interface VideoTagRecord {
+  id: string;
+  namespace: string;
+  name: string;
+  canonical: string;
+  displayNameZh: string | null;
+  source: "scan" | "metadata" | "manual";
+  isUserEdited: boolean;
+}
+
+export interface VideoDetailRecord extends VideoCardRecord {
+  videoRootId: string;
+  videoRootName: string | null;
+  primaryPath: string | null;
+  totalSizeBytes: number;
+  updatedAt: string;
+  episodes: VideoEpisodeRecord[];
+  tags: VideoTagRecord[];
+}
+
+export interface VideoAdminRowRecord extends VideoCardRecord {
+  updatedAt: string;
+  primaryPath: string | null;
+  isPrimaryFileMissing: boolean;
+  videoRootName: string | null;
+}
+
+export interface VideoSearchInput {
+  query?: string;
+  tags?: string[];
+  page?: number;
+  pageSize?: number;
+}
+
+export interface VideoSearchResult {
+  items: VideoCardRecord[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export interface VideoTagFilterRecord {
+  id: string;
+  namespace: string;
+  canonical: string;
+  label: string;
+  videoCount: number;
+}
+
+export function createVideoRepository() {
+  return {
+    async searchReadableCards(input: VideoSearchInput = {}): Promise<VideoSearchResult> {
+      bootstrapDatabase();
+      const db = getDb();
+      const page = Math.max(1, Math.trunc(input.page ?? 1));
+      const pageSize = Math.max(12, Math.min(96, Math.trunc(input.pageSize ?? 48)));
+      const query = input.query?.trim();
+      const selectedTags = Array.from(new Set((input.tags ?? []).map((tag) => tag.trim().toLowerCase()).filter(Boolean)));
+      const baseWhere = and(eq(videos.status, "readable"), eq(videoEpisodes.isMissing, false));
+      const queryWhere = query
+        ? or(
+            like(videos.displayTitle, `%${query}%`),
+            like(videos.fileTitle, `%${query}%`),
+            sql`exists (select 1 from video_tags qvt inner join tags qt on qt.id = qvt.tag_id where qvt.video_id = ${videos.id} and (qt.canonical like ${`%${query.toLowerCase()}%`} or qt.name like ${`%${query.toLowerCase()}%`} or qt.display_name_zh like ${`%${query}%`}))`,
+          )
+        : undefined;
+      const tagWheres = selectedTags.map(
+        (canonical) => sql`exists (select 1 from video_tags svt inner join tags st on st.id = svt.tag_id where svt.video_id = ${videos.id} and st.canonical = ${canonical})`,
+      );
+      const whereClause = and(baseWhere, queryWhere, ...tagWheres);
+      const episodeCountSql = sql<number>`count(distinct ${videoEpisodes.id})`;
+      const totalDurationSql = sql<number>`coalesce(sum(distinct ${videoEpisodes.durationSeconds}), 0)`;
+      const rows = db
+        .select({
+          id: videos.id,
+          displayTitle: videos.displayTitle,
+          fileTitle: videos.fileTitle,
+          status: videos.status,
+          episodeCount: episodeCountSql,
+          totalDurationSeconds: totalDurationSql,
+          lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
+          addedAt: videos.createdAt,
+        })
+        .from(videos)
+        .leftJoin(videoEpisodes, eq(videoEpisodes.videoId, videos.id))
+        .where(whereClause)
+        .groupBy(videos.id)
+        .orderBy(desc(videos.createdAt))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize)
+        .all();
+      const totalRow = db
+        .select({ count: sql<number>`count(distinct ${videos.id})` })
+        .from(videos)
+        .leftJoin(videoEpisodes, eq(videoEpisodes.videoId, videos.id))
+        .where(whereClause)
+        .get();
+      return {
+        items: rows.map((row) => ({ ...row, episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0 })),
+        page,
+        pageSize,
+        total: Number(totalRow?.count ?? 0),
+      };
+    },
+
+    async listReadableTagFilters(limit = 24): Promise<VideoTagFilterRecord[]> {
+      bootstrapDatabase();
+      const countSql = sql<number>`count(distinct ${videoTags.videoId})`;
+      return getDb()
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          canonical: tags.canonical,
+          label: sql<string>`coalesce(${tags.displayNameZh}, ${tags.name}, ${tags.canonical})`,
+          videoCount: countSql,
+        })
+        .from(tags)
+        .innerJoin(videoTags, eq(videoTags.tagId, tags.id))
+        .innerJoin(videos, eq(videos.id, videoTags.videoId))
+        .where(eq(videos.status, "readable"))
+        .groupBy(tags.id)
+        .orderBy(desc(countSql), asc(tags.namespace), asc(tags.name))
+        .limit(limit)
+        .all()
+        .map((row) => ({ ...row, videoCount: Number(row.videoCount) }));
+    },
+
+    async listAdminRows(limit = 300): Promise<VideoAdminRowRecord[]> {
+      bootstrapDatabase();
+      const db = getDb();
+      const episodeCountSql = sql<number>`count(distinct ${videoEpisodes.id})`;
+      const durationSql = sql<number>`coalesce(sum(distinct ${videoEpisodes.durationSeconds}), 0)`;
+      const rows = db
+        .select({
+          id: videos.id,
+          displayTitle: videos.displayTitle,
+          fileTitle: videos.fileTitle,
+          status: videos.status,
+          episodeCount: episodeCountSql,
+          totalDurationSeconds: durationSql,
+          lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
+          addedAt: videos.createdAt,
+          updatedAt: videos.updatedAt,
+          primaryPath: sql<string | null>`min(${videoEpisodes.absolutePath})`,
+          isPrimaryFileMissing: sql<boolean>`max(${videoEpisodes.isMissing})`,
+          videoRootName: videoRoots.displayName,
+        })
+        .from(videos)
+        .leftJoin(videoEpisodes, eq(videoEpisodes.videoId, videos.id))
+        .leftJoin(videoRoots, eq(videoRoots.id, videos.videoRootId))
+        .groupBy(videos.id)
+        .orderBy(desc(videos.createdAt))
+        .limit(limit)
+        .all();
+      return rows.map((row) => ({ ...row, episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0, isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing) }));
+    },
+
+    async getDetail(id: string): Promise<VideoDetailRecord | null> {
+      bootstrapDatabase();
+      const db = getDb();
+      const video = db
+        .select({
+          id: videos.id,
+          displayTitle: videos.displayTitle,
+          fileTitle: videos.fileTitle,
+          status: videos.status,
+          lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
+          addedAt: videos.createdAt,
+          updatedAt: videos.updatedAt,
+          videoRootId: videos.videoRootId,
+          videoRootName: videoRoots.displayName,
+        })
+        .from(videos)
+        .leftJoin(videoRoots, eq(videoRoots.id, videos.videoRootId))
+        .where(eq(videos.id, id))
+        .get();
+      if (!video) return null;
+
+      const episodeRows = db
+        .select({
+          id: videoEpisodes.id,
+          title: videoEpisodes.title,
+          sortTitle: videoEpisodes.sortTitle,
+          sortOrder: videoEpisodes.sortOrder,
+          relativePath: videoEpisodes.relativePath,
+          absolutePath: videoEpisodes.absolutePath,
+          extension: videoEpisodes.extension,
+          sizeBytes: videoEpisodes.sizeBytes,
+          durationSeconds: videoEpisodes.durationSeconds,
+          isMissing: videoEpisodes.isMissing,
+          progressSeconds: sql<number>`coalesce(${videoProgress.positionSeconds}, 0)`,
+          progressPercent: sql<number>`coalesce(${videoProgress.progressPercent}, 0)`,
+          isCompleted: sql<boolean>`coalesce(${videoProgress.isCompleted}, 0)`,
+        })
+        .from(videoEpisodes)
+        .leftJoin(videoProgress, and(eq(videoProgress.episodeId, videoEpisodes.id), eq(videoProgress.videoId, id)))
+        .where(eq(videoEpisodes.videoId, id))
+        .orderBy(asc(videoEpisodes.sortOrder), asc(videoEpisodes.createdAt))
+        .all();
+      const tagRows = db
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          name: tags.name,
+          canonical: tags.canonical,
+          displayNameZh: tags.displayNameZh,
+          source: videoTags.source,
+          isUserEdited: videoTags.isUserEdited,
+        })
+        .from(videoTags)
+        .innerJoin(tags, eq(tags.id, videoTags.tagId))
+        .where(eq(videoTags.videoId, id))
+        .orderBy(asc(tags.namespace), asc(tags.name))
+        .all();
+      const readableEpisodes = episodeRows.filter((episode) => !episode.isMissing);
+      return {
+        ...video,
+        primaryPath: readableEpisodes[0]?.absolutePath ?? episodeRows[0]?.absolutePath ?? null,
+        episodeCount: episodeRows.length,
+        totalDurationSeconds: episodeRows.reduce((sum, episode) => sum + (episode.durationSeconds ?? 0), 0),
+        totalSizeBytes: episodeRows.reduce((sum, episode) => sum + (episode.sizeBytes ?? 0), 0),
+        watchedPercent: episodeRows.length ? Math.round(episodeRows.reduce((sum, episode) => sum + episode.progressPercent, 0) / episodeRows.length) : 0,
+        episodes: episodeRows.map((episode) => ({ ...episode, isMissing: Boolean(episode.isMissing), isCompleted: Boolean(episode.isCompleted) })),
+        tags: tagRows.map((tag) => ({ ...tag, isUserEdited: Boolean(tag.isUserEdited) })),
+      };
+    },
+
+    async getEpisode(id: string) {
+      bootstrapDatabase();
+      return getDb().select().from(videoEpisodes).where(eq(videoEpisodes.id, id)).get() ?? null;
+    },
+  };
+}
+
+export type VideoRepository = ReturnType<typeof createVideoRepository>;

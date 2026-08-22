@@ -18,8 +18,13 @@ export const comicStatuses = [
   "deleted",
 ] as const;
 
+export const videoStatuses = ["readable", "missing_local_file", "hidden", "deleted"] as const;
+
 export const localFileKinds = ["directory", "zip", "cbz"] as const;
 export const mangaRootScanModes = ["children_as_comics"] as const;
+export const videoRootScanModes = ["children_as_videos"] as const;
+export const videoFileKinds = ["file", "directory_episode"] as const;
+export const videoFileExtensions = ["mp4", "mkv", "avi", "mov", "webm", "m4v", "ts"] as const;
 export const pageSourceKinds = ["filesystem", "archive"] as const;
 export const mediaAssetUses = ["cover", "list_thumbnail", "reader_thumbnail"] as const;
 export const cacheEntryKinds = ["archive_file_list", "page_image"] as const;
@@ -56,6 +61,78 @@ export const mangaRoots = sqliteTable(
   },
   (table) => ({
     pathIdx: uniqueIndex("manga_roots_absolute_path_idx").on(table.absolutePath),
+  }),
+);
+
+export const videoRoots = sqliteTable(
+  "video_roots",
+  {
+    id: text("id").primaryKey(),
+    absolutePath: text("absolute_path").notNull(),
+    displayName: text("display_name"),
+    scanMode: text("scan_mode", { enum: videoRootScanModes }).notNull().default("children_as_videos"),
+    isEnabled: integer("is_enabled", { mode: "boolean" }).notNull().default(true),
+    lastScanAt: text("last_scan_at"),
+    ...timestamps,
+  },
+  (table) => ({
+    pathIdx: uniqueIndex("video_roots_absolute_path_idx").on(table.absolutePath),
+  }),
+);
+
+export const videos = sqliteTable(
+  "videos",
+  {
+    id: text("id").primaryKey(),
+    videoRootId: text("video_root_id")
+      .notNull()
+      .references(() => videoRoots.id),
+    sourceKey: text("source_key").notNull(),
+    displayTitle: text("display_title").notNull(),
+    fileTitle: text("file_title").notNull(),
+    sortTitle: text("sort_title").notNull(),
+    status: text("status", { enum: videoStatuses }).notNull().default("readable"),
+    lastWatchedEpisodeId: text("last_watched_episode_id"),
+    lastWatchedPositionSeconds: integer("last_watched_position_seconds"),
+    lastWatchedAt: text("last_watched_at"),
+    hiddenAt: text("hidden_at"),
+    deletedAt: text("deleted_at"),
+    ...timestamps,
+  },
+  (table) => ({
+    statusIdx: index("videos_status_idx").on(table.status),
+    sortTitleIdx: index("videos_sort_title_idx").on(table.sortTitle),
+    rootSourceIdx: uniqueIndex("videos_root_source_idx").on(table.videoRootId, table.sourceKey),
+  }),
+);
+
+export const videoEpisodes = sqliteTable(
+  "video_episodes",
+  {
+    id: text("id").primaryKey(),
+    videoId: text("video_id")
+      .notNull()
+      .references(() => videos.id),
+    videoRootId: text("video_root_id")
+      .notNull()
+      .references(() => videoRoots.id),
+    title: text("title").notNull(),
+    sortTitle: text("sort_title").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    absolutePath: text("absolute_path").notNull(),
+    relativePath: text("relative_path").notNull(),
+    extension: text("extension").notNull(),
+    kind: text("kind", { enum: videoFileKinds }).notNull().default("file"),
+    sizeBytes: integer("size_bytes"),
+    mtimeMs: integer("mtime_ms"),
+    durationSeconds: integer("duration_seconds"),
+    isMissing: integer("is_missing", { mode: "boolean" }).notNull().default(false),
+    missingSince: text("missing_since"),
+    ...timestamps,
+  },
+  (table) => ({
+    videoOrderIdx: index("video_episodes_video_order_idx").on(table.videoId, table.sortOrder),
+    rootPathIdx: uniqueIndex("video_episodes_root_relative_path_idx").on(table.videoRootId, table.relativePath),
   }),
 );
 
@@ -213,6 +290,25 @@ export const comicTags = sqliteTable(
   }),
 );
 
+export const videoTags = sqliteTable(
+  "video_tags",
+  {
+    videoId: text("video_id")
+      .notNull()
+      .references(() => videos.id),
+    tagId: text("tag_id")
+      .notNull()
+      .references(() => tags.id),
+    source: text("source", { enum: ["scan", "metadata", "manual"] }).notNull().default("manual"),
+    isUserEdited: integer("is_user_edited", { mode: "boolean" }).notNull().default(false),
+    ...timestamps,
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.videoId, table.tagId] }),
+    tagIdx: index("video_tags_tag_idx").on(table.tagId),
+  }),
+);
+
 export const chapterTags = sqliteTable(
   "chapter_tags",
   {
@@ -253,6 +349,29 @@ export const readingProgress = sqliteTable(
   (table) => ({
     comicIdx: uniqueIndex("reading_progress_comic_idx").on(table.comicId),
     chapterIdx: index("reading_progress_chapter_idx").on(table.chapterId),
+  }),
+);
+
+export const videoProgress = sqliteTable(
+  "video_progress",
+  {
+    id: text("id").primaryKey(),
+    videoId: text("video_id")
+      .notNull()
+      .references(() => videos.id),
+    episodeId: text("episode_id")
+      .notNull()
+      .references(() => videoEpisodes.id),
+    positionSeconds: integer("position_seconds").notNull().default(0),
+    progressPercent: integer("progress_percent").notNull().default(0),
+    isCompleted: integer("is_completed", { mode: "boolean" }).notNull().default(false),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  },
+  (table) => ({
+    videoEpisodeIdx: uniqueIndex("video_progress_video_episode_idx").on(table.videoId, table.episodeId),
+    videoIdx: index("video_progress_video_idx").on(table.videoId),
   }),
 );
 
@@ -297,6 +416,45 @@ export const comicResources = sqliteTable(
   }),
 );
 
+export const videoSources = sqliteTable(
+  "video_sources",
+  {
+    id: text("id").primaryKey(),
+    videoId: text("video_id")
+      .notNull()
+      .references(() => videos.id),
+    site: text("site").notNull(),
+    sourceId: text("source_id"),
+    sourceUrl: text("source_url").notNull(),
+    originalTitle: text("original_title"),
+    coverUrl: text("cover_url"),
+    rawMetadataJson: text("raw_metadata_json"),
+    ...timestamps,
+  },
+  (table) => ({
+    videoIdx: index("video_sources_video_idx").on(table.videoId),
+    sourceIdx: uniqueIndex("video_sources_site_source_idx").on(table.site, table.sourceId),
+  }),
+);
+
+export const videoResources = sqliteTable(
+  "video_resources",
+  {
+    id: text("id").primaryKey(),
+    videoId: text("video_id").references(() => videos.id),
+    videoSourceId: text("video_source_id").references(() => videoSources.id),
+    resourceType: text("resource_type", { enum: ["http", "torrent", "magnet", "openlist"] }).notNull(),
+    displayLabel: text("display_label"),
+    resourceUrl: text("resource_url"),
+    redactedResource: text("redacted_resource"),
+    ...timestamps,
+  },
+  (table) => ({
+    videoIdx: index("video_resources_video_idx").on(table.videoId),
+    sourceIdx: index("video_resources_source_idx").on(table.videoSourceId),
+  }),
+);
+
 export const downloadTaskStatuses = ["queued", "submitted", "downloading", "running", "failed", "completed", "cancel_requested", "canceled"] as const;
 export const downloadTaskTypes = ["offline", "transfer"] as const;
 
@@ -305,6 +463,8 @@ export const downloadTasks = sqliteTable(
   {
     id: text("id").primaryKey(),
     comicResourceId: text("comic_resource_id").references(() => comicResources.id),
+    videoResourceId: text("video_resource_id").references(() => videoResources.id),
+    mediaType: text("media_type", { enum: ["comic", "video"] }).notNull().default("comic"),
     provider: text("provider").notNull(),
     status: text("status", { enum: downloadTaskStatuses })
       .notNull()
@@ -323,6 +483,8 @@ export const downloadTasks = sqliteTable(
   (table) => ({
     statusIdx: index("download_tasks_status_idx").on(table.status),
     resourceIdx: index("download_tasks_resource_idx").on(table.comicResourceId),
+    videoResourceIdx: index("download_tasks_video_resource_idx").on(table.videoResourceId),
+    mediaTypeIdx: index("download_tasks_media_type_idx").on(table.mediaType),
     typeIdx: index("download_tasks_type_idx").on(table.taskType),
     offlineTaskIdx: index("download_tasks_offline_task_idx").on(table.offlineTaskId),
   }),
@@ -510,6 +672,8 @@ export const mediaAssets = sqliteTable(
     comicId: text("comic_id").references(() => comics.id),
     chapterId: text("chapter_id").references(() => chapters.id),
     pageId: text("page_id").references(() => pages.id),
+    videoId: text("video_id").references(() => videos.id),
+    videoEpisodeId: text("video_episode_id").references(() => videoEpisodes.id),
     use: text("use", { enum: mediaAssetUses }).notNull(),
     cacheKey: text("cache_key").notNull(),
     width: integer("width").notNull(),
@@ -524,6 +688,8 @@ export const mediaAssets = sqliteTable(
     cacheKeyIdx: uniqueIndex("media_assets_cache_key_idx").on(table.cacheKey),
     comicIdx: index("media_assets_comic_idx").on(table.comicId),
     pageIdx: index("media_assets_page_idx").on(table.pageId),
+    videoIdx: index("media_assets_video_idx").on(table.videoId),
+    videoEpisodeIdx: index("media_assets_video_episode_idx").on(table.videoEpisodeId),
     lastAccessIdx: index("media_assets_last_access_idx").on(table.lastAccessAt),
   }),
 );

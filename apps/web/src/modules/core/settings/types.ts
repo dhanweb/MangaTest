@@ -34,4 +34,5 @@ export interface RuntimeSettings {
   aria2Enabled: boolean;
   aria2RpcUrl: string;
   aria2RpcToken: string;
+  potplayerExecutablePath?: string;
 }

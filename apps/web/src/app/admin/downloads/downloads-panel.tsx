@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionIcon, Badge, Box, Group, Paper, Select, Stack, Table, Tabs, Text, Tooltip } from "@mantine/core";
-import { ArrowDownToLine, BookOpen, ChevronDown, ChevronRight, CloudDownload, FolderOpen, FolderSearch, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDownToLine, BookOpen, ChevronDown, ChevronRight, CloudDownload, FolderOpen, FolderSearch, Play, Plus, RotateCcw, Trash2, Video } from "lucide-react";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -14,6 +14,7 @@ import type {
   DownloadProvider,
   DownloadTaskRecord,
   DownloadWorkerTickResult,
+  VideoDownloadTaskRecord,
 } from "@/modules/downloads";
 
 const PROVIDER_LABELS: Record<DownloadProvider, string> = {
@@ -109,6 +110,11 @@ export function DownloadsPanel({
   const [resourceItems, setResourceItems] = useState(resources);
   const [offlineTasks, setOfflineTasks] = useState(tasks.filter((t) => t.taskType === "offline"));
   const [transferTasks, setTransferTasks] = useState(tasks.filter((t) => t.taskType === "transfer"));
+  const [videoTasks, setVideoTasks] = useState<VideoDownloadTaskRecord[]>([]);
+  const [videoRoots, setVideoRoots] = useState<Array<{ id: string; absolutePath: string; displayName: string | null }>>([]);
+  const [videoTitle, setVideoTitle] = useState("");
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoRootId, setVideoRootId] = useState<string | null>(null);
   const [planItem, setPlanItem] = useState(dispatchPlan);
   const [activeTab, setActiveTab] = useAdminTabState<string | null>("downloadsActiveTab", "offline");
   const [selectedId, setSelectedId] = useAdminTabState<string | null>("resourceId", resources[0]?.id ?? null);
@@ -203,6 +209,12 @@ export function DownloadsPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    Promise.all([fetch("/api/downloads/videos").then((response) => response.json()), fetch("/api/video-roots").then((response) => response.json())])
+      .then(([taskPayload, rootPayload]) => { setVideoTasks(taskPayload.tasks ?? []); setVideoRoots(rootPayload.roots ?? []); setVideoRootId((current) => current ?? rootPayload.roots?.[0]?.id ?? null); })
+      .catch(() => undefined);
+  }, []);
+
   async function createTask() {
     if (!selected) return;
     setPendingCreate(true);
@@ -215,6 +227,15 @@ export function DownloadsPanel({
       else toast.success("已有相同任务，未重复创建");
       await refresh();
     }
+    setPendingCreate(false);
+  }
+
+  async function createVideoTask() {
+    if (!videoTitle.trim() || !videoUrl.trim() || !videoRootId) return;
+    setPendingCreate(true);
+    const response = await fetch("/api/downloads/videos", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: videoTitle, resourceUrl: videoUrl, videoRootId }) });
+    const payload = await response.json();
+    if (!response.ok) toast.error(payload.error ?? "创建视频下载任务失败"); else { toast.success("视频下载任务已创建，默认使用 aria2"); setVideoTitle(""); setVideoUrl(""); const latest = await fetch("/api/downloads/videos").then((res) => res.json()); setVideoTasks(latest.tasks ?? []); }
     setPendingCreate(false);
   }
 
@@ -327,6 +348,7 @@ export function DownloadsPanel({
 
       <Tabs value={activeTab ?? "offline"} onChange={(v) => setActiveTab(v as string)}>
         <Tabs.List mb="lg">
+          <Tabs.Tab value="video" leftSection={<Video size={14} />}>视频下载 {videoTasks.length > 0 ? `(${videoTasks.length})` : ""}</Tabs.Tab>
           <Tabs.Tab value="offline" leftSection={<CloudDownload size={14} />}>
             离线下载 {offlineTasks.length > 0 ? `(${offlineTasks.length})` : ""}
           </Tabs.Tab>
@@ -334,6 +356,29 @@ export function DownloadsPanel({
             传输列表 {transferTasks.length > 0 ? `(${transferTasks.length})` : ""}
           </Tabs.Tab>
         </Tabs.List>
+
+        <Tabs.Panel value="video">
+          <Group gap="lg" mb="lg" px="md" py="sm" style={{ background: "var(--mantine-color-pink-0)", borderRadius: 10 }}>
+            <MiniStat label="任务数" value={String(videoTasks.length)} />
+            <MiniStat label="下载中" value={String(videoTasks.filter((task) => task.status === "downloading" || task.status === "running").length)} />
+            <MiniStat label="已完成" value={String(videoTasks.filter((task) => task.status === "completed").length)} />
+            <MiniStat label="失败" value={String(videoTasks.filter((task) => task.status === "failed").length)} />
+          </Group>
+          <Paper p="md" mb="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10 }}>
+            <Text size="sm" fw={700} mb="sm">新建视频下载</Text>
+            <Group align="flex-end" gap="sm" wrap="wrap">
+              <AppInput label="视频标题" placeholder="下载后显示的标题" value={videoTitle} onChange={(event) => setVideoTitle(event.currentTarget.value)} style={{ width: 220 }} size="xs" />
+              <AppInput label="直链 URL" placeholder="https://..." value={videoUrl} onChange={(event) => setVideoUrl(event.currentTarget.value)} style={{ flex: "1 1 360px" }} size="xs" />
+              <Select label="视频根目录" placeholder="选择根目录" data={videoRoots.map((root) => ({ value: root.id, label: root.displayName || root.absolutePath }))} value={videoRootId} onChange={setVideoRootId} style={{ width: 220 }} size="xs" />
+              <AppButton leftSection={<Plus size={15} />} loading={pendingCreate} disabled={!videoTitle.trim() || !videoUrl.trim() || !videoRootId} onClick={() => void createVideoTask()} size="xs">创建任务</AppButton>
+            </Group>
+            <Text size="xs" c="ink.5" mt="sm">默认使用 aria2，下载到所选视频根目录的“下载入库/标题”目录，完成后自动扫描。</Text>
+          </Paper>
+          <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10 }}>
+            <Text size="sm" fw={700} mb="sm">视频下载任务</Text>
+            {videoTasks.length ? <Table striped highlightOnHover><Table.Thead><Table.Tr><Table.Th>标题</Table.Th><Table.Th>Provider</Table.Th><Table.Th>状态</Table.Th><Table.Th>目标目录</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{videoTasks.map((task) => <Table.Tr key={task.id}><Table.Td><Text size="sm" fw={700}>{task.title}</Text><Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{task.resourceUrl}</Text></Table.Td><Table.Td>aria2</Table.Td><Table.Td><StatusBadge status={task.status} />{task.errorMessage ? <Text size="xs" c="red">{task.errorMessage}</Text> : null}</Table.Td><Table.Td><Text size="xs" style={{ wordBreak: "break-all" }}>{task.targetDirectory || "—"}</Text></Table.Td></Table.Tr>)}</Table.Tbody></Table> : <Text size="sm" c="ink.5" ta="center" py="md">暂无视频下载任务</Text>}
+          </Paper>
+        </Tabs.Panel>
 
         {/* ===== 离线下载 Tab ===== */}
         <Tabs.Panel value="offline">

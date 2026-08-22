@@ -123,6 +123,14 @@ export async function PATCH(request: Request) {
     input.aria2RpcToken = payload.aria2RpcToken.trim();
   }
 
+  if (typeof payload.potplayerExecutablePath === "string") {
+    const normalized = normalizeOptionalAbsolutePath(payload.potplayerExecutablePath);
+    if (normalized.error) {
+      return Response.json({ error: `PotPlayer 路径必须是绝对路径。` }, { status: 400 });
+    }
+    input.potplayerExecutablePath = normalized.value;
+  }
+
   try {
     return Response.json({ settings: await saveRuntimeSettings(input) });
   } catch (error) {

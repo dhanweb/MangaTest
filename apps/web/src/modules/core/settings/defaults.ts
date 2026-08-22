@@ -24,6 +24,7 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   aria2Enabled: false,
   aria2RpcUrl: "",
   aria2RpcToken: "",
+  potplayerExecutablePath: "",
 };
 
 export const settingDefinitions = [
@@ -173,5 +174,12 @@ export const settingDefinitions = [
     description: "aria2 RPC secret token（--rpc-secret），留空表示无密钥。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.aria2RpcToken,
+  },
+  {
+    key: "potplayerExecutablePath",
+    label: "PotPlayer 路径",
+    description: "用于由本机服务启动 PotPlayer 的可执行文件绝对路径；也可使用浏览器 potplayer:// 协议。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.potplayerExecutablePath,
   },
 ] satisfies Array<SettingDefinition<RuntimeSettings[keyof RuntimeSettings]>>;

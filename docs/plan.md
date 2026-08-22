@@ -27,6 +27,20 @@ MangaTest 是一个本地自托管的个人漫画库系统。
 - 章节允许没有标题，单章节漫画不强行显示“第 1 章”。
 - 章节默认自然排序，后台可手动拖拽并保存 `sort_order`。
 
+视频库：
+
+- 视频使用独立的一个或多个 video root，不和 manga root 混用。
+- video root 下的单个视频文件是单集视频；子目录是一个视频实体，目录内文件是多集。
+- 单文件视频的标题来自文件名；多集视频的标题来自目录名，集标题来自文件名；默认去掉扩展名。
+- MVP 扫描 `.mp4`、`.mkv`、`.avi`、`.mov`、`.webm`、`.m4v`、`.ts`，不扫描视频压缩包。
+- 集数默认自然排序，后台保留手动调整顺序的能力。
+- 视频时长保存为整数秒，无法读取时长时允许为空。
+- 视频详情页使用原生 video 播放器但不自动播放；播放进度绑定 `video + episode`，保存当前秒数、百分比和完成状态。
+- 封面从视频首帧按需生成并缓存，失败时使用占位图。
+- 视频标签复用全局 `tags` 字典，新增 `video_tags` 关联表；无命名空间的来源标签内部使用 `general` namespace，展示时隐藏 namespace。
+- 视频下载任务支持后台输入直链，默认使用 aria2，完成后触发视频扫描；后续保留 Metadata Ingest/浏览器插件提交视频 metadata 和资源的能力，但本次不开发插件。
+- PotPlayer 同时支持配置可执行文件路径后由本机服务启动，以及浏览器 `potplayer://` 协议启动。
+
 本地文件与版本：
 
 - 一个 `comic` 可以关联多个 `local_file`。
@@ -133,6 +147,8 @@ Library 不关心漫画元数据从哪里来，也不关心下载怎么发生。
 - 启动时不自动扫描，MVP 先由后台手动触发扫描。
 - 重复扫描默认新建记录，并在后台提示疑似重复，不自动合并。
 
+本地视频目录由独立的 `video-library` 模块负责，保持与 Library 类似的应用服务边界：扫描 video root、创建视频和集数、列表/详情/搜索、标签关联、缺失文件维护和视频播放进度。视频不复用漫画的 chapter/page 业务实体。
+
 ### 3.3 Tags 模块
 
 标签模块是独立模块，不属于插件，也不属于下载。
@@ -204,6 +220,7 @@ Media Assets 负责应用生成的图片资产。
 职责：
 
 - 从本地漫画目录、zip、cbz 中提取封面
+- 从本地视频按需截取首帧封面
 - 生成列表封面缩略图
 - 生成 reader 缩略图导航需要的页面预览图
 - 管理缩略图缓存、失效和重新生成
@@ -290,6 +307,7 @@ Downloads 负责资源获取。
 - aria2 下载直接写入入库目录（默认下载目录或 manga root/下载入库），完成后不再迁移文件，保证 aria2 日志路径仍可打开
 - 完成后移动到 manga root
 - 触发 Library / Local Files 重新扫描
+- 支持 `media_type=video` 的下载任务，默认使用 aria2，完成后触发 video-library 扫描；未来 Metadata Ingest 可以创建视频资源，但本次不开发插件端。
 
 Downloads 的输入不仅限于漫画资源。后续视频下载可以复用同一套任务和 provider 边界：插件只提交视频标题、来源页面、媒体信息和下载地址，provider 选择、任务状态、重试和文件落盘仍由后端负责。视频适配器不应在浏览器端实现下载器。
 
@@ -302,6 +320,7 @@ OpenList 登录、OpenList token、115 离线任务、云端目录扫描都属�
 - Downloads 只消费 `comic_resource`，不直接理解标签和漫画展示规则。
 - 下载完成后触发 Local Files / Library 重新扫描；aria2 直写入库时只登记 finalPath 并扫描，不移动文件。
 - 下载目标默认是 `manga root/下载入库/标题/`，后台允许修改目标目录。
+- 视频下载目标默认是 `video root/下载入库/标题/`，后台允许修改目标目录。
 - 下载任务失败默认手动重试，自动重试次数后续可配置。
 
 ### 3.9 Admin 模块
@@ -414,6 +433,10 @@ apps/
             page.tsx
             [id]/
               page.tsx
+          videos/
+            page.tsx
+            [id]/
+              page.tsx
           reader/
             [comicId]/
               page.tsx
@@ -423,6 +446,8 @@ apps/
         admin/
           page.tsx
           comics/
+            page.tsx
+          videos/
             page.tsx
           files/
             page.tsx
@@ -446,6 +471,16 @@ apps/
           pages/
             [pageId]/
               route.ts
+          videos/
+            route.ts
+            [id]/
+              route.ts
+              stream/
+                route.ts
+              open-potplayer/
+                route.ts
+          video-progress/
+            route.ts
           tags/
             route.ts
           local-files/
@@ -471,6 +506,11 @@ apps/
           events.ts
           settings.ts
         library/
+          domain/
+          application/
+          infrastructure/
+          ui/
+        video-library/
           domain/
           application/
           infrastructure/
@@ -603,6 +643,7 @@ api/             该模块专用请求解析和响应 DTO
 - `app/admin` 是后台入口，只做管理编排和展示。
 - `app/api` 只负责请求解析、鉴权、调用模块 service、返回响应。
 - `modules/library` 是本地漫画库模块，不再额外建立平级 `comic` 模块；`comic` 是核心实体名，不是独立业务边界。
+- `modules/video-library` 是本地视频库模块；视频集数是可播放文件实体，不复用漫画的 `chapter`/`page`。
 - `modules/metadata-ingest` 不命名为 `import`，避免和本地扫描入库混淆。
 - `modules/downloads/providers/openlist` 是 provider adapter，不建立平级 `modules/openlist`。
 - `modules/media-assets` 比单独 `thumbnail` 更宽，既覆盖封面，也覆盖 reader 缩略图。
@@ -621,6 +662,7 @@ api/             该模块专用请求解析和响应 DTO
 
 - `settings`：系统设置，例如监听地址、缓存目录、缓存上限、阅读偏好。
 - `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode`。
+- `video_roots`：视频根目录，保存绝对路径、启用状态和扫描模式。
 - `scan_sessions`：扫描批次，保存开始时间、结束时间、root、统计结果、错误摘要。
 - `comics`：漫画业务实体，保存展示标题、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
 - `local_files`：本地文件实体，保存 root、路径、类型、size、mtime、可选 hash、是否主文件、缺失状态。
@@ -632,6 +674,11 @@ api/             该模块专用请求解析和响应 DTO
 - `reading_progress`：阅读进度，保存 comic、chapter、page、百分比、更新时间。
 - `comic_sources`：来源站元数据，保存站点、来源 ID、URL、原始标题、封面 URL。
 - `comic_resources`：可下载资源，保存资源类型、脱敏展示字段、完整资源链接密文或受控字段。
+- `videos`：视频业务实体，保存标题、状态、last-watched 快照和本地集数关系。
+- `video_episodes`：视频集数和可播放文件，保存视频归属、标题、路径、自然/手动排序、时长秒数、文件状态。
+- `video_tags`：视频与全局 `tags` 的关联，支持 manual/metadata 来源和用户编辑保护。
+- `video_progress`：视频集数播放进度，保存视频、集数、当前秒数、百分比、完成状态和更新时间。
+- `video_sources` / `video_resources`：预留未来插件 metadata 和资源导入，结构与 comic source/resource 解耦但采用相同规范化规则。
 - `download_tasks`：下载任务，第四阶段启用。
 - `media_assets`：生成的封面和缩略图记录，保存用途类型、尺寸、key、路径、lastAccess、过期时间。
 - `cache_entries`：压缩包文件列表、最近访问页面等缓存记录。
@@ -649,6 +696,10 @@ chapter    * ── * tag   (reserved)
 comic      1 ── * comic_source
 comic      1 ── * comic_resource
 comic      1 ── * reading_progress
+video_root 1 ── * video_episode
+video      1 ── * video_episode
+video      * ── * tag
+video      1 ── * video_progress
 ```
 
 数据安全要求：
@@ -657,6 +708,7 @@ comic      1 ── * reading_progress
 - `comic_resource` 可以保存完整资源链接，但日志和常规 UI 必须脱敏。
 - `operation_logs` 不记录完整 magnet。
 - manga root 必须是绝对路径，且不得默默自动创建父目录。
+- video root 必须是绝对路径；视频播放、首帧和 PotPlayer 启动 API 只接受受控的 `videoId`/`episodeId`，不接受客户端任意路径。
 
 ## 6. 模块交互示例
 
@@ -674,6 +726,24 @@ Library: create comic/chapter/page records
 Tags: attach basic tags if present
   ↓
 Admin 展示扫描结果
+```
+
+### 6.4 视频扫描与播放
+
+```text
+Admin 点击扫描 video root
+  ↓
+video-library application: scanVideoRoot()
+  ↓
+Local Files: enumerate supported files and child directories
+  ↓
+video-library: create videos/video_episodes and extract file facts
+  ↓
+Media Assets: lazily generate first-frame cover
+  ↓
+Video detail: select episode without autoplay
+  ↓
+Video Player: stream by episodeId and throttle-save seconds progress
 ```
 
 ### 6.2 插件导入 metadata
@@ -776,6 +846,20 @@ Provider: 获取或下载媒体文件
 - 后台首页展示扫描状态、缺失文件、疑似重复、最近危险操作、存储和缓存状态
 - 设置页包含 manga root、监听地址、缓存目录、缓存上限、备份导出、主题和阅读偏好
 
+视频功能作为当前视频扩展阶段纳入 MVP：
+
+- 一个或多个 video root 绝对路径设置和手动扫描
+- 支持单文件单集、子目录多集视频
+- 支持 `.mp4`、`.mkv`、`.avi`、`.mov`、`.webm`、`.m4v`、`.ts`
+- 视频列表、搜索、标签筛选、详情和原生 video 播放
+- 首帧封面懒生成和缓存
+- 视频时长秒数、文件大小、格式展示
+- 集数自然排序和后台手动排序
+- 秒级播放进度、继续观看和已看状态
+- 视频管理、缺失检查、路径修复、隐藏/恢复、软删除和标题/标签编辑
+- 下载任务“视频下载”分类，后台直链创建，aria2 默认 provider，完成后扫描入库
+- PotPlayer 可执行文件路径设置、服务端启动按钮和 `potplayer://` 协议按钮
+
 第一阶段不做：
 
 - 浏览器插件
@@ -791,6 +875,9 @@ Provider: 获取或下载媒体文件
 - 启动时自动扫描
 - 列表页批量插件采集
 - rar / cbr / 7z / pdf
+- 视频浏览器插件采集；仅保留未来 Metadata Ingest 的后端扩展位
+- 视频自动播放和自动切换下一集
+- 视频压缩包扫描
 
 ## 8. 第二阶段
 

@@ -37,6 +37,20 @@ export function bootstrapDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS manga_roots_absolute_path_idx
       ON manga_roots (absolute_path);
 
+    CREATE TABLE IF NOT EXISTS video_roots (
+      id TEXT PRIMARY KEY NOT NULL,
+      absolute_path TEXT NOT NULL,
+      display_name TEXT,
+      scan_mode TEXT NOT NULL DEFAULT 'children_as_videos',
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      last_scan_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS video_roots_absolute_path_idx
+      ON video_roots (absolute_path);
+
     CREATE TABLE IF NOT EXISTS scan_sessions (
       id TEXT PRIMARY KEY NOT NULL,
       manga_root_id TEXT REFERENCES manga_roots(id),
@@ -86,6 +100,58 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS comics_parent_idx
       ON comics (parent_comic_id);
+
+    CREATE TABLE IF NOT EXISTS videos (
+      id TEXT PRIMARY KEY NOT NULL,
+      video_root_id TEXT NOT NULL REFERENCES video_roots(id),
+      source_key TEXT NOT NULL,
+      display_title TEXT NOT NULL,
+      file_title TEXT NOT NULL,
+      sort_title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'readable',
+      last_watched_episode_id TEXT,
+      last_watched_position_seconds INTEGER,
+      last_watched_at TEXT,
+      hidden_at TEXT,
+      deleted_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS videos_status_idx
+      ON videos (status);
+
+    CREATE INDEX IF NOT EXISTS videos_sort_title_idx
+      ON videos (sort_title);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS videos_root_source_idx
+      ON videos (video_root_id, source_key);
+
+    CREATE TABLE IF NOT EXISTS video_episodes (
+      id TEXT PRIMARY KEY NOT NULL,
+      video_id TEXT NOT NULL REFERENCES videos(id),
+      video_root_id TEXT NOT NULL REFERENCES video_roots(id),
+      title TEXT NOT NULL,
+      sort_title TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      absolute_path TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      extension TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'file',
+      size_bytes INTEGER,
+      mtime_ms INTEGER,
+      duration_seconds INTEGER,
+      is_missing INTEGER NOT NULL DEFAULT 0,
+      missing_since TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS video_episodes_video_order_idx
+      ON video_episodes (video_id, sort_order);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS video_episodes_root_relative_path_idx
+      ON video_episodes (video_root_id, relative_path);
 
     CREATE TABLE IF NOT EXISTS local_files (
       id TEXT PRIMARY KEY NOT NULL,
@@ -179,6 +245,19 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS comic_tags_tag_idx
       ON comic_tags (tag_id);
 
+    CREATE TABLE IF NOT EXISTS video_tags (
+      video_id TEXT NOT NULL REFERENCES videos(id),
+      tag_id TEXT NOT NULL REFERENCES tags(id),
+      source TEXT NOT NULL DEFAULT 'manual',
+      is_user_edited INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (video_id, tag_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS video_tags_tag_idx
+      ON video_tags (tag_id);
+
     CREATE TABLE IF NOT EXISTS chapter_tags (
       chapter_id TEXT NOT NULL REFERENCES chapters(id),
       tag_id TEXT NOT NULL REFERENCES tags(id),
@@ -206,6 +285,22 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS reading_progress_chapter_idx
       ON reading_progress (chapter_id);
+
+    CREATE TABLE IF NOT EXISTS video_progress (
+      id TEXT PRIMARY KEY NOT NULL,
+      video_id TEXT NOT NULL REFERENCES videos(id),
+      episode_id TEXT NOT NULL REFERENCES video_episodes(id),
+      position_seconds INTEGER NOT NULL DEFAULT 0,
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      is_completed INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS video_progress_video_episode_idx
+      ON video_progress (video_id, episode_id);
+
+    CREATE INDEX IF NOT EXISTS video_progress_video_idx
+      ON video_progress (video_id);
 
     CREATE TABLE IF NOT EXISTS comic_sources (
       id TEXT PRIMARY KEY NOT NULL,
@@ -244,9 +339,48 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS comic_resources_source_idx
       ON comic_resources (comic_source_id);
 
+    CREATE TABLE IF NOT EXISTS video_sources (
+      id TEXT PRIMARY KEY NOT NULL,
+      video_id TEXT NOT NULL REFERENCES videos(id),
+      site TEXT NOT NULL,
+      source_id TEXT,
+      source_url TEXT NOT NULL,
+      original_title TEXT,
+      cover_url TEXT,
+      raw_metadata_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS video_sources_video_idx
+      ON video_sources (video_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS video_sources_site_source_idx
+      ON video_sources (site, source_id);
+
+    CREATE TABLE IF NOT EXISTS video_resources (
+      id TEXT PRIMARY KEY NOT NULL,
+      video_id TEXT REFERENCES videos(id),
+      video_source_id TEXT REFERENCES video_sources(id),
+      resource_type TEXT NOT NULL,
+      display_label TEXT,
+      resource_url TEXT,
+      redacted_resource TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS video_resources_video_idx
+      ON video_resources (video_id);
+
+    CREATE INDEX IF NOT EXISTS video_resources_source_idx
+      ON video_resources (video_source_id);
+
     CREATE TABLE IF NOT EXISTS download_tasks (
       id TEXT PRIMARY KEY NOT NULL,
       comic_resource_id TEXT REFERENCES comic_resources(id),
+      video_resource_id TEXT REFERENCES video_resources(id),
+      media_type TEXT NOT NULL DEFAULT 'comic',
       provider TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'queued',
       task_type TEXT NOT NULL DEFAULT 'transfer',
@@ -265,6 +399,12 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS download_tasks_resource_idx
       ON download_tasks (comic_resource_id);
+
+    CREATE INDEX IF NOT EXISTS download_tasks_video_resource_idx
+      ON download_tasks (video_resource_id);
+
+    CREATE INDEX IF NOT EXISTS download_tasks_media_type_idx
+      ON download_tasks (media_type);
 
     CREATE TABLE IF NOT EXISTS download_task_preparations (
       id TEXT PRIMARY KEY NOT NULL,
@@ -442,6 +582,8 @@ export function bootstrapDatabase() {
       comic_id TEXT REFERENCES comics(id),
       chapter_id TEXT REFERENCES chapters(id),
       page_id TEXT REFERENCES pages(id),
+      video_id TEXT REFERENCES videos(id),
+      video_episode_id TEXT REFERENCES video_episodes(id),
       use TEXT NOT NULL,
       cache_key TEXT NOT NULL,
       width INTEGER NOT NULL,
@@ -462,6 +604,12 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS media_assets_page_idx
       ON media_assets (page_id);
+
+    CREATE INDEX IF NOT EXISTS media_assets_video_idx
+      ON media_assets (video_id);
+
+    CREATE INDEX IF NOT EXISTS media_assets_video_episode_idx
+      ON media_assets (video_episode_id);
 
     CREATE INDEX IF NOT EXISTS media_assets_last_access_idx
       ON media_assets (last_access_at);
@@ -546,6 +694,10 @@ export function bootstrapDatabase() {
   ensureColumn("download_tasks", "offline_task_id", "TEXT");
   ensureColumn("download_tasks", "remote_task_id", "TEXT");
   ensureColumn("download_tasks", "remote_path", "TEXT");
+  ensureColumn("download_tasks", "video_resource_id", "TEXT");
+  ensureColumn("download_tasks", "media_type", "TEXT NOT NULL DEFAULT 'comic'");
+  ensureColumn("media_assets", "video_id", "TEXT");
+  ensureColumn("media_assets", "video_episode_id", "TEXT");
 
   // Create new indices if they do not exist
   const sqlite2 = getSqlite();
