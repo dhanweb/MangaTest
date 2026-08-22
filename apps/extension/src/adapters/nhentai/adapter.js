@@ -45,6 +45,18 @@
       return false;
     }
 
+    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      try {
+        await chrome.runtime.sendMessage({
+          type: "MANGATEST_NHENTAI_TORRENT_INTENT",
+          sourceId: `nhentai.net${context.location.pathname.replace(/\/+$/, "") || "/"}`,
+          sourceUrl: context.location.href,
+        });
+      } catch {
+        // The download event can still be recognized from its nhentai URL.
+      }
+    }
+
     torrentMenuItem.click();
     return true;
   }

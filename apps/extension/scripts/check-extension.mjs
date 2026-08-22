@@ -15,10 +15,12 @@ assert(manifest.permissions.includes("scripting"), "scripting permission is requ
 assert(manifest.permissions.includes("storage"), "storage permission is required");
 assert(manifest.permissions.includes("downloads"), "downloads permission is required");
 assert(manifest.host_permissions?.includes("https://nhentai.net/*"), "nhentai host permission is required");
+assert(manifest.host_permissions?.includes("https://*.nhentai.net/*"), "nhentai subdomain host permission is required");
 
 const referencedFiles = [
   manifest.action.default_popup,
   manifest.background?.service_worker,
+  "src/background/nhentai-download-capture.js",
   "src/adapters/exhentai/adapter.js",
   "src/adapters/nhentai/adapter.js",
   "src/runtime/adapter-registry.js",
@@ -107,6 +109,7 @@ checkFixture({
 });
 
 await checkTorrentMagnet();
+checkNhentaiDownloadCapture();
 
 console.log("Extension manifest and collector checks passed.");
 
@@ -290,6 +293,26 @@ async function checkTorrentMagnet() {
   assert(magnet.startsWith("magnet:?xt=urn%3Abtih%3A"), "torrentToMagnet must produce a btih magnet");
   assert(magnet.includes("dn=demo"), "torrentToMagnet must include torrent name");
   assert(magnet.includes("tr=http%3A%2F%2Ftracker"), "torrentToMagnet must include tracker");
+}
+
+function checkNhentaiDownloadCapture() {
+  const context = { URL, Date, self: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/background/nhentai-download-capture.js"), "utf8"), context, {
+    filename: "src/background/nhentai-download-capture.js",
+  });
+
+  const capture = context.self.MangaTestNhentaiDownloadCapture;
+  const torrentUrl = "https://i2.nhentai.net/download/4132256?gid=674903&fmt=torrent&sig=mock";
+  const zipUrl = "https://i2.nhentai.net/download/4132256?gid=674903&fmt=zip&sig=mock";
+  assert(capture.isNhentaiTorrentDownloadUrl(torrentUrl), "nhentai torrent URL must be recognized");
+  assert(!capture.isNhentaiTorrentDownloadUrl(zipUrl), "nhentai ZIP URL must be ignored");
+  assert(capture.isTorrentDownload({ filename: "" }, torrentUrl), "nhentai torrent URL must identify a torrent");
+  assert(capture.isUsableTabId(42), "zero-based Chrome tab IDs must be accepted");
+  assert(!capture.isUsableTabId(-1), "unknown Chrome tab IDs must be rejected");
+
+  const pending = new Map([[42, { createdAt: 1000 }]]);
+  assert(capture.activePendingTabIds(pending, 1000)[0] === 42, "pending torrent intent must retain its tab ID");
 }
 
 function findElementByAttr(html, tag, attrName, attrValue, location) {

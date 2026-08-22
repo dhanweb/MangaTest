@@ -1,4 +1,4 @@
-importScripts("torrent-magnet.js");
+importScripts("nhentai-download-capture.js", "torrent-magnet.js");
 
 function log(...args) {
   console.log("[MangaTest:后台]", ...args);
@@ -6,6 +6,8 @@ function log(...args) {
 
 const processingDownloadIds = new Set();
 const capturedDownloadIds = new Set();
+const pendingNhentaiTorrentIntents = new Map();
+const nhentaiCapture = self.MangaTestNhentaiDownloadCapture;
 
 chrome.runtime.onInstalled.addListener(async () => {
   log("后台服务已启动");
@@ -59,6 +61,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }, Math.max(0, delayMs));
     sendResponse({ ok: true, tabId });
+    return false;
+  }
+
+  if (message?.type === "MANGATEST_NHENTAI_TORRENT_INTENT") {
+    const tabId = sender.tab?.id;
+    if (!nhentaiCapture.isUsableTabId(tabId)) {
+      sendResponse({ ok: false, error: "no tab" });
+      return false;
+    }
+
+    pendingNhentaiTorrentIntents.set(tabId, {
+      createdAt: Date.now(),
+      sourceId: typeof message.sourceId === "string" ? message.sourceId : "",
+      sourceUrl: typeof message.sourceUrl === "string" ? message.sourceUrl : "",
+    });
+    sendResponse({ ok: true });
     return false;
   }
 
@@ -129,26 +147,44 @@ async function notifySourceTabs(message) {
 }
 
 async function captureNhentaiTorrentDownload(downloadItem) {
-  if (typeof downloadItem?.tabId !== "number") return;
   if (capturedDownloadIds.has(downloadItem.id) || processingDownloadIds.has(downloadItem.id)) return;
   processingDownloadIds.add(downloadItem.id);
 
   try {
-    const tab = await chrome.tabs.get(downloadItem.tabId);
-    if (!isNhentaiGalleryUrl(tab?.url)) return;
-
     const resourceUrl = downloadItem.finalUrl || downloadItem.url;
-    if (!isTorrentDownload(downloadItem, resourceUrl)) return;
+    if (!nhentaiCapture.isTorrentDownload(downloadItem, resourceUrl) && !nhentaiCapture.isNhentaiTorrentDownloadUrl(resourceUrl)) return;
 
-    const response = await chrome.tabs.sendMessage(downloadItem.tabId, {
-      type: "MANGATEST_NHENTAI_TORRENT_CAPTURED",
+    const tabId = await resolveNhentaiCaptureTabId(downloadItem);
+    if (!nhentaiCapture.isUsableTabId(tabId)) return;
+
+    const intent = pendingNhentaiTorrentIntents.get(tabId) || null;
+    const label = torrentDownloadLabel(downloadItem);
+    log("识别到 NHentai Torrent 下载", {
       downloadId: downloadItem.id,
-      url: resourceUrl,
-      label: torrentDownloadLabel(downloadItem),
+      tabId,
+      地址: String(resourceUrl || "").slice(0, 120),
+      文件名: label,
     });
+
+    let response = null;
+    try {
+      response = await chrome.tabs.sendMessage(tabId, {
+        type: "MANGATEST_NHENTAI_TORRENT_CAPTURED",
+        downloadId: downloadItem.id,
+        url: resourceUrl,
+        label,
+      });
+    } catch (error) {
+      log("详情页消息发送失败，改用后台提交", { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    if (!response?.ok) {
+      response = await submitNhentaiTorrentFromCache(resourceUrl, label, intent);
+    }
 
     if (response?.ok) {
       capturedDownloadIds.add(downloadItem.id);
+      pendingNhentaiTorrentIntents.delete(tabId);
       await chrome.downloads.cancel(downloadItem.id).catch(() => undefined);
     }
   } catch (error) {
@@ -158,20 +194,55 @@ async function captureNhentaiTorrentDownload(downloadItem) {
   }
 }
 
-function isNhentaiGalleryUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    return /(^|\.)nhentai\.net$/.test(url.hostname) && /^\/g\/\d+\/?$/.test(url.pathname);
-  } catch {
-    return false;
+async function resolveNhentaiCaptureTabId(downloadItem) {
+  if (nhentaiCapture.isUsableTabId(downloadItem?.tabId)) {
+    return downloadItem.tabId;
   }
+
+  for (const tabId of nhentaiCapture.activePendingTabIds(pendingNhentaiTorrentIntents)) {
+    try {
+      await chrome.tabs.get(tabId);
+      return tabId;
+    } catch {
+      pendingNhentaiTorrentIntents.delete(tabId);
+    }
+  }
+
+  return null;
 }
 
-function isTorrentDownload(downloadItem, resourceUrl) {
-  const url = String(resourceUrl || "");
-  const filename = String(downloadItem?.filename || "");
-  const mime = String(downloadItem?.mime || "");
-  return /\.torrent(?:[?#]|$)/i.test(url) || /\.torrent$/i.test(filename) || /bittorrent/i.test(mime);
+async function submitNhentaiTorrentFromCache(resourceUrl, label, intent) {
+  const expectedSourceId = intent?.sourceId || nhentaiSourceIdFromTorrentUrl(resourceUrl);
+  if (!expectedSourceId) {
+    return { ok: false, error: "无法确定 NHentai 漫画来源" };
+  }
+
+  const stored = await chrome.storage.local.get({ lastPageMetadata: null, lastExhentaiMetadata: null });
+  const metadata = stored.lastPageMetadata || stored.lastExhentaiMetadata;
+  if (!metadata || metadata.site !== "nhentai.net" || metadata.sourceId !== expectedSourceId) {
+    return { ok: false, error: "没有匹配的 NHentai 页面元数据" };
+  }
+
+  const resources = await resolveResources([{ type: "torrent", url: resourceUrl, label }]);
+  if (resources.length === 0) {
+    return { ok: false, error: "Torrent 转换失败" };
+  }
+
+  return handleBackendRequest({
+    method: "POST",
+    endpoint: "/api/metadata/import-with-magnet",
+    body: { ...metadata, resources },
+  });
+}
+
+function nhentaiSourceIdFromTorrentUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const galleryId = url.searchParams.get("gid");
+    return /^\d+$/.test(galleryId || "") ? `nhentai.net/g/${galleryId}` : "";
+  } catch {
+    return "";
+  }
 }
 
 function torrentDownloadLabel(downloadItem) {

@@ -32,7 +32,7 @@ When the status panel shows a single local match, enable "提交到本地漫画"
 7. Click "提交入库".
 8. Confirm Admin > 漫画管理 shows a remote-only record or the chosen matched local record.
 
-For an NHentai gallery, the adapter keeps metadata collection and download handling on the same detail page. It triggers only the native `Torrent` menu item; the service worker captures the resulting `.torrent` browser download, forwards its URL through the existing torrent-to-magnet flow, and leaves ZIP/CBZ untouched.
+For an NHentai gallery, the adapter keeps metadata collection and download handling on the same detail page. It triggers only the native `Torrent` menu item; the service worker recognizes NHentai's signed `fmt=torrent` download URL, forwards it through the existing torrent-to-magnet flow, and can fall back to cached page metadata if the browser navigates away before the content script responds. ZIP/CBZ downloads remain untouched.
 
 ## Verification
 
