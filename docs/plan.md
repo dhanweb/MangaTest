@@ -369,6 +369,13 @@ Collections 是后续阅读组织模块。
 - `background`：service worker、跨 tab / 跨页面协调、队列和需要扩展权限的动作；不解析站点 DOM
 - `popup`：设置、预览、状态和手动触发；不直接读取站点 DOM，也不保存站点规则
 
+详情页状态提示的内容和状态逻辑由 common injector 负责，挂载位置由 page handler 可选提供 `statusPlacement`：
+
+- 默认使用 viewport 模式，固定在右上角（`top: 16px; right: 16px`）。
+- viewport 模式支持 `top`、`right`、`bottom`、`left` 四边 CSS 偏移；数字值按像素处理。
+- custom 模式提供 `mount({ element, document, location })`，由适配层选择目标 DOM、插入方式和元素样式。
+- custom 挂载失败时回退到默认 viewport 位置；操作面板仍属于 common injector 的右下角 UI。
+
 站点适配器应以能力和页面类型为单位组织，而不是把所有网站逻辑堆在一个 `site-adapters.js` 中。一个站点可以有多个页面 handler，一个页面也可以暴露多个能力：
 
 ```text

@@ -50,4 +50,26 @@ The content script is assembled from independent layers:
 
 The first adapters are ExHentai (`src/adapters/exhentai/adapter.js`) and NHentai (`src/adapters/nhentai/adapter.js`). ExHentai keeps separate detail and torrent-page handlers while sharing the generic backend and submission flows.
 
+详情页“已下载 / 已入库 / 未下载”等状态提示由 common injector 统一渲染，默认固定在右上角。站点 page handler 可以通过 `statusPlacement` 调整位置：
+
+```js
+statusPlacement: { mode: "viewport", top: "72px", right: "16px" }
+```
+
+如果站点需要挂到自己的 DOM 结构中，可以完全接管插入：
+
+```js
+statusPlacement: {
+  mode: "custom",
+  mount({ element, document }) {
+    const target = document.querySelector(".site-header");
+    if (!target) return false;
+    target.appendChild(element);
+    return true;
+  },
+}
+```
+
+自定义挂载返回 `false` 或抛出异常时，会回退到默认右上角；操作面板本身仍由 common injector 固定在右下角。
+
 For ExHentai, `.torrent` URLs are not sent to MangaTest when conversion succeeds. The extension submits generated magnet links instead.
