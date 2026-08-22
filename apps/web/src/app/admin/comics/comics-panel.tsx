@@ -1,11 +1,12 @@
 "use client";
 
-import { Box, Group, Pagination, Select, Table, Text, TextInput, Tooltip, type TextProps } from "@mantine/core";
+import { Box, Group, Modal, Pagination, Select, Table, Text, TextInput, Tooltip, UnstyledButton, type TextProps } from "@mantine/core";
 import { Library, Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
+import { ComicCover } from "@/components/comic-cover";
 import { AppButton } from "@/components/ui/app-components";
 import type { LibraryComicAdminRowRecord } from "@/modules/library";
 
@@ -20,6 +21,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
   const [pageSize, setPageSize] = useAdminTabState("pageSize", "10");
   const [search, setSearch] = useAdminTabState("search", "");
   const [statusFilter, setStatusFilter] = useAdminTabState("statusFilter", "all");
+  const [previewComic, setPreviewComic] = useState<LibraryComicAdminRowRecord | null>(null);
 
   const filtered = useMemo(() => {
     // Server already excludes soft-deleted; client only filters remaining statuses.
@@ -99,15 +101,15 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
       </Group>
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
-        <Table.ScrollContainer minWidth={760} type="native">
-          <Table striped highlightOnHover layout="fixed" verticalSpacing="sm" horizontalSpacing="md" style={{ minWidth: 760 }}>
+        <Table.ScrollContainer minWidth={720} type="native">
+          <Table striped highlightOnHover layout="fixed" verticalSpacing="sm" horizontalSpacing="md" style={{ minWidth: 720 }}>
             <Table.Thead>
               <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
+                <Table.Th fw={900} c="#8d5a6e" w={64}>
+                  封面
+                </Table.Th>
                 <Table.Th fw={900} c="#8d5a6e" w={380}>
                   标题
-                </Table.Th>
-                <Table.Th fw={900} c="#8d5a6e" w={110}>
-                  格式
                 </Table.Th>
                 <Table.Th fw={900} c="#8d5a6e" w={80}>
                   页数
@@ -132,8 +134,26 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {paginated.map((comic) => (
+              {paginated.map((comic, index) => (
                 <Table.Tr key={comic.id}>
+                  <Table.Td w={64}>
+                    <UnstyledButton
+                      type="button"
+                      aria-label={`预览封面：${comic.displayTitle}`}
+                      onClick={() => setPreviewComic(comic)}
+                      style={{ display: "block", borderRadius: 8 }}
+                    >
+                      <Box style={{ width: 44, height: 66, overflow: "hidden", borderRadius: 8 }}>
+                        <ComicCover
+                          className="admin-comic-thumbnail"
+                          comicId={previewableComicId(comic)}
+                          index={index}
+                          title={comic.displayTitle}
+                          use="list_thumbnail"
+                        />
+                      </Box>
+                    </UnstyledButton>
+                  </Table.Td>
                   <Table.Td style={{ minWidth: 0 }}>
                     <Box style={{ minWidth: 0, width: "100%" }}>
                       <OverflowTooltipText fw={700} size="sm">
@@ -143,9 +163,6 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
                         {comic.fileTitle}
                       </OverflowTooltipText>
                     </Box>
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm">{formatKind(comic.localFileKind)}</Text>
                   </Table.Td>
                   <Table.Td>
                     <Text size="sm">{comic.pageCount}</Text>
@@ -206,6 +223,26 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
         </Group>
         {totalPages > 1 && <Pagination total={totalPages} value={page} onChange={setPage} color="pink" withEdges />}
       </Group>
+
+      <Modal
+        opened={previewComic !== null}
+        onClose={() => setPreviewComic(null)}
+        title={previewComic ? `封面预览：${previewComic.displayTitle}` : "封面预览"}
+        centered
+        size="sm"
+      >
+        {previewComic && (
+          <Box style={{ display: "flex", justifyContent: "center", paddingBottom: 8 }}>
+            <ComicCover
+              comicId={previewableComicId(previewComic)}
+              index={comics.findIndex((comic) => comic.id === previewComic.id)}
+              title={previewComic.displayTitle}
+              compact={false}
+              use="cover"
+            />
+          </Box>
+        )}
+      </Modal>
     </Box>
   );
 }
@@ -282,10 +319,6 @@ function statusLabel(status: LibraryComicAdminRowRecord["status"], merged = fals
   return labels[status];
 }
 
-function formatKind(kind: LibraryComicAdminRowRecord["localFileKind"]) {
-  if (kind === "directory") {
-    return "DIR";
-  }
-
-  return kind?.toUpperCase() ?? "LOCAL";
+function previewableComicId(comic: LibraryComicAdminRowRecord) {
+  return comic.status === "readable" && !comic.isPrimaryFileMissing && comic.pageCount > 0 ? comic.id : undefined;
 }

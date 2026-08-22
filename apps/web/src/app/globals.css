@@ -211,6 +211,24 @@
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 }
 
+.admin-comic-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.admin-comic-thumbnail > img,
+.admin-comic-thumbnail > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.admin-comic-thumbnail > img {
+  aspect-ratio: auto !important;
+  border-radius: 8px !important;
+  object-fit: cover;
+}
+
 @media (min-width: 700px) {
   .comic-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -440,10 +458,30 @@
 .reader-pages {
   flex: 1;
   overflow-y: auto;
+  scrollbar-width: auto;
+  scrollbar-color: #b56b8a #241b2b;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 0 0 48px;
+}
+
+.reader-pages::-webkit-scrollbar {
+  width: 18px;
+}
+
+.reader-pages::-webkit-scrollbar-track {
+  background: #241b2b;
+}
+
+.reader-pages::-webkit-scrollbar-thumb {
+  border: 3px solid #241b2b;
+  border-radius: 999px;
+  background: #b56b8a;
+}
+
+.reader-pages::-webkit-scrollbar-thumb:hover {
+  background: var(--pink);
 }
 
 .reader-pages > .reader-divider,
