@@ -1,7 +1,7 @@
 "use client";
 
 import { Box } from "@mantine/core";
-import { Bookmark, CloudDownload, Folder, Gauge, Library, Settings, Tag, Wrench } from "lucide-react";
+import { Bookmark, CloudDownload, Folder, Gauge, Library, Settings, Tag, Video, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
@@ -14,8 +14,9 @@ import { SiteHeader } from "@/components/site-header";
 
 const navItems = [
   { href: "/admin", icon: Gauge, label: "后台首页", exact: true },
-  { href: "/admin/paths", icon: Folder, label: "漫画路径" },
+  { href: "/admin/paths", icon: Folder, label: "媒体路径" },
   { href: "/admin/comics", icon: Library, label: "漫画管理" },
+  { href: "/admin/videos", icon: Video, label: "视频管理" },
   { href: "/admin/files", icon: Wrench, label: "文件维护" },
   { href: "/admin/tags", icon: Tag, label: "标签管理" },
   { href: "/admin/collections", icon: Bookmark, label: "收藏夹" },

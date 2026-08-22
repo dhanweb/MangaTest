@@ -23,9 +23,12 @@ import {
   getDb,
   localFiles,
   operationLogs,
+  videoResources,
+  videoRoots,
 } from "@/modules/core/db";
 import { getRuntimeSettings, type RuntimeSettings } from "@/modules/core/settings";
 import { createMangaRootRepository, scanMangaRoot, type MangaRootRecord } from "@/modules/library";
+import { scanVideoRoot } from "@/modules/video-library";
 import { DOWNLOAD_IMPORT_DIRECTORY_NAME } from "@/modules/local-files";
 
 import {
@@ -148,6 +151,18 @@ export interface CreateDownloadTaskInput {
   provider?: DownloadProvider;
   taskType?: DownloadTaskType;
   targetDirectory?: string | null;
+}
+
+export interface VideoDownloadTaskRecord {
+  id: string;
+  title: string;
+  resourceUrl: string;
+  provider: "aria2";
+  status: DownloadTaskStatus;
+  targetDirectory: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CreateDownloadTaskResult {
@@ -457,6 +472,54 @@ export async function createDownloadTask(input: CreateDownloadTaskInput): Promis
     created: true,
     task: getDownloadTaskById(taskId) ?? task,
   };
+}
+
+export async function createVideoDownloadTask(input: { title: string; resourceUrl: string; videoRootId: string; targetDirectory?: string | null }) {
+  bootstrapDatabase();
+  const title = input.title.trim();
+  const resourceUrl = input.resourceUrl.trim();
+  if (!title) throw new Error("视频标题不能为空。");
+  if (!/^https?:\/\//i.test(resourceUrl) && !resourceUrl.startsWith("magnet:")) throw new Error("视频下载地址必须是 http(s) 直链或 magnet。");
+  const root = getDb().select().from(videoRoots).where(eq(videoRoots.id, input.videoRootId)).get();
+  if (!root) throw new Error("找不到视频根目录。");
+  const settings = await getRuntimeSettings();
+  if (!settings.aria2Enabled || !settings.aria2RpcUrl) throw new Error("请先在设置中启用并配置 aria2。");
+  const targetDirectory = input.targetDirectory?.trim() || path.join(root.absolutePath, "下载入库", sanitizeDownloadName(title));
+  await mkdir(targetDirectory, { recursive: true });
+  const db = getDb();
+  const now = new Date().toISOString();
+  const resourceId = randomUUID();
+  const taskId = randomUUID();
+  db.insert(videoResources).values({ id: resourceId, resourceType: resourceUrl.startsWith("magnet:") ? "magnet" : "http", displayLabel: title, resourceUrl, redactedResource: redactDownloadResource(resourceUrl), createdAt: now, updatedAt: now }).run();
+  db.insert(downloadTasks).values({ id: taskId, videoResourceId: resourceId, mediaType: "video", provider: "aria2", taskType: "transfer", status: "queued", targetDirectory, createdAt: now, updatedAt: now }).run();
+  void runVideoDownloadTask(taskId, resourceUrl, targetDirectory, root.id, settings.aria2RpcUrl, settings.aria2RpcToken);
+  return { created: true, task: await getVideoDownloadTask(taskId) };
+}
+
+export async function listVideoDownloadTasks(limit = 100): Promise<VideoDownloadTaskRecord[]> {
+  bootstrapDatabase();
+  const rows = getDb().select({ id: downloadTasks.id, title: videoResources.displayLabel, resourceUrl: videoResources.resourceUrl, provider: downloadTasks.provider, status: downloadTasks.status, targetDirectory: downloadTasks.targetDirectory, errorMessage: downloadTasks.errorMessage, createdAt: downloadTasks.createdAt, updatedAt: downloadTasks.updatedAt }).from(downloadTasks).leftJoin(videoResources, eq(videoResources.id, downloadTasks.videoResourceId)).where(eq(downloadTasks.mediaType, "video")).orderBy(desc(downloadTasks.createdAt)).limit(normalizeLimit(limit)).all();
+  return rows.map((row) => ({ id: row.id, title: row.title || "视频下载", resourceUrl: row.resourceUrl || "", provider: "aria2", status: normalizeDownloadTaskStatus(row.status), targetDirectory: row.targetDirectory, errorMessage: row.errorMessage, createdAt: row.createdAt, updatedAt: row.updatedAt }));
+}
+
+async function getVideoDownloadTask(taskId: string) {
+  const task = (await listVideoDownloadTasks(200)).find((item) => item.id === taskId);
+  if (!task) throw new Error("创建视频下载任务失败。");
+  return task;
+}
+
+async function runVideoDownloadTask(taskId: string, resourceUrl: string, targetDirectory: string, videoRootId: string, rpcUrl: string, rpcToken: string) {
+  const db = getDb();
+  const now = new Date().toISOString();
+  db.update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, taskId)).run();
+  const result = await downloadWithAria2({ rpcUrl, rpcToken: rpcToken || undefined, uri: resourceUrl, dir: targetDirectory, taskId });
+  const finishedAt = new Date().toISOString();
+  if (result.success) {
+    db.update(downloadTasks).set({ status: "completed", updatedAt: finishedAt }).where(eq(downloadTasks.id, taskId)).run();
+    await scanVideoRoot(videoRootId).catch((error) => db.update(downloadTasks).set({ errorMessage: error instanceof Error ? `下载完成但扫描失败：${error.message}` : "下载完成但扫描失败。", updatedAt: new Date().toISOString() }).where(eq(downloadTasks.id, taskId)).run());
+  } else {
+    db.update(downloadTasks).set({ status: "failed", errorMessage: result.errorMessage || "aria2 下载失败。", updatedAt: finishedAt }).where(eq(downloadTasks.id, taskId)).run();
+  }
 }
 
 export async function listDownloadTasks(limit = 100, taskType?: DownloadTaskType): Promise<DownloadTaskRecord[]> {
@@ -3438,6 +3501,21 @@ async function resolveDownloadTargetDirectory(inputTargetDirectory: string | nul
 
 function normalizeLimit(value: number) {
   return Math.max(1, Math.min(500, Math.trunc(value)));
+}
+
+function sanitizeDownloadName(value: string) {
+  return sanitizeDownloadFileName(value).replace(/\.+/g, ".");
+}
+
+function redactDownloadResource(value: string) {
+  if (value.startsWith("magnet:")) return value.replace(/([?&](?:xt|dn|tr))=[^&]*/gi, "$1=…");
+  try {
+    const url = new URL(value);
+    for (const key of ["token", "sign", "signature", "expires"]) url.searchParams.delete(key);
+    return url.toString();
+  } catch {
+    return "资源已脱敏";
+  }
 }
 
 function normalizeProvider(value: unknown): DownloadProvider {

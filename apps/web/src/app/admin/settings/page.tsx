@@ -927,6 +927,17 @@ function DownloadSettings({
         </SettingsRow>
       </SettingsGroup>
 
+      <SettingsGroup title="视频播放器">
+        <SettingsRow label="PotPlayer 路径" note="本机服务启动 PotPlayer 时使用的可执行文件绝对路径；协议打开不依赖此配置。">
+          <AppInput
+            value={settings.potplayerExecutablePath ?? ""}
+            onChange={(event) => onSettingsChange({ ...settings, potplayerExecutablePath: event.currentTarget.value })}
+            placeholder="例如 C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"
+            style={{ width: 360 }}
+          />
+        </SettingsRow>
+      </SettingsGroup>
+
     </>
   );
 }

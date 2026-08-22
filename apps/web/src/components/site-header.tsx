@@ -1,16 +1,17 @@
 "use client";
 
 import { Box, Group } from "@mantine/core";
-import { BookOpen, Heart, Library, Settings } from "lucide-react";
+import { BookOpen, Heart, Library, Settings, Video } from "lucide-react";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
 interface SiteHeaderProps {
-  active?: "library" | "favorites" | "admin";
+  active?: "library" | "videos" | "favorites" | "admin";
 }
 
 const navItems = [
   { id: "library", icon: Library, label: "漫画库", href: "/" },
+  { id: "videos", icon: Video, label: "视频库", href: "/videos" },
   { id: "favorites", icon: Heart, label: "收藏", href: "/collections" },
   { id: "admin", icon: Settings, label: "管理", href: "/admin" },
 ] as const;
