@@ -52,6 +52,7 @@
   let panelRoot = null;
   /** @type {{ imported?: boolean, localReadable?: boolean, displayTitle?: string | null, hasLocalFile?: boolean, comicStatus?: string | null } | null} */
   let libraryStatus = null;
+  let libraryStatusLoaded = false;
   let panelBusy = false;
 
   if (isDetailPage) {
@@ -158,6 +159,8 @@
     } catch (error) {
       console.warn("[MangaTest] 状态查询失败", error);
       libraryStatus = null;
+    } finally {
+      libraryStatusLoaded = true;
     }
   }
 
@@ -205,9 +208,7 @@
       pointerEvents: "none",
     });
     badge.innerHTML = `
-      <div style="font-weight:800;font-size:12px;color:#24141f;margin-bottom:4px;">MangaTest</div>
-      <div id="mangatest-status-main">检查库状态…</div>
-      <div id="mangatest-status-extra" style="margin-top:4px;opacity:0.9;"></div>
+      <div id="mangatest-status-main" style="font-weight:800;font-size:13px;color:#24141f;">检查状态…</div>
     `;
     document.body.appendChild(badge);
 
@@ -267,43 +268,27 @@
 
   function updatePanelStatusUi() {
     const mainElement = document.querySelector("#mangatest-status-main");
-    const extraElement = document.querySelector("#mangatest-status-extra");
     const badge = document.querySelector("#mangatest-status-badge");
-    if (!(mainElement instanceof HTMLElement) || !(extraElement instanceof HTMLElement)) return;
+    if (!(mainElement instanceof HTMLElement)) return;
 
-    let main = "未在库中";
+    let main = libraryStatusLoaded ? (libraryStatus ? "未入库" : "状态未知") : "检查状态…";
     let border = "#f7c9dc";
     let color = "#7c5166";
 
-    if (isLocallyDownloaded(libraryStatus)) {
-      main = `📚 已入库可阅读${libraryStatus?.displayTitle ? `：${libraryStatus.displayTitle}` : ""}`;
+    if (!libraryStatusLoaded) {
+      main = "检查状态…";
+    } else if (isLocallyDownloaded(libraryStatus)) {
+      main = "已下载，可阅读";
       border = "#8ce99a";
       color = "#087f5b";
     } else if (libraryStatus?.imported) {
-      main = libraryStatus.hasLocalFile ? "已导入（本地文件可能缺失）" : "已导入元数据，本地尚无文件";
+      main = libraryStatus.hasLocalFile ? "已入库，文件缺失" : "已入库，未下载";
       border = "#ffe066";
       color = "#e67700";
     }
 
-    const extras = [settings.autoDownloadOnGalleryOpen ? "自动下载：开" : "自动下载：关"];
-    if (isLocallyDownloaded(libraryStatus)) extras.push("不会自动下载");
-
-    try {
-      const metadata = collectNormalizedMetadata();
-      const last = metadata.sourceId ? (settings.lastSubmitBySourceId || {})[metadata.sourceId] : null;
-      if (last?.at) {
-        const time = new Date(last.at).toLocaleString();
-        if (last.kind === "download" && last.ok) extras.push(`✅ 下载已提交 ${time}`);
-        else if (last.kind === "download") extras.push(`下载提交失败 ${time}`);
-        else extras.push(`元数据已提交 ${time}`);
-      }
-    } catch {
-      // Keep the status panel usable even when the page changes underneath it.
-    }
-
     mainElement.textContent = main;
     mainElement.style.color = color;
-    extraElement.textContent = extras.join(" · ");
     if (badge instanceof HTMLElement) badge.style.borderColor = border;
   }
 
