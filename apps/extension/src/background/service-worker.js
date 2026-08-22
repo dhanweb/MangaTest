@@ -7,7 +7,7 @@ function log(...args) {
 chrome.runtime.onInstalled.addListener(async () => {
   log("后台服务已启动");
   const defaults = {
-    serverUrl: "http://127.0.0.1:4317",
+    serverUrl: "http://127.0.0.1:4427",
     importToken: "",
     autoDownloadOnGalleryOpen: false,
     autoDownloadOnTorrentPage: false,
@@ -69,7 +69,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "MANGATEST_PING") {
-    const serverUrl = message.serverUrl || "http://127.0.0.1:4317";
+    const serverUrl = message.serverUrl || "http://127.0.0.1:4427";
     fetch(serverUrl, { method: "HEAD", signal: AbortSignal.timeout(3000) })
       .then(() => sendResponse({ ok: true }))
       .catch(() => sendResponse({ ok: false }));
@@ -115,7 +115,7 @@ async function notifySourceTabs(message) {
 }
 
 async function handleBackendRequest(message) {
-  const settings = await chrome.storage.local.get({ serverUrl: "http://127.0.0.1:4317", importToken: "" });
+  const settings = await chrome.storage.local.get({ serverUrl: "http://127.0.0.1:4427", importToken: "" });
   const endpoint = typeof message.endpoint === "string" ? message.endpoint : "";
   if (!endpoint.startsWith("/api/")) {
     throw new Error("只允许访问本地 API 路径。");

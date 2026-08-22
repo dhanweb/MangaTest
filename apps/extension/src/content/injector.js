@@ -16,7 +16,7 @@
   const isResourcePage = page.type === "resource";
 
   let settings = await chrome.storage.local.get({
-    serverUrl: "http://127.0.0.1:4317",
+    serverUrl: "http://127.0.0.1:4427",
     importToken: "",
     autoDownloadOnGalleryOpen: false,
     autoDownloadOnTorrentPage: false,
