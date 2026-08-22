@@ -111,6 +111,7 @@
         id: "nhentai-gallery",
         type: "detail",
         capabilities: ["metadata", "download-resource"],
+        statusPlacement: { mode: "viewport", top: "66px", right: "16px" },
         collect: () => collectGallery(context),
         triggerResourceDownload: () => triggerTorrentDownload(context),
       };
