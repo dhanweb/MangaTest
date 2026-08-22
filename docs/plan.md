@@ -891,7 +891,7 @@ Downloads 和 OpenList provider：
 部分后续阶段能力已经提前进入 `apps/web`：
 
 - 第二阶段的一部分：标题 / 元数据编辑、标签维护、封面上传 / 重新生成、重复候选、合并为章节和恢复
-- 第三阶段的一部分：Chrome MV3 插件 ExHentai 详情页采集、torrent 页面资源采集、浏览器登录态种子转磁链、`metadata-ingest`、导入 token、来源站状态检查、metadata 导入、remote-only 记录和显式本地匹配提交。现有插件实现仍是早期的 content 脚本组织；后续新增 NHentai、视频站点或更多资源页面前，应按本节的 runtime/backend/features/adapters 边界重构。
+- 第三阶段的一部分：Chrome MV3 插件 ExHentai 详情页采集、torrent 页面资源采集、浏览器登录态种子转磁链、`metadata-ingest`、导入 token、来源站状态检查、metadata 导入、remote-only 记录和显式本地匹配提交。插件已完成第一步 runtime/backend/features/adapters 重构，ExHentai 是首个完整迁移的站点适配层；后续新增 NHentai 的下载能力、视频站点或更多资源页面继续沿用同一边界。
 - 第四阶段的一部分：Downloads provider 注册、OpenList 连接检查、OpenList cloud scan、资源导入、下载准备、临时下载、finalization
 - 第五阶段的一部分：collections / reading queue 和队列阅读导航
 

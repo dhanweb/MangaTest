@@ -38,6 +38,14 @@ When the status panel shows a single local match, enable "提交到本地漫画"
 npm run check
 ```
 
-The extension loads site-specific adapters from `src/content/site-adapters.js` before falling back to the generic detail-page collector.
+The content script is assembled from independent layers:
+
+- `src/runtime/` detects the current page and normalizes collected facts.
+- `src/backend/` owns the generic HTTP bridge to MangaTest.
+- `src/features/` owns metadata and download-resource submission flows.
+- `src/adapters/` owns site-specific URL matching, page handlers, DOM selectors, and resource extraction.
+- `src/content/injector.js` only renders the common controls and orchestrates capabilities returned by the current adapter.
+
+The first adapters are ExHentai (`src/adapters/exhentai/adapter.js`) and NHentai (`src/adapters/nhentai/adapter.js`). ExHentai keeps separate detail and torrent-page handlers while sharing the generic backend and submission flows.
 
 For ExHentai, `.torrent` URLs are not sent to MangaTest when conversion succeeds. The extension submits generated magnet links instead.

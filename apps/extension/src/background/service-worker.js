@@ -12,11 +12,13 @@ chrome.runtime.onInstalled.addListener(async () => {
     autoDownloadOnGalleryOpen: false,
     autoDownloadOnTorrentPage: false,
     autoTorrentSubmitCount: 1,
+    pendingAutoDownload: null,
     pendingAutoDownloadSourceId: null,
+    lastPageMetadata: null,
+    lastExhentaiMetadata: null,
     lastSubmitBySourceId: {},
   };
   const current = await chrome.storage.local.get(defaults);
-  // Prefer new key; if only legacy true exists, keep true once for migration.
   if (current.autoDownloadOnGalleryOpen === undefined && current.autoDownloadOnTorrentPage === true) {
     current.autoDownloadOnGalleryOpen = true;
   }
@@ -35,8 +37,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, error: "no tab" });
       return false;
     }
+
     const delayMs = typeof message.delayMs === "number" ? message.delayMs : 800;
-    log("准备关闭标签", { tabId, delayMs, url: sender.tab?.url });
     setTimeout(() => {
       chrome.tabs.remove(tabId).catch((error) => {
         log("关闭标签失败", { tabId, error: error instanceof Error ? error.message : String(error) });
@@ -46,26 +48,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  if (message?.type === "MANGATEST_NOTIFY_GALLERY") {
-    notifyGalleryTabs(message)
+  if (message?.type === "MANGATEST_NOTIFY_SOURCE_RESULT" || message?.type === "MANGATEST_NOTIFY_GALLERY") {
+    notifySourceTabs(message)
       .then((count) => sendResponse({ ok: true, notified: count }))
       .catch((error) => {
-        log("通知详情页失败", { error: error instanceof Error ? error.message : String(error) });
+        log("通知来源页面失败", { error: error instanceof Error ? error.message : String(error) });
         sendResponse({ ok: false, error: error instanceof Error ? error.message : "notify failed" });
       });
     return true;
   }
 
-  if (message?.type === "MANGATEST_RESOLVE_TORRENTS") {
-    log("开始转换种子为磁链", { 数量: message.resources?.length });
-    resolveTorrentResources(message.resources)
-      .then((resources) => {
-        log("种子转换完成", { 数量: resources.length });
-        sendResponse({ ok: true, resources });
-      })
+  if (message?.type === "MANGATEST_RESOLVE_RESOURCES" || message?.type === "MANGATEST_RESOLVE_TORRENTS") {
+    resolveResources(message.resources)
+      .then((resources) => sendResponse({ ok: true, resources }))
       .catch((error) => {
-        log("种子转换失败", { 错误: error instanceof Error ? error.message : String(error) });
-        sendResponse({ ok: false, error: error instanceof Error ? error.message : "种子转换失败。" });
+        log("资源处理失败", { error: error instanceof Error ? error.message : String(error) });
+        sendResponse({ ok: false, error: error instanceof Error ? error.message : "资源处理失败。" });
       });
     return true;
   }
@@ -78,15 +76,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message?.type === "MANGATEST_API_CALL") {
-    log("API 请求", { 方法: message.method, 接口: message.endpoint });
-    handleApiCall(message)
-      .then((result) => {
-        log("API 请求成功", { 接口: message.endpoint, 状态码: result.status });
-        sendResponse(result);
-      })
+  if (message?.type === "MANGATEST_BACKEND_REQUEST" || message?.type === "MANGATEST_API_CALL") {
+    handleBackendRequest(message)
+      .then(sendResponse)
       .catch((error) => {
-        log("API 请求失败", { 接口: message.endpoint, 错误: error instanceof Error ? error.message : String(error) });
+        log("后端请求失败", { error: error instanceof Error ? error.message : String(error) });
         sendResponse({ ok: false, error: error instanceof Error ? error.message : "请求失败。" });
       });
     return true;
@@ -95,79 +89,78 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function notifyGalleryTabs(message) {
-  const sourceId = message.sourceId || "";
-  const gid = extractGid(sourceId) || extractGid(message.sourceUrl || "");
-  const tabs = await chrome.tabs.query({
-    url: ["https://exhentai.org/*", "https://e-hentai.org/*"],
-  });
+async function notifySourceTabs(message) {
+  const tabs = await chrome.tabs.query({});
   let count = 0;
+
   for (const tab of tabs) {
-    if (typeof tab.id !== "number" || !tab.url) continue;
-    // Skip torrent listing tabs.
-    if (/gallerytorrents\.php/i.test(tab.url)) continue;
-    if (!/\/g\/\d+/i.test(tab.url)) continue;
-    if (gid && !tab.url.includes(`/g/${gid}`)) continue;
+    if (typeof tab.id !== "number") continue;
     try {
       await chrome.tabs.sendMessage(tab.id, {
-        type: "MANGATEST_DOWNLOAD_RESULT",
-        sourceId: message.sourceId,
-        sourceUrl: message.sourceUrl,
+        type: "MANGATEST_SOURCE_RESULT",
+        site: message.site || "",
+        sourceId: message.sourceId || "",
+        sourceUrl: message.sourceUrl || "",
         ok: Boolean(message.ok),
         message: message.message || "",
       });
       count += 1;
     } catch {
-      // tab may not have content script
+      // Tabs without the content script are expected and can be ignored.
     }
   }
-  log("已通知详情页", { count, sourceId, gid });
+
+  log("已通知来源页面", { count, site: message.site || "", sourceId: message.sourceId || "" });
   return count;
 }
 
-function extractGid(value) {
-  const m = /\/g\/(\d+)/.exec(String(value || ""));
-  return m?.[1] || null;
-}
-
-async function handleApiCall(message) {
+async function handleBackendRequest(message) {
   const settings = await chrome.storage.local.get({ serverUrl: "http://127.0.0.1:4317", importToken: "" });
-  const url = `${settings.serverUrl}${message.endpoint}`;
-  log("正在请求", { 地址: url, 方法: message.method || "GET" });
+  const endpoint = typeof message.endpoint === "string" ? message.endpoint : "";
+  if (!endpoint.startsWith("/api/")) {
+    throw new Error("只允许访问本地 API 路径。");
+  }
 
+  const url = `${settings.serverUrl}${endpoint}`;
   const headers = { "Content-Type": "application/json" };
   if (settings.importToken) {
     headers.Authorization = `Bearer ${settings.importToken}`;
   }
 
-  const res = await fetch(url, {
+  const response = await fetch(url, {
     method: message.method || "GET",
     headers,
     body: message.body ? JSON.stringify(message.body) : undefined,
   });
+  const responseBody = await response.json().catch(() => null);
 
-  const responseBody = await res.json().catch(() => null);
-  log("响应结果", { 状态码: res.status, 成功: res.ok, 数据: responseBody });
-
-  if (!res.ok) {
-    return { ok: false, status: res.status, error: responseBody?.error || `HTTP ${res.status}` };
+  if (!response.ok) {
+    return { ok: false, status: response.status, error: responseBody?.error || `HTTP ${response.status}` };
   }
 
-  return { ok: true, status: res.status, body: responseBody };
+  return { ok: true, status: response.status, body: responseBody };
 }
 
-async function resolveTorrentResources(resources) {
+async function resolveResources(resources) {
   const input = Array.isArray(resources) ? resources : [];
   const resolved = [];
+
   for (const resource of input) {
-    if (!resource || resource.type !== "torrent" || typeof resource.url !== "string") continue;
-    log("正在转换种子", { 地址: resource.url?.slice(0, 80) });
+    if (!resource || typeof resource.url !== "string") continue;
+
+    if (resource.type !== "torrent") {
+      resolved.push(resource);
+      continue;
+    }
+
+    log("正在转换种子", { 地址: resource.url.slice(0, 80) });
     try {
       const magnet = await self.MangaTestTorrentMagnet.fetchTorrentAsMagnet(resource.url);
       resolved.push({ type: "magnet", url: magnet, label: resource.label || "Magnet" });
-    } catch (err) {
-      log("种子转换失败", { 错误: err instanceof Error ? err.message : String(err) });
+    } catch (error) {
+      log("种子转换失败", { error: error instanceof Error ? error.message : String(error) });
     }
   }
+
   return resolved;
 }

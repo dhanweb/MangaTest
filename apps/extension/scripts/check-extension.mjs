@@ -17,9 +17,14 @@ assert(manifest.permissions.includes("storage"), "storage permission is required
 const referencedFiles = [
   manifest.action.default_popup,
   manifest.background?.service_worker,
-  "src/content/site-adapters.js",
-  "src/content/metadata-contract.js",
-  "src/content/collect-page-metadata.js",
+  "src/adapters/exhentai/adapter.js",
+  "src/adapters/nhentai/adapter.js",
+  "src/runtime/adapter-registry.js",
+  "src/runtime/metadata-contract.js",
+  "src/runtime/collector.js",
+  "src/backend/client.js",
+  "src/features/metadata/submit.js",
+  "src/features/download-resources/submit.js",
   "src/content/injector.js",
   "src/background/torrent-magnet.js",
   "src/popup/popup.css",
@@ -38,6 +43,7 @@ checkFixture({
   url: "https://example.test/gallery/123",
   expected: {
     adapterId: "generic",
+    pageType: "detail",
     site: "example.test",
     sourceId: "example.test/gallery/123",
     title: "Generic Sample Comic",
@@ -51,6 +57,7 @@ checkFixture({
   url: "https://nhentai.net/g/123/",
   expected: {
     adapterId: "nhentai-gallery",
+    pageType: "detail",
     site: "nhentai.net",
     sourceId: "nhentai.net/g/123",
     title: "NH Sample Comic",
@@ -65,6 +72,7 @@ checkFixture({
   url: "https://exhentai.org/g/3242017/mock-token/",
   expected: {
     adapterId: "ehentai-gallery",
+    pageType: "detail",
     site: "exhentai.org",
     sourceId: "exhentai.org/g/3242017",
     sourceUrl: "https://exhentai.org/g/3242017/mock-token/",
@@ -84,6 +92,7 @@ checkFixture({
   url: "https://exhentai.org/gallerytorrents.php?gid=3242017&t=mocktoken",
   expected: {
     adapterId: "ehentai-torrents",
+    pageType: "resource",
     site: "exhentai.org",
     sourceId: "exhentai.org/g/3242017",
     sourceUrl: "https://exhentai.org/g/3242017/",
@@ -103,6 +112,7 @@ function checkFixture({ file, url, expected }) {
   const result = runCollector(html, url);
 
   assert(result.adapterId === expected.adapterId, `${file} adapterId mismatch`);
+  assert(result.pageType === expected.pageType, `${file} pageType mismatch`);
   assert(result.site === expected.site, `${file} site mismatch`);
   assert(result.sourceId === expected.sourceId, `${file} sourceId mismatch`);
   assert(result.title === expected.title, `${file} title mismatch`);
@@ -140,13 +150,20 @@ function runCollector(html, url) {
   };
 
   vm.createContext(context);
-  for (const file of ["src/content/site-adapters.js", "src/content/metadata-contract.js"]) {
+  for (const file of [
+    "src/adapters/exhentai/adapter.js",
+    "src/adapters/nhentai/adapter.js",
+    "src/runtime/adapter-registry.js",
+    "src/runtime/metadata-contract.js",
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context, { filename: file });
   }
 
-  return vm.runInContext(fs.readFileSync(path.join(root, "src/content/collect-page-metadata.js"), "utf8"), context, {
-    filename: "src/content/collect-page-metadata.js",
+  vm.runInContext(fs.readFileSync(path.join(root, "src/runtime/collector.js"), "utf8"), context, {
+    filename: "src/runtime/collector.js",
   });
+
+  return context.window.MangaTestCollector.normalizeMetadata(context.window.MangaTestCollector.collectPageMetadata());
 }
 
 function createDocument(html, location) {

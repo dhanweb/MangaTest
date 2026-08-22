@@ -3,7 +3,8 @@
   const MAX_RESOURCES = 16;
 
   function collectPageMetadata() {
-    const adapterMetadata = collectWithSiteAdapter();
+    const currentPage = getCurrentPage();
+    const adapterMetadata = collectWithSiteAdapter(currentPage);
     const sourceUrl = getCanonicalUrl();
     const title = firstText([
       selectText("h1"),
@@ -11,47 +12,41 @@
       selectText('[name="twitter:title"]', "content"),
       document.title,
     ]);
-    const coverUrl = firstUrl([
-      selectText('[property="og:image"]', "content"),
-      selectText('[name="twitter:image"]', "content"),
-      selectText('link[rel="image_src"]', "href"),
-      findLikelyCoverImage(),
-    ]);
     const genericMetadata = {
-      adapterId: "generic",
+      adapterId: currentPage?.page?.id || "generic",
+      pageType: currentPage?.page?.type || "detail",
       site: location.hostname.replace(/^www\./, ""),
       sourceUrl,
       sourceId: createSourceId(sourceUrl),
       title: title || sourceUrl,
       originalTitle: title || null,
-      coverUrl,
+      coverUrl: firstUrl([
+        selectText('[property="og:image"]', "content"),
+        selectText('[name="twitter:image"]', "content"),
+        selectText('link[rel="image_src"]', "href"),
+        findLikelyCoverImage(),
+      ]),
       tags: collectTags(),
-      resources: collectResources(),
+      resources: [],
     };
 
     return mergeMetadata(genericMetadata, adapterMetadata);
   }
 
-  function collectWithSiteAdapter() {
-    const adapters = Array.isArray(window.MangaTestSiteAdapters) ? window.MangaTestSiteAdapters : [];
-    const adapter = adapters.find((candidate) => {
-      try {
-        return candidate.matches();
-      } catch {
-        return false;
-      }
-    });
+  function getCurrentPage() {
+    return window.MangaTestAdapterRegistry?.getCurrentPage() || null;
+  }
 
-    if (!adapter) {
+  function collectWithSiteAdapter(currentPage = getCurrentPage()) {
+    if (!currentPage?.page || typeof currentPage.page.collect !== "function") {
       return null;
     }
 
     try {
-      return adapter.collect();
-    } catch {
-      return {
-        adapterId: adapter.id,
-      };
+      return currentPage.page.collect();
+    } catch (error) {
+      console.warn("[MangaTest] 页面适配器采集失败", { adapter: currentPage.page.id, error });
+      return { adapterId: currentPage.page.id, pageType: currentPage.page.type };
     }
   }
 
@@ -62,7 +57,7 @@
 
     return {
       ...genericMetadata,
-      ...pickPresent(adapterMetadata, ["adapterId", "site", "sourceUrl", "sourceId", "title", "originalTitle", "coverUrl"]),
+      ...pickPresent(adapterMetadata, ["adapterId", "pageType", "site", "sourceUrl", "sourceId", "title", "originalTitle", "coverUrl"]),
       tags: mergeTags(adapterMetadata.tags, genericMetadata.tags),
       resources: mergeResources(adapterMetadata.resources, genericMetadata.resources),
     };
@@ -147,10 +142,6 @@
     return Array.from(tags.values()).slice(0, MAX_TAGS);
   }
 
-  function collectResources() {
-    return [];
-  }
-
   function addTag(tags, namespace, name, displayNameZh) {
     const cleanName = cleanText(name).toLowerCase();
     const cleanNamespace = cleanText(namespace).toLowerCase();
@@ -203,7 +194,6 @@
       .filter((image) => image.src && image.width >= 120 && image.height >= 120);
 
     images.sort((a, b) => coverScore(b) - coverScore(a));
-
     return images[0]?.src ?? null;
   }
 
@@ -274,20 +264,12 @@
     return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   }
 
-  window.__mangatest = {
+  window.MangaTestCollector = {
     collectPageMetadata,
     collectWithSiteAdapter,
+    getCurrentPage,
     mergeMetadata,
-    normalizeMetadata: (m) => window.MangaTestMetadataContract?.normalizeMetadataPayload(m) ?? m,
+    normalizeMetadata: (metadata) => window.MangaTestMetadataContract?.normalizeMetadataPayload(metadata) ?? metadata,
+    sameSource: (first, second) => window.MangaTestAdapterRegistry?.sameSource(first, second) ?? false,
   };
-
-  try {
-    const metadata = collectPageMetadata();
-    const normalized = window.MangaTestMetadataContract ? window.MangaTestMetadataContract.normalizeMetadataPayload(metadata) : metadata;
-    console.log("[MangaTest:采集] 采集完成", { 适配器: normalized.adapterId, 站点: normalized.site, 标题: normalized.title, 标签数: normalized.tags?.length, 资源数: normalized.resources?.length });
-    return normalized;
-  } catch (err) {
-    console.error("[MangaTest:采集] 采集失败", err);
-    throw err;
-  }
 })();
