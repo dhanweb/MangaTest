@@ -34,6 +34,7 @@
 
     return {
       adapterId: cleanText(input.adapterId) || "generic",
+      pageType: cleanText(input.pageType) || "detail",
       site,
       sourceId: cleanText(input.sourceId) || null,
       sourceUrl,

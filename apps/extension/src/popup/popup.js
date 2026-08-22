@@ -28,7 +28,7 @@ async function initializePopup() {
   }
 
   const settings = await chrome.storage.local.get({
-    serverUrl: "http://127.0.0.1:4317",
+    serverUrl: "http://127.0.0.1:4427",
     importToken: "",
     autoDownloadOnGalleryOpen: false,
     autoDownloadOnTorrentPage: false,
@@ -38,7 +38,7 @@ async function initializePopup() {
   if (settings.autoDownloadOnGalleryOpen === undefined && settings.autoDownloadOnTorrentPage === true) {
     auto = true;
   }
-  elements.serverUrl.value = settings.serverUrl || "http://127.0.0.1:4317";
+  elements.serverUrl.value = settings.serverUrl || "http://127.0.0.1:4427";
   elements.importToken.value = settings.importToken || "";
   elements.autoDownloadTorrent.checked = auto;
   elements.autoTorrentCount.value = String(normalizeAutoTorrentSubmitCount(settings.autoTorrentSubmitCount));
@@ -69,7 +69,7 @@ async function autoSave() {
 }
 
 function normalizeServerUrl(value) {
-  const trimmed = value.trim() || "http://127.0.0.1:4317";
+  const trimmed = value.trim() || "http://127.0.0.1:4427";
   const url = new URL(trimmed);
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("地址必须是 http 或 https");
   return url.origin;

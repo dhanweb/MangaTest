@@ -226,7 +226,7 @@ Media Assets 可以被 Library、Reader、Admin 调用，但它不负责扫描�
 
 ### 3.7 Metadata Ingest 模块
 
-这是浏览器插件提交数据时命中的后端模块。
+这是浏览器插件提交规范化数据时命中的后端模块。它是插件和 web app 之间的业务边界，但不负责解析任何来源站 DOM。
 
 它应该独立于 Downloads。
 
@@ -248,6 +248,25 @@ Media Assets 可以被 Library、Reader、Admin 调用，但它不负责扫描�
 - 返回当前页面是否已入库、是否已有本地文件、是否可下载
 
 Metadata Ingest 不直接登录 OpenList，不直接提交 115 离线下载。
+
+插件 API 需要保持稳定，并使用与来源站无关的规范化合同。至少预留以下能力：
+
+- `submitMetadata`：提交漫画来源信息和可选的封面、标签、作者标签
+- `submitDownloadResource`：提交种子、磁链、直链或其他可下载资源，后端决定是否创建下载任务
+- `submitVideo`：提交视频信息和下载地址，后端可以将其交给 Downloads，而不要求先创建漫画
+- `getImportStatus`：查询来源站条目是否已入库、是否已有本地文件、是否已有资源或下载任务
+
+这些是插件端 backend client 的逻辑操作，不要求站点适配器知道 HTTP 路由、token 传递、响应格式或下载 provider。路由可以按 `metadata`、`downloads`、`videos` 等 API 分组，但请求/响应合同必须由 web app 统一维护。
+
+建议的规范化提交模型包含：
+
+- `source`：`site`、`sourceId`、页面 URL 和来源类型
+- `entity`：`manga` 或 `video`
+- `metadata`：标题、原始标题、作者标签、canonical 标签、封面和其他来源字段
+- `resources`：资源类型、展示名称、URL 或受控字段、文件名、大小、来源页面
+- `clientContext`：插件版本、页面类型和采集时间，用于诊断和幂等处理
+
+后端应以 `site + sourceId + resource identity` 做幂等和跨页面关联。这样 ExHentai 的详情页和资源页可以分别提交，NHentai 的单页可以一次提交多个部分，重复点击也不会无条件创建重复记录。
 
 导入决策：
 
@@ -271,6 +290,8 @@ Downloads 负责资源获取。
 - aria2 下载直接写入入库目录（默认下载目录或 manga root/下载入库），完成后不再迁移文件，保证 aria2 日志路径仍可打开
 - 完成后移动到 manga root
 - 触发 Library / Local Files 重新扫描
+
+Downloads 的输入不仅限于漫画资源。后续视频下载可以复用同一套任务和 provider 边界：插件只提交视频标题、来源页面、媒体信息和下载地址，provider 选择、任务状态、重试和文件落盘仍由后端负责。视频适配器不应在浏览器端实现下载器。
 
 OpenList、115、内置 HTTP 下载、aria2 都应该是 Downloads 的 provider adapter。
 
@@ -336,6 +357,47 @@ Collections 是后续阅读组织模块。
 它不是 web app 的模块，因为它运行环境、权限、打包方式都不同。
 
 它只通过 HTTP API 和本地服务通信。
+
+插件的核心不是某个网站的采集脚本，而是一个可复用的运行时。运行时提供通用的后端 client、token/storage、跨页面状态、能力编排、预览和提交流程；站点适配器只负责识别页面和从 DOM 或页面脚本中提取来源站事实。站点适配器不得直接调用 web app API，也不得承担下载任务编排。
+
+插件按以下边界拆分：
+
+- `runtime`：content script 启动、页面类型识别、适配器注册、能力调度和错误处理
+- `backend`：与 web app 通信的统一 client、API contracts、token 和请求重试；不包含站点选择器
+- `features`：metadata、download-resource、video 等通用能力；把适配器结果转换为后端合同并驱动预览/提交
+- `adapters`：每个站点及其页面 handler；只拥有 URL 匹配、页面类型识别、DOM 选择器、页面事实提取和站点特有的浏览器动作
+- `background`：service worker、跨 tab / 跨页面协调、队列和需要扩展权限的动作；不解析站点 DOM
+- `popup`：设置、预览、状态和手动触发；不直接读取站点 DOM，也不保存站点规则
+
+详情页状态提示的内容和状态逻辑由 common injector 负责，挂载位置由 page handler 可选提供 `statusPlacement`：
+
+- 默认使用 viewport 模式，固定在右上角（`top: 16px; right: 16px`）。
+- viewport 模式支持 `top`、`right`、`bottom`、`left` 四边 CSS 偏移；数字值按像素处理。
+- custom 模式提供 `mount({ element, document, location })`，由适配层选择目标 DOM、插入方式和元素样式。
+- custom 挂载失败时回退到默认 viewport 位置；操作面板仍属于 common injector 的右下角 UI。
+
+站点适配器应以能力和页面类型为单位组织，而不是把所有网站逻辑堆在一个 `site-adapters.js` 中。一个站点可以有多个页面 handler，一个页面也可以暴露多个能力：
+
+```text
+site adapter
+  ├─ matches(url)
+  ├─ detectPage(document, location)
+  └─ handlers
+      ├─ detail page  -> metadata
+      ├─ download/resource page -> download resources
+      └─ media page -> video resources
+```
+
+通用运行时只依赖这些能力返回的规范化事实，不依赖 DOM。新增网站时，正常情况下只需要新增 adapter、页面 handler、选择器和 fixture/test，不需要复制 backend client、popup 提交流程或 service worker 的业务逻辑。
+
+页面拆分和关联规则：
+
+- ExHentai 的详情页 handler 只采集漫画 metadata，下载/种子页 handler 只采集资源；两者通过 `site + sourceId` 关联，分别调用通用提交能力。
+- NHentai 的 gallery handler 在同一页面按能力分别采集 metadata 和下载资源；运行时可以合并为一次预览，也可以拆成多个幂等请求。
+- 任何站点都不应假设详情页、下载页和视频页一定是同一个 URL 或同一个 tab。需要跨页面信息时由 background storage 保存短期上下文，最终关联以服务端 source identity 为准。
+- 第一版仍只做详情页、资源页等明确页面，不做列表页批量采集；列表页批量采集应作为单独的能力和权限评估。
+
+视频扩展沿用同一模式。视频站点 adapter 只返回标题、来源页面、视频标识、媒体信息和下载地址，`features/video` 调用 `backend.submitVideo`；不需要修改 manga adapter，也不需要让 popup 或后端 provider 理解该站点的 DOM。
 
 ## 4. 目录结构
 
@@ -473,10 +535,39 @@ apps/
         utils.ts
   extension/
     src/
+      runtime/
+        content-entry.js
+        adapter-registry.js
+        capability-runner.js
+      backend/
+        client.js
+        contracts.js
+        auth.js
+      features/
+        metadata/
+        download-resources/
+        video/
+      adapters/
+        common/
+        exhentai/
+          adapter.js
+          pages/
+            detail.js
+            download.js
+        nhentai/
+          adapter.js
+          pages/
+            gallery.js
       content/
-      popup/
+        injector.js
       background/
-      site-adapters/
+        service-worker.js
+        tab-state.js
+        task-queue.js
+      popup/
+        popup.html
+        popup.js
+        popup.css
   prototype/
     src/
 packages/
@@ -588,20 +679,34 @@ Admin 展示扫描结果
 ### 6.2 插件导入 metadata
 
 ```text
-Extension 采集页面
+Content runtime 检测当前页面
   ↓
-POST /api/import
+Adapter registry 选择 site adapter + page handler
   ↓
-Metadata Ingest: validate token and normalize payload
+Site adapter 只读取 DOM，返回规范化页面事实
   ↓
-Tags: upsert canonical tags
+Feature: metadata.submitMetadata
   ↓
-Library: create/update comic
+Backend client: 调用 web app extension/metadata API
   ↓
-Metadata Ingest: create comic_source and comic_resource
+Metadata Ingest: validate token, normalize and match
+  ↓
+Tags / Library: upsert canonical tags and comic
   ↓
 返回导入结果和可下载资源状态
 ```
+
+跨页面的站点由多个 handler 组成，但不改变这条通用链路：
+
+```text
+ExHentai detail page                 ExHentai download page
+  │ metadata                           │ resource
+  └────────── submitMetadata ──────────┴──────── submitDownloadResource
+                         ↓
+              Metadata Ingest 按 site + sourceId 幂等关联
+```
+
+NHentai 等单页站点则由同一个 page handler 产出 metadata 和 resources，运行时按能力调用同一套 backend client。
 
 ### 6.3 下载
 
@@ -620,6 +725,22 @@ Library: scan finalized file
   ↓
 Reader 可以读取页面
 ```
+
+### 6.4 视频提交和下载（后置扩展）
+
+```text
+Video site adapter 读取视频信息和下载地址
+  ↓
+Feature: video.submitVideo
+  ↓
+Backend client: 调用视频提交 API
+  ↓
+Metadata Ingest / Downloads: 校验、幂等、创建视频下载任务
+  ↓
+Provider: 获取或下载媒体文件
+```
+
+视频适配器只负责来源站差异；后端合同、任务生命周期和 provider 仍由通用模块负责。视频能力预留在架构中，但不进入本地漫画 MVP。
 
 ## 7. 第一阶段 MVP
 
@@ -692,14 +813,17 @@ Reader 可以读取页面
 浏览器插件和 Metadata Ingest：
 
 - Chrome Manifest V3 extension
-- 站点 adapter
+- 通用 runtime、backend client 和规范化 API contract
+- adapter registry，以及按站点/页面类型拆分的 page handler
+- ExHentai 详情页采集 metadata，资源页采集种子/磁链资源
+- NHentai 单 gallery 页采集 metadata 和可下载资源
 - 读取来源站标题、作者、标签、封面、URL、站点 ID
-- 读取磁链 / 种子资源
-- 提交本地服务
+- 统一提交 metadata、download resource 和状态查询
 - 与已有本地漫画匹配
 - 重复导入策略
-- 第一版插件只提交详情页，不做列表页批量采集
+- 详情页、资源页和单页 gallery 支持；不做列表页批量采集
 - 允许只提交 metadata，不提交可下载资源
+- 为视频信息和下载地址预留 `submitVideo` 合同，但暂不要求实现具体视频站点
 
 ## 10. 第四阶段
 
@@ -774,7 +898,7 @@ Downloads 和 OpenList provider：
 部分后续阶段能力已经提前进入 `apps/web`：
 
 - 第二阶段的一部分：标题 / 元数据编辑、标签维护、封面上传 / 重新生成、重复候选、合并为章节和恢复
-- 第三阶段的一部分：Chrome MV3 插件 ExHentai 详情页采集、torrent 页面资源采集、浏览器登录态种子转磁链、`metadata-ingest`、导入 token、来源站状态检查、metadata 导入、remote-only 记录和显式本地匹配提交
+- 第三阶段的一部分：Chrome MV3 插件 ExHentai 详情页采集、torrent 页面资源采集、浏览器登录态种子转磁链、`metadata-ingest`、导入 token、来源站状态检查、metadata 导入、remote-only 记录和显式本地匹配提交。插件已完成第一步 runtime/backend/features/adapters 重构，ExHentai 是首个完整迁移的站点适配层；后续新增 NHentai 的下载能力、视频站点或更多资源页面继续沿用同一边界。
 - 第四阶段的一部分：Downloads provider 注册、OpenList 连接检查、OpenList cloud scan、资源导入、下载准备、临时下载、finalization
 - 第五阶段的一部分：collections / reading queue 和队列阅读导航
 

@@ -13,13 +13,23 @@ assert(Array.isArray(manifest.permissions), "permissions must be an array");
 assert(manifest.permissions.includes("activeTab"), "activeTab permission is required");
 assert(manifest.permissions.includes("scripting"), "scripting permission is required");
 assert(manifest.permissions.includes("storage"), "storage permission is required");
+assert(manifest.permissions.includes("downloads"), "downloads permission is required");
+assert(manifest.host_permissions?.includes("https://nhentai.net/*"), "nhentai host permission is required");
+assert(manifest.host_permissions?.includes("https://*.nhentai.net/*"), "nhentai subdomain host permission is required");
 
 const referencedFiles = [
   manifest.action.default_popup,
   manifest.background?.service_worker,
-  "src/content/site-adapters.js",
-  "src/content/metadata-contract.js",
-  "src/content/collect-page-metadata.js",
+  "src/background/nhentai-download-capture.js",
+  "src/runtime/status-placement.js",
+  "src/adapters/exhentai/adapter.js",
+  "src/adapters/nhentai/adapter.js",
+  "src/runtime/adapter-registry.js",
+  "src/runtime/metadata-contract.js",
+  "src/runtime/collector.js",
+  "src/backend/client.js",
+  "src/features/metadata/submit.js",
+  "src/features/download-resources/submit.js",
   "src/content/injector.js",
   "src/background/torrent-magnet.js",
   "src/popup/popup.css",
@@ -38,6 +48,7 @@ checkFixture({
   url: "https://example.test/gallery/123",
   expected: {
     adapterId: "generic",
+    pageType: "detail",
     site: "example.test",
     sourceId: "example.test/gallery/123",
     title: "Generic Sample Comic",
@@ -51,10 +62,12 @@ checkFixture({
   url: "https://nhentai.net/g/123/",
   expected: {
     adapterId: "nhentai-gallery",
+    pageType: "detail",
+    capabilities: ["metadata", "download-resource"],
     site: "nhentai.net",
     sourceId: "nhentai.net/g/123",
-    title: "NH Sample Comic",
-    originalTitle: "Sample Original Comic",
+    title: "Sample Original Comic",
+    originalTitle: "NH Sample Comic",
     tagCount: 2,
     resourceCount: 0,
   },
@@ -65,6 +78,7 @@ checkFixture({
   url: "https://exhentai.org/g/3242017/mock-token/",
   expected: {
     adapterId: "ehentai-gallery",
+    pageType: "detail",
     site: "exhentai.org",
     sourceId: "exhentai.org/g/3242017",
     sourceUrl: "https://exhentai.org/g/3242017/mock-token/",
@@ -84,6 +98,7 @@ checkFixture({
   url: "https://exhentai.org/gallerytorrents.php?gid=3242017&t=mocktoken",
   expected: {
     adapterId: "ehentai-torrents",
+    pageType: "resource",
     site: "exhentai.org",
     sourceId: "exhentai.org/g/3242017",
     sourceUrl: "https://exhentai.org/g/3242017/",
@@ -95,6 +110,8 @@ checkFixture({
 });
 
 await checkTorrentMagnet();
+checkNhentaiDownloadCapture();
+checkStatusPlacement();
 
 console.log("Extension manifest and collector checks passed.");
 
@@ -103,6 +120,7 @@ function checkFixture({ file, url, expected }) {
   const result = runCollector(html, url);
 
   assert(result.adapterId === expected.adapterId, `${file} adapterId mismatch`);
+  assert(result.pageType === expected.pageType, `${file} pageType mismatch`);
   assert(result.site === expected.site, `${file} site mismatch`);
   assert(result.sourceId === expected.sourceId, `${file} sourceId mismatch`);
   assert(result.title === expected.title, `${file} title mismatch`);
@@ -128,6 +146,11 @@ function checkFixture({ file, url, expected }) {
       );
     }
   }
+  if (expected.capabilities) {
+    for (const capability of expected.capabilities) {
+      assert(result.pageCapabilities.includes(capability), `${file} missing capability ${capability}`);
+    }
+  }
 }
 
 function runCollector(html, url) {
@@ -140,13 +163,22 @@ function runCollector(html, url) {
   };
 
   vm.createContext(context);
-  for (const file of ["src/content/site-adapters.js", "src/content/metadata-contract.js"]) {
+  for (const file of [
+    "src/adapters/exhentai/adapter.js",
+    "src/adapters/nhentai/adapter.js",
+    "src/runtime/adapter-registry.js",
+    "src/runtime/metadata-contract.js",
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(root, file), "utf8"), context, { filename: file });
   }
 
-  return vm.runInContext(fs.readFileSync(path.join(root, "src/content/collect-page-metadata.js"), "utf8"), context, {
-    filename: "src/content/collect-page-metadata.js",
+  vm.runInContext(fs.readFileSync(path.join(root, "src/runtime/collector.js"), "utf8"), context, {
+    filename: "src/runtime/collector.js",
   });
+
+  const metadata = context.window.MangaTestCollector.normalizeMetadata(context.window.MangaTestCollector.collectPageMetadata());
+  const page = context.window.MangaTestCollector.getCurrentPage()?.page;
+  return { ...metadata, pageCapabilities: page?.capabilities || [] };
 }
 
 function createDocument(html, location) {
@@ -192,11 +224,11 @@ function querySelector(html, selector, location) {
     return parseElements(sectionById(html, "gd1"), "img", location)[0] ?? null;
   }
 
-  if (selector === "#info h1") {
+  if (selector === "#info > h1" || selector === "#info h1") {
     return elementFromTag(sectionById(html, "info"), "h1", location);
   }
 
-  if (selector === "#info h2") {
+  if (selector === "#info > h2" || selector === "#info h2") {
     return elementFromTag(sectionById(html, "info"), "h2", location);
   }
 
@@ -263,6 +295,94 @@ async function checkTorrentMagnet() {
   assert(magnet.startsWith("magnet:?xt=urn%3Abtih%3A"), "torrentToMagnet must produce a btih magnet");
   assert(magnet.includes("dn=demo"), "torrentToMagnet must include torrent name");
   assert(magnet.includes("tr=http%3A%2F%2Ftracker"), "torrentToMagnet must include tracker");
+}
+
+function checkNhentaiDownloadCapture() {
+  const context = { URL, Date, self: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/background/nhentai-download-capture.js"), "utf8"), context, {
+    filename: "src/background/nhentai-download-capture.js",
+  });
+
+  const capture = context.self.MangaTestNhentaiDownloadCapture;
+  const torrentUrl = "https://i2.nhentai.net/download/4132256?gid=674903&fmt=torrent&sig=mock";
+  const zipUrl = "https://i2.nhentai.net/download/4132256?gid=674903&fmt=zip&sig=mock";
+  assert(capture.isNhentaiTorrentDownloadUrl(torrentUrl), "nhentai torrent URL must be recognized");
+  assert(!capture.isNhentaiTorrentDownloadUrl(zipUrl), "nhentai ZIP URL must be ignored");
+  assert(capture.isTorrentDownload({ filename: "" }, torrentUrl), "nhentai torrent URL must identify a torrent");
+  assert(capture.isUsableTabId(42), "zero-based Chrome tab IDs must be accepted");
+  assert(!capture.isUsableTabId(-1), "unknown Chrome tab IDs must be rejected");
+
+  const pending = new Map([[42, { createdAt: 1000 }]]);
+  assert(capture.activePendingTabIds(pending, 1000)[0] === 42, "pending torrent intent must retain its tab ID");
+}
+
+function checkStatusPlacement() {
+  const context = { self: {}, window: {} };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(root, "src/runtime/status-placement.js"), "utf8"), context, {
+    filename: "src/runtime/status-placement.js",
+  });
+
+  const placement = context.window.MangaTestStatusPlacement;
+  assert(placement, "status placement runtime must be exposed");
+
+  const document = createPlacementDocument();
+  const element = createPlacementElement();
+  placement.mount(element, undefined, { document, location: new URL("https://example.test/gallery/1") });
+  assert(element.style.position === "fixed", "default status placement must use fixed positioning");
+  assert(element.style.top === "16px", "default status placement must use the top-right offset");
+  assert(element.style.right === "16px", "default status placement must use the right offset");
+  assert(document.body.children.includes(element), "default status placement must append to body");
+
+  const offsetElement = createPlacementElement();
+  placement.mount(
+    offsetElement,
+    { mode: "viewport", top: 40, left: "12%", bottom: "8px" },
+    { document, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(offsetElement.style.top === "40px", "numeric status offsets must become pixels");
+  assert(offsetElement.style.left === "12%", "custom left status offset must be preserved");
+  assert(offsetElement.style.right === "auto", "unspecified right offset must be reset");
+
+  const customTarget = { children: [], appendChild(elementToMount) { this.children.push(elementToMount); } };
+  const customDocument = createPlacementDocument(customTarget);
+  const customElement = createPlacementElement();
+  let customCalled = false;
+  placement.mount(
+    customElement,
+    {
+      mode: "custom",
+      mount({ element: elementToMount, document: documentToUse, location }) {
+        customCalled = location.hostname === "example.test";
+        documentToUse.querySelector(".site-status").appendChild(elementToMount);
+        return true;
+      },
+    },
+    { document: customDocument, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(customCalled, "custom status placement must receive the page context");
+  assert(customTarget.children.includes(customElement), "custom status placement must own DOM insertion");
+
+  const fallbackElement = createPlacementElement();
+  placement.mount(
+    fallbackElement,
+    { mode: "custom", mount: () => false },
+    { document, location: new URL("https://example.test/gallery/1") },
+  );
+  assert(document.body.children.includes(fallbackElement), "failed custom placement must fall back to body mounting");
+}
+
+function createPlacementDocument(customTarget = null) {
+  const body = { children: [], appendChild(element) { this.children.push(element); } };
+  return {
+    body,
+    querySelector: () => customTarget,
+  };
+}
+
+function createPlacementElement() {
+  return { style: {} };
 }
 
 function findElementByAttr(html, tag, attrName, attrValue, location) {

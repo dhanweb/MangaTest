@@ -12,7 +12,7 @@ Load `apps/extension` as an **unpacked** extension in Chrome (Load unpacked → 
 
 Before submitting metadata:
 
-1. Start `apps/web` at `http://127.0.0.1:4317`.
+1. Start `apps/web` at `http://127.0.0.1:4427`.
 2. Open MangaTest admin settings and set a metadata import token.
 3. Open an ExHentai gallery detail page in Chrome.
 4. Open the extension popup, enter the local service URL and token, and collect a preview.
@@ -32,12 +32,44 @@ When the status panel shows a single local match, enable "提交到本地漫画"
 7. Click "提交入库".
 8. Confirm Admin > 漫画管理 shows a remote-only record or the chosen matched local record.
 
+For an NHentai gallery, the adapter keeps metadata collection and download handling on the same detail page. It triggers only the native `Torrent` menu item; the service worker recognizes NHentai's signed `fmt=torrent` download URL, forwards it through the existing torrent-to-magnet flow, and can fall back to cached page metadata if the browser navigates away before the content script responds. ZIP/CBZ downloads remain untouched.
+
 ## Verification
 
 ```bash
 npm run check
 ```
 
-The extension loads site-specific adapters from `src/content/site-adapters.js` before falling back to the generic detail-page collector.
+The content script is assembled from independent layers:
+
+- `src/runtime/` detects the current page and normalizes collected facts.
+- `src/backend/` owns the generic HTTP bridge to MangaTest.
+- `src/features/` owns metadata and download-resource submission flows.
+- `src/adapters/` owns site-specific URL matching, page handlers, DOM selectors, and resource extraction.
+- `src/content/injector.js` only renders the common controls and orchestrates capabilities returned by the current adapter.
+
+The first adapters are ExHentai (`src/adapters/exhentai/adapter.js`) and NHentai (`src/adapters/nhentai/adapter.js`). ExHentai keeps separate detail and torrent-page handlers while sharing the generic backend and submission flows.
+
+详情页“已下载 / 已入库 / 未下载”等状态提示由 common injector 统一渲染，默认固定在右上角。站点 page handler 可以通过 `statusPlacement` 调整位置：
+
+```js
+statusPlacement: { mode: "viewport", top: "72px", right: "16px" }
+```
+
+如果站点需要挂到自己的 DOM 结构中，可以完全接管插入：
+
+```js
+statusPlacement: {
+  mode: "custom",
+  mount({ element, document }) {
+    const target = document.querySelector(".site-header");
+    if (!target) return false;
+    target.appendChild(element);
+    return true;
+  },
+}
+```
+
+自定义挂载返回 `false` 或抛出异常时，会回退到默认右上角；操作面板本身仍由 common injector 固定在右下角。
 
 For ExHentai, `.torrent` URLs are not sent to MangaTest when conversion succeeds. The extension submits generated magnet links instead.

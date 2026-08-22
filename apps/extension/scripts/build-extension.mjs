@@ -19,9 +19,14 @@ const files = [
   "src/popup/popup.js",
   "src/background/service-worker.js",
   "src/background/torrent-magnet.js",
-  "src/content/site-adapters.js",
-  "src/content/metadata-contract.js",
-  "src/content/collect-page-metadata.js",
+  "src/adapters/exhentai/adapter.js",
+  "src/adapters/nhentai/adapter.js",
+  "src/runtime/adapter-registry.js",
+  "src/runtime/metadata-contract.js",
+  "src/runtime/collector.js",
+  "src/backend/client.js",
+  "src/features/metadata/submit.js",
+  "src/features/download-resources/submit.js",
   "src/content/injector.js",
 ];
 
