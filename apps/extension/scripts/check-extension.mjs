@@ -63,8 +63,8 @@ checkFixture({
     capabilities: ["metadata", "download-resource"],
     site: "nhentai.net",
     sourceId: "nhentai.net/g/123",
-    title: "NH Sample Comic",
-    originalTitle: "Sample Original Comic",
+    title: "Sample Original Comic",
+    originalTitle: "NH Sample Comic",
     tagCount: 2,
     resourceCount: 0,
   },
@@ -219,11 +219,11 @@ function querySelector(html, selector, location) {
     return parseElements(sectionById(html, "gd1"), "img", location)[0] ?? null;
   }
 
-  if (selector === "#info h1") {
+  if (selector === "#info > h1" || selector === "#info h1") {
     return elementFromTag(sectionById(html, "info"), "h1", location);
   }
 
-  if (selector === "#info h2") {
+  if (selector === "#info > h2" || selector === "#info h2") {
     return elementFromTag(sectionById(html, "info"), "h2", location);
   }
 

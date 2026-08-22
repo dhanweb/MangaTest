@@ -65,8 +65,8 @@
       site: "nhentai.net",
       sourceId: `nhentai.net${context.location.pathname.replace(/\/+$/, "") || "/"}`,
       sourceUrl: absoluteUrl(context, text(context, 'link[rel="canonical"]', "href")) || context.location.href,
-      title: text(context, "#info h1") || text(context, "h1") || context.document.title,
-      originalTitle: text(context, "#info h2") || null,
+      title: text(context, "#info > h2") || text(context, "#info h2") || text(context, "h2") || context.document.title,
+      originalTitle: text(context, "#info > h1") || text(context, "#info h1") || text(context, "h1") || null,
       coverUrl: absoluteUrl(context, text(context, "#cover img", "src") || text(context, '[property="og:image"]', "content")),
       tags,
     };

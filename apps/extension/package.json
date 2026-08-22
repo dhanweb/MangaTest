@@ -1,6 +1,6 @@
 {
   "name": "extension",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": true,
   "scripts": {
     "check": "node scripts/check-extension.mjs && node --check src/background/service-worker.js && node --check src/background/torrent-magnet.js && node --check src/adapters/exhentai/adapter.js && node --check src/adapters/nhentai/adapter.js && node --check src/runtime/adapter-registry.js && node --check src/runtime/metadata-contract.js && node --check src/runtime/collector.js && node --check src/backend/client.js && node --check src/features/metadata/submit.js && node --check src/features/download-resources/submit.js && node --check src/content/injector.js && node --check src/popup/popup.js",
