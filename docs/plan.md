@@ -54,12 +54,27 @@ MangaTest 是一个本地自托管的个人漫画库系统。
 
 - 标题字段至少包含 `display_title`、`file_title`、`original_title`、`metadata_query_title`、`sort_title`。
 - `display_title` 是用户展示名，插件再次导入不得覆盖。
+- `display_title` 需要记录来源状态：扫描生成、metadata 生成或用户手动编辑；metadata 标题还要保留对应 provider/source identity。只有扫描生成或同一 metadata 来源生成的标题允许被后续来源同步更新，用户手动编辑后必须保持不变。
 - 作者作为普通标签处理，例如 `artist:xxx`、`group:xxx`，不单独建作者表。
 - MVP 标签绑定在 `comic` 上，数据库预留 `chapter` 标签关系。
 - 标签 namespace 允许任意值，UI 内置常见分类排序。
 - 中文翻译缺失时显示英文 canonical，并给“未翻译”弱提示。
 - 大小写和空格规范化可以自动处理，真正同义词合并必须后台确认。
 - 用户手动编辑标签后，插件再次导入不得覆盖用户编辑，只能保留为来源标签或候选标签。
+
+PixivDownloader 外部同步：
+
+- PixivDownloader 作为独立的外部采集和下载程序运行，不 fork、不嵌入 MangaTest，也不作为 MangaTest 的 Downloads provider。
+- MangaTest 先通过正常 manga root 扫描建立 `comic`、`local_file`、`chapter` 和 `page`；PixivDownloader 同步只补充 metadata，不替代 Library 扫描，不直接创建页面文件事实。
+- 首版通过只读方式查询 PixivDownloader SQLite。MangaTest 不写入、不迁移、不修复 PixivDownloader 数据库，也不在页面请求中实时依赖该数据库。
+- PixivDownloader 数据库路径、PixivDownloader 下载根目录和对应的 MangaTest `manga_root_id` 必须分别配置；不能假设数据库文件位于下载根目录内。
+- 首次关联以解析后的作品绝对路径匹配 `local_files.absolute_path`，成功后以 `site=pixiv + source_id=artwork_id` 作为长期幂等身份；标题只用于展示和人工候选，不用于自动绑定。
+- PixivDownloader `artworks.folder` / `artworks.move_folder` 中的 `{0}` 由所配置下载根目录解析，`{N}` 由其 `path_prefixes` 表解析；`moved` 生效且 `move_folder` 非空时优先使用移动后路径。
+- 同步只修改 MangaTest 的 `display_title`、来源 metadata 和允许自动更新的派生字段；`file_title`、真实目录名和物理文件保持不变。
+- 首版要求 PixivDownloader 下载目录采用扁平作品布局，即每个 `artwork_id` 作品目录直接位于所配置 manga root 下。作者目录、分级目录或其他多层布局需要后续新增明确的 Pixiv 专用扫描模式，不能让普通根目录扫描猜测。
+- 首版一个 Pixiv `artwork_id` 对应一本 MangaTest 漫画，多图作品对应该漫画的页面。`series_id`、`series_order` 先保存为来源 metadata，并在后台形成可逆的“按系列合并为章节”候选，不自动移动文件或自动合并。
+- 外部记录删除、路径缺失、路径越界或 schema 不兼容时只记录同步结果，不删除 MangaTest 漫画，不删除物理文件，不静默猜测匹配。
+- 首版只提供后台手动“测试连接、预览同步、扫描并同步”，不做启动自动同步、文件监听或无界后台轮询。
 
 前台与后台：
 
@@ -290,6 +305,27 @@ Metadata Ingest 不直接登录 OpenList，不直接提交 115 离线下载。
 - 插件提交 metadata 时允许不带 magnet，只带来源 URL、标题、标签、封面。
 - 如果没有本地漫画匹配，可以创建 remote-only / missing-local 状态的 comic。
 - remote-only 默认不进入普通首页，只在后台或待下载筛选里展示。
+
+PixivDownloader 是 Metadata Ingest 下的独立外部来源适配器，不建立顶层 `pixiv` 或 `pixiv-downloader` 业务模块。推荐目录：
+
+```text
+modules/metadata-ingest/sources/pixiv-downloader/
+  ├─ types.ts              # 与外部 schema 解耦的规范化作品 DTO
+  ├─ schema-inspector.ts   # 必需表/列与兼容性检查
+  ├─ sqlite-reader.ts      # PixivDownloader SQLite 只读查询
+  ├─ path-resolver.ts      # folder/move_folder 与 {0}/{N} 解析
+  ├─ comic-matcher.ts      # source identity 和 local_file 路径匹配
+  ├─ sync-service.ts       # 预览、冲突判断和批量同步应用服务
+  └─ index.ts
+```
+
+模块边界：
+
+- SQLite adapter 只产出规范化 `ExternalPixivArtwork`，后续业务代码不依赖 PixivDownloader 表名；未来可以在不改变同步规则的前提下替换成 HTTP 或插件 adapter。
+- Admin 只负责配置、触发、预览和展示同步结果；路径解析、匹配、标题保护和幂等规则属于同步 application service。
+- 同步服务复用 Library 查询本地文件，复用 Metadata Ingest 写入 `comic_source` 和来源标签；不得复制扫描或标签业务规则。
+- 读取外部 SQLite 和写 MangaTest SQLite 使用两个独立连接。不得把外部库 `ATTACH` 到主业务连接，不做跨库事务。
+- 外部 schema 检查失败时整次同步停止；单条路径冲突或缺失则记录为条目结果，其他安全条目可以继续按小批次提交。
 
 ### 3.8 Downloads 模块
 
@@ -664,7 +700,7 @@ api/             该模块专用请求解析和响应 DTO
 - `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode`。
 - `video_roots`：视频根目录，保存绝对路径、启用状态和扫描模式。
 - `scan_sessions`：扫描批次，保存开始时间、结束时间、root、统计结果、错误摘要。
-- `comics`：漫画业务实体，保存展示标题、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
+- `comics`：漫画业务实体，保存展示标题、展示标题来源（`scan` / `metadata` / `manual`）及可选来源身份、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
 - `local_files`：本地文件实体，保存 root、路径、类型、size、mtime、可选 hash、是否主文件、缺失状态。
 - `chapters`：章节实体，保存 comic 归属、可选标题、排序值、来源 local_file。
 - `pages`：页面实体，保存 chapter 归属、页码、page source、宽高、读取状态。
@@ -673,6 +709,8 @@ api/             该模块专用请求解析和响应 DTO
 - `chapter_tags`：预留章节标签关系，MVP 可以不开放 UI。
 - `reading_progress`：阅读进度，保存 comic、chapter、page、百分比、更新时间。
 - `comic_sources`：来源站元数据，保存站点、来源 ID、URL、原始标题、封面 URL。
+- `metadata_sync_sessions`：外部 metadata 同步批次，保存 provider、开始/结束时间、状态、匹配/更新/跳过/冲突/错误统计和摘要；首个 provider 为 `pixiv-downloader`。
+- `metadata_sync_entries`：同步条目结果，保存批次、外部身份、解析路径、匹配的 comic/local_file、动作和冲突或跳过原因，不保存 Cookie 等凭据。
 - `comic_resources`：可下载资源，保存资源类型、脱敏展示字段、完整资源链接密文或受控字段。
 - `videos`：视频业务实体，保存标题、状态、last-watched 快照和本地集数关系。
 - `video_episodes`：视频集数和可播放文件，保存视频归属、标题、路径、自然/手动排序、时长秒数、文件状态。
@@ -700,6 +738,7 @@ video_root 1 ── * video_episode
 video      1 ── * video_episode
 video      * ── * tag
 video      1 ── * video_progress
+metadata_sync_session 1 ── * metadata_sync_entry
 ```
 
 数据安全要求：
@@ -709,6 +748,7 @@ video      1 ── * video_progress
 - `operation_logs` 不记录完整 magnet。
 - manga root 必须是绝对路径，且不得默默自动创建父目录。
 - video root 必须是绝对路径；视频播放、首帧和 PotPlayer 启动 API 只接受受控的 `videoId`/`episodeId`，不接受客户端任意路径。
+- 外部 metadata 同步解析出的路径只能用于匹配已经配置并扫描出的 `local_file`；不得把外部数据库中的任意路径直接变成客户端可读取路径。
 
 ## 6. 模块交互示例
 
@@ -812,6 +852,48 @@ Provider: 获取或下载媒体文件
 
 视频适配器只负责来源站差异；后端合同、任务生命周期和 provider 仍由通用模块负责。视频能力预留在架构中，但不进入本地漫画 MVP。
 
+### 6.5 PixivDownloader SQLite 同步
+
+```text
+Admin 配置 PixivDownloader 数据库、下载根目录和对应 manga root
+  ↓
+连接测试：只读打开 SQLite，检查 artworks/authors/tags/artwork_tags/path_prefixes 表与必需列
+  ↓
+Library: scanLibraryRoot() 建立或刷新本地 comic/local_file/chapter/page
+  ↓
+Pixiv SQLite adapter: 批量读取 artwork、作者、标签和系列信息
+  ↓
+Path resolver: moved/move_folder 优先级 + {0}/{N} 解码 + Windows 路径规范化
+  ↓
+Matcher: 先查 site=pixiv + artwork_id，再按 local_files.absolute_path 首次绑定
+  ↓
+Preview: 展示将更新、保持用户标题、未匹配、路径越界和身份冲突
+  ↓
+Sync service: 小批次写 display_title/source metadata/tags 和同步结果
+```
+
+同步字段规则：
+
+```text
+PixivDownloader artworks.artwork_id → comic_sources.source_id
+PixivDownloader artworks.title      → comics.display_title（仅非 manual）
+PixivDownloader artworks.title      → comic_sources.original_title
+PixivDownloader artworks.title      → comics.metadata_query_title
+本地目录或文件名                    → comics.file_title（同步不修改）
+PixivDownloader authors.name        → artist:* 标签
+PixivDownloader tags.name           → general:* 标签
+PixivDownloader series_id/order      → 来源 raw metadata 和系列合并候选
+```
+
+重复同步必须幂等。已存在来源身份但来源绑定和路径匹配指向不同漫画时，必须形成冲突并停止该条自动更新，不允许自动合并两本漫画。
+
+验收条件：
+
+- 扫描 `artwork_id` 目录后，同步可以按绝对路径找到 `local_file`，把未手动编辑的 `display_title` 更新为 `artworks.title`，同时保持 `file_title` 和物理目录不变。
+- 用户手动编辑标题后再次同步，`display_title` 保持用户值，Pixiv 最新标题仍写入对应 `comic_source` 供后台查看或手动恢复。
+- 相同数据库重复同步不新增重复 comic/source/tag；作品移动后仍优先通过 `site + source_id` 更新原漫画，并把路径差异交给正常扫描或路径维护处理。
+- schema 不兼容、路径越界、来源身份冲突和本地文件未匹配都有明确同步条目结果，且不会删除 MangaTest 记录或物理文件。
+
 ## 7. 第一阶段 MVP
 
 第一阶段目标：
@@ -911,6 +993,8 @@ Provider: 获取或下载媒体文件
 - 详情页、资源页和单页 gallery 支持；不做列表页批量采集
 - 允许只提交 metadata，不提交可下载资源
 - 为视频信息和下载地址预留 `submitVideo` 合同，但暂不要求实现具体视频站点
+- PixivDownloader SQLite 外部同步按独立子阶段实施：先完成标题来源状态与数据迁移，再完成 schema 检查/路径解析、预览匹配、幂等写入、后台入口和真实数据库副本验证
+- PixivDownloader 同步首版不修改 Library 普通扫描、不实现 Pixiv 下载、不改造浏览器插件；如果真实数据无法满足扁平作品根约束，应先更新本计划再新增 Pixiv 专用扫描模式
 
 ## 10. 第四阶段
 
@@ -978,6 +1062,7 @@ Downloads 和 OpenList provider：
 - 后台管理入口从前台打开时默认使用浏览器新标签页，后台内部提供类似浏览器的应用页签工作台
 - 后台应用页签需要缓存已打开页签，并尽量保留页签切换时的页面交互状态
 - 后续阶段启动点：优先打通 Chrome MV3 插件采集详情页 metadata、状态查询、提交入库和 remote-only / 本地匹配闭环
+- PixivDownloader 集成按外部 SQLite 只读同步方案推进：普通根目录扫描负责文件事实，独立 metadata source adapter 负责路径匹配、标题和来源信息补全；实现前先完成标题来源字段和同步冲突模型
 - 校准前台漫画网站体验与后台管理入口的主次关系
 - 对扫描、reader、缓存、文件维护和备份做端到端验证
 - 保持文档与真实实现同步
