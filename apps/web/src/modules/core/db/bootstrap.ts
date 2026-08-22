@@ -400,12 +400,6 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS download_tasks_resource_idx
       ON download_tasks (comic_resource_id);
 
-    CREATE INDEX IF NOT EXISTS download_tasks_video_resource_idx
-      ON download_tasks (video_resource_id);
-
-    CREATE INDEX IF NOT EXISTS download_tasks_media_type_idx
-      ON download_tasks (media_type);
-
     CREATE TABLE IF NOT EXISTS download_task_preparations (
       id TEXT PRIMARY KEY NOT NULL,
       download_task_id TEXT NOT NULL REFERENCES download_tasks(id),
@@ -605,12 +599,6 @@ export function bootstrapDatabase() {
     CREATE INDEX IF NOT EXISTS media_assets_page_idx
       ON media_assets (page_id);
 
-    CREATE INDEX IF NOT EXISTS media_assets_video_idx
-      ON media_assets (video_id);
-
-    CREATE INDEX IF NOT EXISTS media_assets_video_episode_idx
-      ON media_assets (video_episode_id);
-
     CREATE INDEX IF NOT EXISTS media_assets_last_access_idx
       ON media_assets (last_access_at);
 
@@ -706,6 +694,18 @@ export function bootstrapDatabase() {
   } catch { /* index may already exist */ }
   try {
     sqlite2.exec("CREATE INDEX IF NOT EXISTS download_tasks_offline_task_idx ON download_tasks (offline_task_id)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS download_tasks_video_resource_idx ON download_tasks (video_resource_id)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS download_tasks_media_type_idx ON download_tasks (media_type)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS media_assets_video_idx ON media_assets (video_id)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS media_assets_video_episode_idx ON media_assets (video_episode_id)");
   } catch { /* index may already exist */ }
 
   // Auto-create system manga root if it doesn't exist
