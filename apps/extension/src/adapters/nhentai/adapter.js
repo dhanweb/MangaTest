@@ -24,6 +24,31 @@
     }
   }
 
+  function findTorrentMenuItem(context) {
+    return [...context.document.querySelectorAll('[role="menuitem"]')].find((element) => cleanText(element.textContent).toLowerCase() === "torrent") || null;
+  }
+
+  async function triggerTorrentDownload(context) {
+    const downloadButton = context.document.querySelector("#download");
+    if (!downloadButton) {
+      return false;
+    }
+
+    let torrentMenuItem = findTorrentMenuItem(context);
+    if (!torrentMenuItem) {
+      downloadButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      torrentMenuItem = findTorrentMenuItem(context);
+    }
+
+    if (!torrentMenuItem) {
+      return false;
+    }
+
+    torrentMenuItem.click();
+    return true;
+  }
+
   function collectGallery(context) {
     const tags = [];
 
@@ -73,8 +98,9 @@
       return {
         id: "nhentai-gallery",
         type: "detail",
-        capabilities: ["metadata"],
+        capabilities: ["metadata", "download-resource"],
         collect: () => collectGallery(context),
+        triggerResourceDownload: () => triggerTorrentDownload(context),
       };
     },
   };

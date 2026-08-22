@@ -2,13 +2,13 @@
   "manifest_version": 3,
   "name": "MangaTest Metadata Collector",
   "description": "通过站点适配器采集漫画信息和下载资源并提交到 MangaTest。",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "MangaTest 设置"
   },
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://exhentai.org/*", "https://e-hentai.org/*"],
+  "permissions": ["activeTab", "scripting", "storage", "downloads"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*"],
   "background": {
     "service_worker": "src/background/service-worker.js"
   },

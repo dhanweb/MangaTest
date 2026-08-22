@@ -54,12 +54,13 @@
   let libraryStatus = null;
   let libraryStatusLoaded = false;
   let panelBusy = false;
+  const handledCapturedDownloads = new Set();
 
   if (isDetailPage) {
     void cachePageMetadata();
     chrome.storage.onChanged.addListener(handleStorageChange);
 
-    if (page.capabilities?.includes("resource-navigation")) {
+    if (page.capabilities?.includes("resource-navigation") || page.capabilities?.includes("download-resource")) {
       injectGalleryPanel();
       void initDetailPage();
     } else {
@@ -350,11 +351,17 @@
       await cachePageMetadata();
       await METADATA_FEATURE.submit(metadata);
       await recordLastSubmit(metadata.sourceId, "metadata", true, "before-download");
-      showToast("⚡ 已提交信息，正在打开资源页…", "success");
+      showToast("⚡ 已提交信息，正在获取下载资源…", "success");
 
       const link = page.findResourcePageLink?.();
-      if (!link) throw new Error("未找到资源入口链接");
-      link.click();
+      if (link) {
+        link.click();
+      } else if (typeof page.triggerResourceDownload === "function") {
+        const triggered = await page.triggerResourceDownload();
+        if (!triggered) throw new Error("未找到 Torrent 下载按钮");
+      } else {
+        throw new Error("当前页面没有可用的下载入口");
+      }
     } catch (error) {
       showToast("❌ " + (error instanceof Error ? error.message : "开启下载失败"), "error");
       await clearPendingAutoDownload();
@@ -623,8 +630,47 @@
     void refreshLibraryStatus().then(updatePanelStatusUi);
   }
 
+  async function handleCapturedTorrentDownload(message) {
+    if (!isDetailPage || page.id !== "nhentai-gallery" || !message?.url) {
+      return { ok: false, error: "当前页面不支持 nhentai Torrent 捕获。" };
+    }
+
+    const downloadKey = String(message.downloadId || message.url);
+    if (handledCapturedDownloads.has(downloadKey)) {
+      return { ok: true, duplicate: true };
+    }
+    handledCapturedDownloads.add(downloadKey);
+
+    try {
+      const metadata = collectNormalizedMetadata();
+      const resourceUrl = new URL(message.url, location.href).toString();
+      await DOWNLOAD_FEATURE.submit(metadata, [
+        {
+          type: "torrent",
+          url: resourceUrl,
+          label: message.label || "NHentai Torrent",
+        },
+      ]);
+      await clearPendingAutoDownload();
+      await recordLastSubmit(metadata.sourceId, "download", true, "torrent");
+      showToast("✅ Torrent 已提交到 MangaTest", "success");
+      await refreshLibraryStatus();
+      updatePanelStatusUi();
+      return { ok: true };
+    } catch (error) {
+      await clearPendingAutoDownload();
+      showToast("❌ Torrent 提交失败：" + (error instanceof Error ? error.message : "未知错误"), "error");
+      return { ok: false, error: error instanceof Error ? error.message : "Torrent 提交失败" };
+    }
+  }
+
   if (isDetailPage) {
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message?.type === "MANGATEST_NHENTAI_TORRENT_CAPTURED") {
+        void handleCapturedTorrentDownload(message).then(sendResponse);
+        return true;
+      }
+
       if (message?.type === "MANGATEST_SOURCE_RESULT" || message?.type === "MANGATEST_DOWNLOAD_RESULT") {
         try {
           handleSourceResultMessage(message);

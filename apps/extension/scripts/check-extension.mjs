@@ -13,6 +13,8 @@ assert(Array.isArray(manifest.permissions), "permissions must be an array");
 assert(manifest.permissions.includes("activeTab"), "activeTab permission is required");
 assert(manifest.permissions.includes("scripting"), "scripting permission is required");
 assert(manifest.permissions.includes("storage"), "storage permission is required");
+assert(manifest.permissions.includes("downloads"), "downloads permission is required");
+assert(manifest.host_permissions?.includes("https://nhentai.net/*"), "nhentai host permission is required");
 
 const referencedFiles = [
   manifest.action.default_popup,
@@ -58,6 +60,7 @@ checkFixture({
   expected: {
     adapterId: "nhentai-gallery",
     pageType: "detail",
+    capabilities: ["metadata", "download-resource"],
     site: "nhentai.net",
     sourceId: "nhentai.net/g/123",
     title: "NH Sample Comic",
@@ -138,6 +141,11 @@ function checkFixture({ file, url, expected }) {
       );
     }
   }
+  if (expected.capabilities) {
+    for (const capability of expected.capabilities) {
+      assert(result.pageCapabilities.includes(capability), `${file} missing capability ${capability}`);
+    }
+  }
 }
 
 function runCollector(html, url) {
@@ -163,7 +171,9 @@ function runCollector(html, url) {
     filename: "src/runtime/collector.js",
   });
 
-  return context.window.MangaTestCollector.normalizeMetadata(context.window.MangaTestCollector.collectPageMetadata());
+  const metadata = context.window.MangaTestCollector.normalizeMetadata(context.window.MangaTestCollector.collectPageMetadata());
+  const page = context.window.MangaTestCollector.getCurrentPage()?.page;
+  return { ...metadata, pageCapabilities: page?.capabilities || [] };
 }
 
 function createDocument(html, location) {
