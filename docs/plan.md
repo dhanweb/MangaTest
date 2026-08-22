@@ -67,7 +67,7 @@ PixivDownloader 外部同步：
 - PixivDownloader 作为独立的外部采集和下载程序运行，不 fork、不嵌入 MangaTest，也不作为 MangaTest 的 Downloads provider。
 - MangaTest 先通过正常 manga root 扫描建立 `comic`、`local_file`、`chapter` 和 `page`；PixivDownloader 同步只补充 metadata，不替代 Library 扫描，不直接创建页面文件事实。
 - 首版通过只读方式查询 PixivDownloader SQLite。MangaTest 不写入、不迁移、不修复 PixivDownloader 数据库，也不在页面请求中实时依赖该数据库。
-- PixivDownloader 数据库路径、PixivDownloader 下载根目录和对应的 MangaTest `manga_root_id` 必须分别配置；不能假设数据库文件位于下载根目录内。
+- 用户必须在后台指定 PixivDownloader SQLite `.db` 文件的绝对路径，并另行指定 PixivDownloader 下载根目录和对应的 MangaTest `manga_root_id`；三者分别保存，不能假设数据库文件位于下载根目录内，也不能把某个安装目录硬编码为所有用户的默认值。Windows 安装示例为 `C:\Program Files\PixivDownload\data\pixiv_download.db`。
 - 首次关联以解析后的作品绝对路径匹配 `local_files.absolute_path`，成功后以 `site=pixiv + source_id=artwork_id` 作为长期幂等身份；标题只用于展示和人工候选，不用于自动绑定。
 - PixivDownloader `artworks.folder` / `artworks.move_folder` 中的 `{0}` 由所配置下载根目录解析，`{N}` 由其 `path_prefixes` 表解析；`moved` 生效且 `move_folder` 非空时优先使用移动后路径。
 - 同步只修改 MangaTest 的 `display_title`、来源 metadata 和允许自动更新的派生字段；`file_title`、真实目录名和物理文件保持不变。
@@ -857,7 +857,9 @@ Provider: 获取或下载媒体文件
 ```text
 Admin 配置 PixivDownloader 数据库、下载根目录和对应 manga root
   ↓
-连接测试：只读打开 SQLite，检查 artworks/authors/tags/artwork_tags/path_prefixes 表与必需列
+用户通过文件选择器或绝对路径输入指定具体 .db 文件；设置持久化该绝对路径
+  ↓
+连接测试：确认目标是存在的文件，以只读方式打开 SQLite，检查 artworks/authors/tags/artwork_tags/path_prefixes 表与必需列
   ↓
 Library: scanLibraryRoot() 建立或刷新本地 comic/local_file/chapter/page
   ↓
