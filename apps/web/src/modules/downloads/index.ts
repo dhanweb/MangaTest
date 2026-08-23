@@ -503,7 +503,7 @@ export async function createVideoDownloadTask(input: { title: string; resourceUr
     db.insert(videoResources).values({ id: resourceId, videoId: input.videoId ?? null, videoSourceId: input.videoSourceId ?? null, resourceType: resourceUrl.startsWith("magnet:") ? "magnet" : "http", displayLabel: title, resourceUrl, redactedResource: redactDownloadResource(resourceUrl), createdAt: now, updatedAt: now }).run();
   }
   db.insert(downloadTasks).values({ id: taskId, videoResourceId: resourceId, mediaType: "video", provider: "aria2", taskType: "transfer", status: "queued", targetDirectory, createdAt: now, updatedAt: now }).run();
-  void runVideoDownloadTask(taskId, resourceUrl, targetDirectory, root.id, settings.aria2RpcUrl, settings.aria2RpcToken);
+  void runVideoDownloadTask(taskId, title, resourceUrl, targetDirectory, root.id, settings.aria2RpcUrl, settings.aria2RpcToken);
   return { created: true, task: await getVideoDownloadTask(taskId) };
 }
 
@@ -519,11 +519,18 @@ async function getVideoDownloadTask(taskId: string) {
   return task;
 }
 
-async function runVideoDownloadTask(taskId: string, resourceUrl: string, targetDirectory: string, videoRootId: string, rpcUrl: string, rpcToken: string) {
+async function runVideoDownloadTask(taskId: string, title: string, resourceUrl: string, targetDirectory: string, videoRootId: string, rpcUrl: string, rpcToken: string) {
   const db = getDb();
   const now = new Date().toISOString();
   db.update(downloadTasks).set({ status: "downloading", updatedAt: now }).where(eq(downloadTasks.id, taskId)).run();
-  const result = await downloadWithAria2({ rpcUrl, rpcToken: rpcToken || undefined, uri: resourceUrl, dir: targetDirectory, taskId });
+  const result = await downloadWithAria2({
+    rpcUrl,
+    rpcToken: rpcToken || undefined,
+    uri: resourceUrl,
+    dir: targetDirectory,
+    out: /^https?:\/\//i.test(resourceUrl) ? buildVideoDownloadFileName(title, resourceUrl) : undefined,
+    taskId,
+  });
   const finishedAt = new Date().toISOString();
   if (result.success) {
     db.update(downloadTasks).set({ status: "completed", updatedAt: finishedAt }).where(eq(downloadTasks.id, taskId)).run();
@@ -3516,6 +3523,24 @@ function normalizeLimit(value: number) {
 
 function sanitizeDownloadName(value: string) {
   return sanitizeDownloadFileName(value).replace(/\.+/g, ".");
+}
+
+const VIDEO_FILE_EXTENSIONS = new Set(["mp4", "mkv", "avi", "mov", "webm", "m4v", "ts"]);
+
+export function buildVideoDownloadFileName(title: string, resourceUrl: string) {
+  const safeTitle = sanitizeDownloadFileName(title);
+  const titleExtension = path.extname(safeTitle).slice(1).toLowerCase();
+  if (VIDEO_FILE_EXTENSIONS.has(titleExtension)) return safeTitle;
+
+  let resourceExtension = "mp4";
+  try {
+    const urlExtension = path.extname(new URL(resourceUrl).pathname).slice(1).toLowerCase();
+    if (VIDEO_FILE_EXTENSIONS.has(urlExtension)) resourceExtension = urlExtension;
+  } catch {
+    // Use mp4 when the resource URL has no usable video extension.
+  }
+
+  return `${safeTitle}.${resourceExtension}`;
 }
 
 function redactDownloadResource(value: string) {
