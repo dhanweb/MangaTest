@@ -25,6 +25,9 @@ export const defaultRuntimeSettings: RuntimeSettings = {
   aria2RpcUrl: "",
   aria2RpcToken: "",
   potplayerExecutablePath: "",
+  pixivDownloaderDbPath: "",
+  pixivDownloaderDownloadRoot: "",
+  pixivDownloaderMangaRootId: "",
 };
 
 export const settingDefinitions = [
@@ -181,5 +184,26 @@ export const settingDefinitions = [
     description: "用于由本机服务启动 PotPlayer 的可执行文件绝对路径；也可使用浏览器 potplayer:// 协议。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.potplayerExecutablePath,
+  },
+  {
+    key: "pixivDownloaderDbPath",
+    label: "PixivDownloader 数据库路径",
+    description: "PixivDownloader SQLite .db 文件的绝对路径，只读访问。Windows 安装示例：C:\\Program Files\\PixivDownload\\data\\pixiv_download.db。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.pixivDownloaderDbPath,
+  },
+  {
+    key: "pixivDownloaderDownloadRoot",
+    label: "PixivDownloader 下载根目录",
+    description: "PixivDownloader 保存作品的根目录，用于解析 artworks.folder 中的 {0} 占位符。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.pixivDownloaderDownloadRoot,
+  },
+  {
+    key: "pixivDownloaderMangaRootId",
+    label: "PixivDownloader 对应漫画根目录",
+    description: "PixivDownloader 下载内容对应的 MangaTest 漫画根目录，扫描并同步时会先扫描该根目录。",
+    valueType: "string",
+    defaultValue: defaultRuntimeSettings.pixivDownloaderMangaRootId,
   },
 ] satisfies Array<SettingDefinition<RuntimeSettings[keyof RuntimeSettings]>>;

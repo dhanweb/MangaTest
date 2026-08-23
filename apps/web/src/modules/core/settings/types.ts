@@ -35,4 +35,10 @@ export interface RuntimeSettings {
   aria2RpcUrl: string;
   aria2RpcToken: string;
   potplayerExecutablePath?: string;
+  /** PixivDownloader SQLite 数据库文件的绝对路径，例如 C:\\Program Files\\PixivDownload\\data\\pixiv_download.db。 */
+  pixivDownloaderDbPath: string;
+  /** PixivDownloader 下载根目录的绝对路径，用于解析 artworks.folder 中的 {0}。 */
+  pixivDownloaderDownloadRoot: string;
+  /** PixivDownloader 下载内容对应的 MangaTest 漫画根目录 ID。 */
+  pixivDownloaderMangaRootId: string;
 }

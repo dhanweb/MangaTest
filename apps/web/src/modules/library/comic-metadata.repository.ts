@@ -51,6 +51,9 @@ export function createComicMetadataRepository(): ComicMetadataRepository {
       const now = new Date().toISOString();
       const metadata = {
         displayTitle,
+        displayTitleSource: "manual" as const,
+        displayTitleSourceSite: null,
+        displayTitleSourceId: null,
         metadataQueryTitle: normalizeOptionalTitle(input.metadataQueryTitle),
         originalTitle: normalizeOptionalTitle(input.originalTitle),
         sortTitle: normalizeSortTitle(displayTitle),

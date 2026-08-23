@@ -674,6 +674,9 @@ function runtimeSettings(overrides: Partial<RuntimeSettings> = {}): RuntimeSetti
     aria2Enabled: false,
     aria2RpcUrl: "",
     aria2RpcToken: "",
+    pixivDownloaderDbPath: "",
+    pixivDownloaderDownloadRoot: "",
+    pixivDownloaderMangaRootId: "",
     ...overrides,
   };
 }

@@ -26,6 +26,8 @@ import {
   localFiles,
   mangaRoots,
   mediaAssets,
+  metadataSyncEntries,
+  metadataSyncSessions,
   operationLogs,
   pages,
   readingProgress,
@@ -232,6 +234,8 @@ export async function resetApplicationData(options: DataResetOptions): Promise<D
       db.delete(chapters).run();
       db.delete(comicResources).run();
       db.delete(comicSources).run();
+      db.delete(metadataSyncEntries).run();
+      db.delete(metadataSyncSessions).run();
 
       sqlite
         .prepare(

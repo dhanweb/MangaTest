@@ -2,7 +2,7 @@
 
 本文档汇总 MangaTest 当前仓库中的实际功能、使用入口、模块边界和未实现范围。内容以当前代码为依据，`docs/plan.md` 仍是产品范围、架构决策和开发阶段的唯一来源。
 
-最后核对日期：2026-07-19。
+最后核对日期：2026-08-23。
 
 ## 1. 状态说明
 
@@ -51,6 +51,7 @@ MangaTest 是一个本地自托管的个人漫画库系统。核心流程是把�
 | 标签管理 | `/admin/tags` | 搜索、新建、编辑和删除未绑定标签 |
 | 收藏与队列 | `/admin/collections` | 创建、编辑、启停和删除收藏或阅读队列 |
 | 下载任务 | `/admin/downloads` | 管理离线任务、传输任务、资源、worker、重试、取消和拉回本地 |
+| Pixiv 同步 | `/admin/pixiv-sync` | 配置 PixivDownloader 数据库、测试连接、预览、扫描并同步和批次结果 |
 | 设置 | `/admin/settings` | 阅读、缓存、导入 token、下载、OpenList、aria2、备份和数据清理 |
 
 后台采用应用内页签工作台。内部导航会复用已有页签，页签状态保存到浏览器存储；支持刷新当前页签、关闭、关闭其他、关闭右侧和关闭全部，并缓存已打开页面以尽量保留切换前的交互状态。前台进入后台时默认打开浏览器新标签页。
@@ -151,6 +152,18 @@ MangaTest 是一个本地自托管的个人漫画库系统。核心流程是把�
 - 重复导入同一来源会更新已有记录，不重复创建漫画。
 - 导入不会覆盖用户修改的展示标题或手动标签绑定。
 - `/api/metadata/import-with-magnet` 在导入元数据后，为磁链资源创建 OpenList 离线任务并立即尝试提交一次。
+
+### 4.8.1 PixivDownloader SQLite 同步
+
+- PixivDownloader 作为独立外部程序运行；MangaTest 以只读方式查询其 SQLite 数据库，不写入、不迁移、不修复，也不把它作为下载 provider。
+- 后台 `/admin/pixiv-sync` 分别配置三项内容：数据库 `.db` 文件绝对路径、下载根目录和对应的 MangaTest 漫画根目录；三者独立保存，安装目录只作为输入示例。
+- 连接测试会检查 artworks、authors、tags、artwork_tags、path_prefixes 及必需列；schema 不兼容时整次同步停止。
+- 路径解析遵循 `moved` + `move_folder` 优先、`{0}` 替换下载根目录、`{N}` 替换 path_prefixes；解析后做 Windows 规范化，越界路径只记录条目结果。
+- 首次关联按解析后的作品绝对路径匹配 `local_files.absolute_path`；之后以 `site=pixiv + source_id=artwork_id` 作为幂等身份；标题不参与自动绑定。
+- 同步更新未手动编辑的 `display_title`（标题来源为 scan 或同一 pixiv 来源）、`comic_sources`、`original_title`、`metadata_query_title`（仅填补空值）和 `artist:*` / `general:*` 标签；`file_title` 与物理文件保持不变。
+- `series_id` / `series_order` 保存为来源 raw metadata，不自动合并章节；来源身份与路径指向不同漫画时记录冲突条目，不做自动合并。
+- 支持同步预览、“扫描并同步”（先普通扫描再同步）和仅同步；重复同步幂等，不产生重复来源或标签。
+- 每次同步记录 `metadata_sync_sessions` 批次和逐作品条目结果，统计更新、跳过、未匹配、冲突、路径异常和错误。
 
 ### 4.9 Chrome 浏览器扩展
 
@@ -280,6 +293,11 @@ Route Handler 只负责请求解析、鉴权、调用模块服务和返回响应
 | `POST` | `/api/metadata/status` | 查询来源页与本地漫画的匹配状态 |
 | `POST` | `/api/metadata/import` | 导入详情页元数据 |
 | `POST` | `/api/metadata/import-with-magnet` | 导入元数据并为磁链创建 OpenList 离线任务 |
+| `POST` | `/api/pixiv-downloader/check` | 只读测试 PixivDownloader 数据库连接和 schema |
+| `POST` | `/api/pixiv-downloader/preview` | 预览 Pixiv 同步的匹配和条目结果 |
+| `POST` | `/api/pixiv-downloader/sync` | 执行 Pixiv 元数据同步，可选先扫描 |
+| `GET` | `/api/pixiv-downloader/sessions` | 列出 Pixiv 同步批次 |
+| `GET` | `/api/pixiv-downloader/sessions/[id]` | 查看批次条目结果 |
 | `POST`, `PATCH`, `DELETE` | `/api/tags` | 创建、编辑和删除标签 |
 | `GET`, `POST` | `/api/collections` | 列表和创建集合 |
 | `GET`, `PATCH`, `DELETE` | `/api/collections/[id]` | 读取、编辑和删除集合 |

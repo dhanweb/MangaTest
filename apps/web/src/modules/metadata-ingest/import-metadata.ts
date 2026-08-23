@@ -125,6 +125,9 @@ export async function importMetadataPayload(input: MetadataIngestPayload): Promi
         .values({
           id: comicId,
           displayTitle: payload.title,
+          displayTitleSource: "metadata",
+          displayTitleSourceSite: payload.site,
+          displayTitleSourceId: payload.sourceId,
           fileTitle: payload.title,
           originalTitle: payload.originalTitle,
           metadataQueryTitle: payload.title,

@@ -1,7 +1,7 @@
 "use client";
 
 import { Box } from "@mantine/core";
-import { Bookmark, CloudDownload, Folder, Gauge, Library, Settings, Tag, Video, Wrench } from "lucide-react";
+import { Bookmark, CloudDownload, Database, Folder, Gauge, Library, Settings, Tag, Video, Wrench } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
@@ -21,6 +21,7 @@ const navItems = [
   { href: "/admin/tags", icon: Tag, label: "标签管理" },
   { href: "/admin/collections", icon: Bookmark, label: "收藏夹" },
   { href: "/admin/downloads", icon: CloudDownload, label: "下载任务" },
+  { href: "/admin/pixiv-sync", icon: Database, label: "Pixiv 同步" },
   { href: "/admin/settings", icon: Settings, label: "系统设置" },
 ];
 

@@ -14,6 +14,7 @@ const EXACT_TITLES: Record<string, AdminTabInfo> = {
   "/admin/tags": { title: "标签管理", kind: "list", closeable: true },
   "/admin/collections": { title: "收藏夹", kind: "list", closeable: true },
   "/admin/downloads": { title: "下载任务", kind: "list", closeable: true },
+  "/admin/pixiv-sync": { title: "Pixiv 同步", kind: "list", closeable: true },
   "/admin/settings": { title: "系统设置", kind: "settings", closeable: true },
 };
 

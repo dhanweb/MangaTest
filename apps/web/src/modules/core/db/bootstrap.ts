@@ -75,6 +75,9 @@ export function bootstrapDatabase() {
     CREATE TABLE IF NOT EXISTS comics (
       id TEXT PRIMARY KEY NOT NULL,
       display_title TEXT NOT NULL,
+      display_title_source TEXT NOT NULL DEFAULT 'scan',
+      display_title_source_site TEXT,
+      display_title_source_id TEXT,
       file_title TEXT NOT NULL,
       original_title TEXT,
       metadata_query_title TEXT,
@@ -673,11 +676,62 @@ export function bootstrapDatabase() {
 
     CREATE INDEX IF NOT EXISTS collection_comics_comic_idx
       ON collection_comics (comic_id);
+
+    CREATE TABLE IF NOT EXISTS metadata_sync_sessions (
+      id TEXT PRIMARY KEY NOT NULL,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running',
+      manga_root_id TEXT,
+      scan_session_id TEXT,
+      started_at TEXT NOT NULL,
+      finished_at TEXT,
+      total_artwork_count INTEGER NOT NULL DEFAULT 0,
+      updated_count INTEGER NOT NULL DEFAULT 0,
+      skipped_count INTEGER NOT NULL DEFAULT 0,
+      unmatched_count INTEGER NOT NULL DEFAULT 0,
+      conflict_count INTEGER NOT NULL DEFAULT 0,
+      path_error_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      error_summary TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS metadata_sync_sessions_provider_status_idx
+      ON metadata_sync_sessions (provider, status);
+
+    CREATE INDEX IF NOT EXISTS metadata_sync_sessions_started_at_idx
+      ON metadata_sync_sessions (started_at);
+
+    CREATE TABLE IF NOT EXISTS metadata_sync_entries (
+      id TEXT PRIMARY KEY NOT NULL,
+      session_id TEXT NOT NULL REFERENCES metadata_sync_sessions(id),
+      artwork_id TEXT NOT NULL,
+      title TEXT,
+      resolved_path TEXT,
+      matched_comic_id TEXT,
+      matched_comic_title TEXT,
+      matched_local_file_id TEXT,
+      action TEXT NOT NULL,
+      reason TEXT,
+      title_updated INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS metadata_sync_entries_session_artwork_idx
+      ON metadata_sync_entries (session_id, artwork_id);
+
+    CREATE INDEX IF NOT EXISTS metadata_sync_entries_session_idx
+      ON metadata_sync_entries (session_id);
   `);
 
   ensureColumn("local_files", "is_ignored", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn("local_files", "ignored_at", "TEXT");
   ensureColumn("manga_roots", "kind", "TEXT NOT NULL DEFAULT 'user'");
+  ensureColumn("comics", "display_title_source", "TEXT NOT NULL DEFAULT 'scan'");
+  ensureColumn("comics", "display_title_source_site", "TEXT");
+  ensureColumn("comics", "display_title_source_id", "TEXT");
   ensureColumn("download_tasks", "task_type", "TEXT NOT NULL DEFAULT 'transfer'");
   ensureColumn("download_tasks", "offline_task_id", "TEXT");
   ensureColumn("download_tasks", "remote_task_id", "TEXT");
@@ -686,6 +740,30 @@ export function bootstrapDatabase() {
   ensureColumn("download_tasks", "media_type", "TEXT NOT NULL DEFAULT 'comic'");
   ensureColumn("media_assets", "video_id", "TEXT");
   ensureColumn("media_assets", "video_episode_id", "TEXT");
+
+  // Backfill display title provenance for databases created before the
+  // display_title_source columns existed. Titles that still equal the scanned
+  // file title keep the 'scan' default; edited titles with an existing source
+  // record are attributed to that source, everything else is treated as a
+  // manual user edit so later metadata syncs will not overwrite them.
+  sqlite.exec(`
+    UPDATE comics
+    SET display_title_source = 'metadata',
+        display_title_source_site = (
+          SELECT s.site FROM comic_sources s WHERE s.comic_id = comics.id ORDER BY s.created_at DESC LIMIT 1
+        ),
+        display_title_source_id = (
+          SELECT s.source_id FROM comic_sources s WHERE s.comic_id = comics.id ORDER BY s.created_at DESC LIMIT 1
+        )
+    WHERE display_title_source = 'scan'
+      AND trim(display_title) != trim(file_title)
+      AND EXISTS (SELECT 1 FROM comic_sources s WHERE s.comic_id = comics.id);
+
+    UPDATE comics
+    SET display_title_source = 'manual'
+    WHERE display_title_source = 'scan'
+      AND trim(display_title) != trim(file_title);
+  `);
 
   // Create new indices if they do not exist
   const sqlite2 = getSqlite();

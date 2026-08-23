@@ -18,6 +18,8 @@ export const comicStatuses = [
   "deleted",
 ] as const;
 
+export const comicTitleSources = ["scan", "metadata", "manual"] as const;
+
 export const videoStatuses = ["readable", "missing_local_file", "hidden", "deleted"] as const;
 
 export const localFileKinds = ["directory", "zip", "cbz"] as const;
@@ -164,6 +166,11 @@ export const comics = sqliteTable(
   {
     id: text("id").primaryKey(),
     displayTitle: text("display_title").notNull(),
+    displayTitleSource: text("display_title_source", { enum: comicTitleSources })
+      .notNull()
+      .default("scan"),
+    displayTitleSourceSite: text("display_title_source_site"),
+    displayTitleSourceId: text("display_title_source_id"),
     fileTitle: text("file_title").notNull(),
     originalTitle: text("original_title"),
     metadataQueryTitle: text("metadata_query_title"),
@@ -393,6 +400,69 @@ export const comicSources = sqliteTable(
   (table) => ({
     comicIdx: index("comic_sources_comic_idx").on(table.comicId),
     sourceIdx: uniqueIndex("comic_sources_site_source_idx").on(table.site, table.sourceId),
+  }),
+);
+
+export const metadataSyncProviders = ["pixiv-downloader"] as const;
+export const metadataSyncSessionStatuses = ["running", "completed", "failed"] as const;
+export const metadataSyncEntryActions = [
+  "updated",
+  "skipped",
+  "unmatched",
+  "conflict",
+  "path_error",
+  "error",
+] as const;
+
+export const metadataSyncSessions = sqliteTable(
+  "metadata_sync_sessions",
+  {
+    id: text("id").primaryKey(),
+    provider: text("provider", { enum: metadataSyncProviders }).notNull(),
+    status: text("status", { enum: metadataSyncSessionStatuses })
+      .notNull()
+      .default("running"),
+    mangaRootId: text("manga_root_id"),
+    scanSessionId: text("scan_session_id"),
+    startedAt: text("started_at").notNull(),
+    finishedAt: text("finished_at"),
+    totalArtworkCount: integer("total_artwork_count").notNull().default(0),
+    updatedCount: integer("updated_count").notNull().default(0),
+    skippedCount: integer("skipped_count").notNull().default(0),
+    unmatchedCount: integer("unmatched_count").notNull().default(0),
+    conflictCount: integer("conflict_count").notNull().default(0),
+    pathErrorCount: integer("path_error_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    errorSummary: text("error_summary"),
+    ...timestamps,
+  },
+  (table) => ({
+    providerStatusIdx: index("metadata_sync_sessions_provider_status_idx").on(table.provider, table.status),
+    startedAtIdx: index("metadata_sync_sessions_started_at_idx").on(table.startedAt),
+  }),
+);
+
+export const metadataSyncEntries = sqliteTable(
+  "metadata_sync_entries",
+  {
+    id: text("id").primaryKey(),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => metadataSyncSessions.id),
+    artworkId: text("artwork_id").notNull(),
+    title: text("title"),
+    resolvedPath: text("resolved_path"),
+    matchedComicId: text("matched_comic_id"),
+    matchedComicTitle: text("matched_comic_title"),
+    matchedLocalFileId: text("matched_local_file_id"),
+    action: text("action", { enum: metadataSyncEntryActions }).notNull(),
+    reason: text("reason"),
+    titleUpdated: integer("title_updated", { mode: "boolean" }).notNull().default(false),
+    ...timestamps,
+  },
+  (table) => ({
+    sessionArtworkIdx: uniqueIndex("metadata_sync_entries_session_artwork_idx").on(table.sessionId, table.artworkId),
+    sessionIdx: index("metadata_sync_entries_session_idx").on(table.sessionId),
   }),
 );
 

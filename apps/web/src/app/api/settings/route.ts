@@ -131,6 +131,26 @@ export async function PATCH(request: Request) {
     input.potplayerExecutablePath = normalized.value;
   }
 
+  if (typeof payload.pixivDownloaderDbPath === "string") {
+    const normalized = normalizeOptionalAbsolutePath(payload.pixivDownloaderDbPath);
+    if (normalized.error) {
+      return Response.json({ error: "PixivDownloader 数据库路径必须是绝对路径。" }, { status: 400 });
+    }
+    input.pixivDownloaderDbPath = normalized.value;
+  }
+
+  if (typeof payload.pixivDownloaderDownloadRoot === "string") {
+    const normalized = normalizeOptionalAbsolutePath(payload.pixivDownloaderDownloadRoot);
+    if (normalized.error) {
+      return Response.json({ error: "PixivDownloader 下载根目录必须是绝对路径。" }, { status: 400 });
+    }
+    input.pixivDownloaderDownloadRoot = normalized.value;
+  }
+
+  if (typeof payload.pixivDownloaderMangaRootId === "string") {
+    input.pixivDownloaderMangaRootId = payload.pixivDownloaderMangaRootId.trim();
+  }
+
   try {
     return Response.json({ settings: await saveRuntimeSettings(input) });
   } catch (error) {

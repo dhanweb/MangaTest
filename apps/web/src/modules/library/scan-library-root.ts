@@ -292,6 +292,7 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
             .values({
               id: comicId,
               displayTitle: entry.fileTitle,
+              displayTitleSource: "scan",
               fileTitle: entry.fileTitle,
               sortTitle,
               status: "readable",
