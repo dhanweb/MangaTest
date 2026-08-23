@@ -1,7 +1,7 @@
 "use client";
 
-import { ActionIcon, Box, Group, Modal, Paper, Radio, Stack, Table, Text, TextInput } from "@mantine/core";
-import { ArrowDown, ArrowLeft, ArrowUp, EyeOff, GitMerge, RotateCcw, Save, Search, Trash2 } from "lucide-react";
+import { ActionIcon, Box, Checkbox, Group, Modal, Paper, Stack, Table, Text, TextInput } from "@mantine/core";
+import { ArrowDown, ArrowLeft, ArrowUp, EyeOff, GitMerge, RotateCcw, Save, Search, Trash2, Unlink } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
@@ -19,10 +19,11 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
   const [episodes, setEpisodes] = useState(initialVideo.episodes);
   const [tags, setTags] = useState<VideoTagRecord[]>(initialVideo.tags);
   const [tagName, setTagName] = useState("");
+  const [episodeTitleDrafts, setEpisodeTitleDrafts] = useState<Record<string, string>>(() => Object.fromEntries(initialVideo.episodes.map((episode) => [episode.id, episode.title])));
   const [pending, setPending] = useState<string | null>(null);
   const [mergeModalOpened, setMergeModalOpened] = useState(false);
   const [mergeSearch, setMergeSearch] = useState("");
-  const [selectedMergeSourceId, setSelectedMergeSourceId] = useState<string | null>(null);
+  const [selectedMergeSourceIds, setSelectedMergeSourceIds] = useState<string[]>([]);
 
   const isMerged = Boolean(video.parentVideoId || video.mergedAsEpisodeId);
   const parentVideo = video.parentVideoId ? videoRows.find((row) => row.id === video.parentVideoId) : null;
@@ -32,6 +33,12 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
       .filter((row) => row.id !== video.id && row.status === "readable" && row.episodeCount === 1 && !row.parentVideoId && !row.mergedAsEpisodeId)
       .filter((row) => !query || `${row.displayTitle} ${row.fileTitle} ${row.primaryPath ?? ""}`.toLowerCase().includes(query));
   }, [mergeSearch, video.id, videoRows]);
+
+  function applyVideo(nextVideo: VideoDetailRecord) {
+    setVideo(nextVideo);
+    setEpisodes(nextVideo.episodes);
+    setEpisodeTitleDrafts(Object.fromEntries(nextVideo.episodes.map((episode) => [episode.id, episode.title])));
+  }
 
   async function saveTitle() {
     setPending("title");
@@ -58,19 +65,35 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
     setPending(null);
   }
 
+  async function saveEpisodeTitle(episodeId: string) {
+    const nextTitle = (episodeTitleDrafts[episodeId] ?? "").trim();
+    if (!nextTitle) { toast.error("集标题不能为空"); return; }
+    setPending(`episode-title:${episodeId}`);
+    try {
+      const response = await fetch(`/api/videos/${video.id}/episodes/${episodeId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: nextTitle }) });
+      const payload = await response.json() as { video?: VideoDetailRecord; error?: string };
+      if (!response.ok || !payload.video) throw new Error(payload.error ?? "保存集标题失败");
+      applyVideo(payload.video);
+      toast.success("集标题已保存");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "保存集标题失败");
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function mergeVideo() {
-    if (!selectedMergeSourceId) return;
+    if (!selectedMergeSourceIds.length) return;
     setPending("merge");
     try {
-      const response = await fetch(`/api/videos/${video.id}/merge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceVideoId: selectedMergeSourceId }) });
+      const response = await fetch(`/api/videos/${video.id}/merge`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sourceVideoIds: selectedMergeSourceIds }) });
       const payload = await response.json() as VideoMergeResponse;
       if (!response.ok || !payload.video) throw new Error(payload.error ?? "合并失败");
-      setVideo(payload.video);
-      setEpisodes(payload.video.episodes);
+      applyVideo(payload.video);
       setVideoRows(payload.videos ?? videoRows);
-      setSelectedMergeSourceId(null);
+      setSelectedMergeSourceIds([]);
       setMergeModalOpened(false);
-      toast.success("已将视频添加为当前视频的集数");
+      toast.success(`已添加 ${selectedMergeSourceIds.length} 个视频集数`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "合并失败");
     } finally {
@@ -84,8 +107,7 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
       const response = await fetch(`/api/videos/${video.id}/merge`, { method: "DELETE" });
       const payload = await response.json() as VideoMergeResponse;
       if (!response.ok || !payload.video) throw new Error(payload.error ?? "恢复失败");
-      setVideo(payload.video);
-      setEpisodes(payload.video.episodes);
+      applyVideo(payload.video);
       setVideoRows(payload.videos ?? videoRows);
       toast.success("已恢复为独立视频");
     } catch (error) {
@@ -93,6 +115,31 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
     } finally {
       setPending(null);
     }
+  }
+
+  async function removeMergedEpisode(episodeId: string) {
+    const episode = episodes.find((item) => item.id === episodeId);
+    if (!episode?.mergedFromVideoId) return;
+    const sourceTitle = videoRows.find((row) => row.id === episode.mergedFromVideoId)?.displayTitle ?? "来源视频";
+    if (!window.confirm(`确定移除“${episode.title}”吗？\n移除后会恢复来源视频“${sourceTitle}”，不会删除真实文件。`)) return;
+
+    setPending(`remove-episode:${episodeId}`);
+    try {
+      const response = await fetch(`/api/videos/${video.id}/episodes/${episodeId}`, { method: "DELETE" });
+      const payload = await response.json() as VideoMergeResponse;
+      if (!response.ok || !payload.video) throw new Error(payload.error ?? "移除集数失败");
+      applyVideo(payload.video);
+      setVideoRows(payload.videos ?? videoRows);
+      toast.success("已移除合并集数，来源视频已恢复");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "移除集数失败");
+    } finally {
+      setPending(null);
+    }
+  }
+
+  function toggleMergeSource(sourceVideoId: string) {
+    setSelectedMergeSourceIds((current) => current.includes(sourceVideoId) ? current.filter((id) => id !== sourceVideoId) : [...current, sourceVideoId]);
   }
 
   async function addTag() { if (!tagName.trim()) return; setPending("tag"); const response = await fetch(`/api/videos/${video.id}/tags`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: tagName }) }); const payload = await response.json(); if (!response.ok) toast.error(payload.error ?? "添加标签失败"); else { setTags(payload.tags); setTagName(""); toast.success("标签已添加"); } setPending(null); }
@@ -104,9 +151,9 @@ export function VideoAdminDetailPanel({ video: initialVideo, videos: initialVide
     <Group><AppButton component={Link} href="/admin/videos" variant="subtle" leftSection={<ArrowLeft size={15} />}>返回视频管理</AppButton><Text component="h1" size="20px" fw={700}>{video.displayTitle}</Text></Group>
     <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}><Text fw={700} mb="md">基本信息</Text><Group align="flex-end"><TextInput label="展示标题" value={title} onChange={(event) => setTitle(event.currentTarget.value)} style={{ flex: 1 }} /><AppButton loading={pending === "title"} leftSection={<Save size={15} />} onClick={() => void saveTitle()}>保存标题</AppButton></Group><Text size="xs" c="ink.5" mt="sm">来源标题：{video.fileTitle} · {video.videoRootName || "视频库"}</Text></Paper>
     {isMerged && <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "var(--mantine-color-pink-0)" }}><Group justify="space-between" align="center"><Box><Text fw={700}>已合并为其他视频的集数</Text><Text size="sm" c="ink.6" mt={4}>当前集数属于：{parentVideo?.displayTitle ?? video.parentVideoId}</Text><Text size="xs" c="ink.5" mt={4}>恢复操作只修改数据库归属，不会移动真实视频文件。</Text></Box><AppButton variant="outline" loading={pending === "merge:restore"} onClick={() => void restoreMerge()}>恢复为独立视频</AppButton></Group></Paper>}
-    <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}><Group justify="space-between" mb="md"><Text fw={700}>集数顺序</Text><Group gap="xs"><AppButton size="xs" variant="outline" leftSection={<GitMerge size={14} />} disabled={isMerged || video.status !== "readable"} onClick={() => setMergeModalOpened(true)}>合并其他视频为集数</AppButton><AppButton size="xs" loading={pending === "order"} disabled={isMerged} onClick={() => void saveOrder()}>保存顺序</AppButton></Group></Group><Table><Table.Thead><Table.Tr><Table.Th w={50}>#</Table.Th><Table.Th>集标题</Table.Th><Table.Th w={130}>时长</Table.Th><Table.Th w={90}>状态</Table.Th><Table.Th w={90}>操作</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{episodes.length ? episodes.map((episode, index) => <Table.Tr key={episode.id}><Table.Td>{index + 1}</Table.Td><Table.Td><Text size="sm" fw={600}>{episode.title}</Text><Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{episode.relativePath}</Text></Table.Td><Table.Td>{formatDuration(episode.durationSeconds)}</Table.Td><Table.Td>{episode.isMissing ? <Text size="xs" c="red">缺文件</Text> : <Text size="xs" c="green">正常</Text>}</Table.Td><Table.Td><Group gap={3}><ActionIcon size="sm" variant="default" disabled={isMerged || index === 0} onClick={() => move(index, -1)}><ArrowUp size={13} /></ActionIcon><ActionIcon size="sm" variant="default" disabled={isMerged || index === episodes.length - 1} onClick={() => move(index, 1)}><ArrowDown size={13} /></ActionIcon></Group></Table.Td></Table.Tr>) : <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="ink.5" ta="center" py="md">暂无独立集数</Text></Table.Td></Table.Tr>}</Table.Tbody></Table></Paper>
+    <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}><Group justify="space-between" mb="md"><Text fw={700}>集数顺序</Text><Group gap="xs"><AppButton size="xs" variant="outline" leftSection={<GitMerge size={14} />} disabled={isMerged || video.status !== "readable"} onClick={() => setMergeModalOpened(true)}>合并其他视频为集数</AppButton><AppButton size="xs" loading={pending === "order"} disabled={isMerged} onClick={() => void saveOrder()}>保存顺序</AppButton></Group></Group><Table><Table.Thead><Table.Tr><Table.Th w={50}>#</Table.Th><Table.Th>集标题</Table.Th><Table.Th w={130}>时长</Table.Th><Table.Th w={90}>状态</Table.Th><Table.Th w={150}>操作</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{episodes.length ? episodes.map((episode, index) => { const sourceTitle = episode.mergedFromVideoId ? videoRows.find((row) => row.id === episode.mergedFromVideoId)?.displayTitle : null; return <Table.Tr key={episode.id}><Table.Td>{index + 1}</Table.Td><Table.Td><Group gap="xs" align="flex-start" wrap="nowrap"><TextInput size="xs" value={episodeTitleDrafts[episode.id] ?? episode.title} disabled={isMerged} onChange={(event) => setEpisodeTitleDrafts((current) => ({ ...current, [episode.id]: event.currentTarget.value }))} style={{ flex: 1, minWidth: 160 }} aria-label={`第 ${index + 1} 集标题`} /><ActionIcon size="sm" variant="default" aria-label="保存集标题" title="保存集标题" disabled={isMerged || (episodeTitleDrafts[episode.id] ?? episode.title).trim() === episode.title} loading={pending === `episode-title:${episode.id}`} onClick={() => void saveEpisodeTitle(episode.id)}><Save size={13} /></ActionIcon></Group><Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{episode.relativePath}</Text>{sourceTitle && <Text size="xs" c="pink.6">合并自：{sourceTitle}</Text>}</Table.Td><Table.Td>{formatDuration(episode.durationSeconds)}</Table.Td><Table.Td>{episode.isMissing ? <Text size="xs" c="red">缺文件</Text> : <Text size="xs" c="green">正常</Text>}</Table.Td><Table.Td><Group gap={3}><ActionIcon size="sm" variant="default" aria-label="上移集数" title="上移集数" disabled={isMerged || index === 0} onClick={() => move(index, -1)}><ArrowUp size={13} /></ActionIcon><ActionIcon size="sm" variant="default" aria-label="下移集数" title="下移集数" disabled={isMerged || index === episodes.length - 1} onClick={() => move(index, 1)}><ArrowDown size={13} /></ActionIcon>{episode.mergedFromVideoId && <ActionIcon size="sm" variant="light" color="red" aria-label="移除合并集数" title="移除合并集数" loading={pending === `remove-episode:${episode.id}`} onClick={() => void removeMergedEpisode(episode.id)}><Unlink size={13} /></ActionIcon>}</Group></Table.Td></Table.Tr>; }) : <Table.Tr><Table.Td colSpan={5}><Text size="sm" c="ink.5" ta="center" py="md">暂无独立集数</Text></Table.Td></Table.Tr>}</Table.Tbody></Table></Paper>
     <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10, background: "white" }}><Text fw={700} mb="md">标签</Text><Group mb="md" gap="xs" wrap="wrap">{tags.map((tag) => <Box key={tag.id} component="span" style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 8px", border: "1px solid var(--mantine-color-pink-2)", borderRadius: 7, color: "var(--mantine-color-pink-6)", fontSize: 12 }}>{tag.displayNameZh || tag.name}<button type="button" onClick={() => void removeTag(tag.id)} style={{ border: 0, background: "none", cursor: "pointer", color: "inherit" }}>×</button></Box>)}</Group><Group align="flex-end"><TextInput label="新增通用标签" placeholder="例如 action" value={tagName} onChange={(event) => setTagName(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter") void addTag(); }} style={{ width: 260 }} /><AppButton loading={pending === "tag"} onClick={() => void addTag()}>添加</AppButton></Group><Text size="xs" c="ink.5" mt="sm">视频来源标签内部使用 general 命名空间，界面不显示命名空间。</Text></Paper>
     <Paper p="md" style={{ border: "1px solid rgba(217,58,78,0.3)", borderRadius: 10, background: "white" }}><Text fw={700} c="red" mb="md">状态维护</Text><Group><AppButton variant="outline" leftSection={<EyeOff size={15} />} disabled={isMerged || video.status === "hidden" || video.status === "deleted"} loading={pending === "hide"} onClick={() => void changeStatus("hide")}>隐藏</AppButton><AppButton variant="outline" leftSection={<RotateCcw size={15} />} disabled={isMerged || video.status === "readable"} loading={pending === "restore"} onClick={() => void changeStatus("restore")}>恢复</AppButton><AppButton color="red" variant="outline" leftSection={<Trash2 size={15} />} disabled={isMerged || video.status === "deleted"} loading={pending === "soft_delete"} onClick={() => void changeStatus("soft_delete")}>软删除</AppButton></Group></Paper>
-    <Modal opened={mergeModalOpened} onClose={() => setMergeModalOpened(false)} title="选择要合并的视频" centered><Text size="sm" c="ink.5" mb="md">选择一个单集视频，作为当前视频的新集数。真实文件不会移动。</Text><TextInput leftSection={<Search size={15} />} placeholder="搜索视频标题或路径..." value={mergeSearch} onChange={(event) => setMergeSearch(event.currentTarget.value)} mb="md" /><Radio.Group value={selectedMergeSourceId} onChange={setSelectedMergeSourceId}><Stack gap="xs" mah={320} style={{ overflowY: "auto" }}>{mergeCandidates.map((candidate) => <Radio key={candidate.id} value={candidate.id} label={<Box><Text size="sm" fw={600}>{candidate.displayTitle}</Text><Text size="xs" c="ink.5">{candidate.primaryPath ?? candidate.fileTitle} · 1 集</Text></Box>} />)}{mergeCandidates.length === 0 && <Text size="sm" c="ink.5" py="md" ta="center">没有可合并的单集视频</Text>}</Stack></Radio.Group><Group justify="flex-end" mt="lg"><AppButton variant="outline" onClick={() => setMergeModalOpened(false)}>取消</AppButton><AppButton loading={pending === "merge"} disabled={!selectedMergeSourceId} onClick={() => void mergeVideo()}>确认合并</AppButton></Group></Modal>
+    <Modal opened={mergeModalOpened} onClose={() => setMergeModalOpened(false)} title="选择要合并的视频" centered size="min(960px, 92vw)" styles={{ content: { maxWidth: "calc(100vw - 24px)" } }}><Stack gap="md"><Group justify="space-between" align="flex-start"><Box><Text size="sm" c="ink.6">可多选单集视频，按当前列表顺序追加为新集数。</Text><Text size="xs" c="ink.5" mt={3}>只修改数据库归属，真实文件不会移动或删除。</Text></Box><Text size="sm" fw={800} c="pink.6">已选 {selectedMergeSourceIds.length} 个</Text></Group><TextInput leftSection={<Search size={15} />} placeholder="搜索视频标题或路径..." value={mergeSearch} onChange={(event) => setMergeSearch(event.currentTarget.value)} /><Box style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(330px, 1fr))", gap: 12, maxHeight: 540, overflowY: "auto", padding: 2 }}>{mergeCandidates.map((candidate) => <Box key={candidate.id} component="label" style={{ display: "grid", gridTemplateColumns: "128px minmax(0, 1fr)", gap: 12, alignItems: "stretch", padding: 10, border: "1px solid var(--pink-line)", borderRadius: 12, background: selectedMergeSourceIds.includes(candidate.id) ? "var(--pink-soft)" : "white", cursor: "pointer" }}><Box style={{ position: "relative", minHeight: 88, overflow: "hidden", borderRadius: 8, background: "var(--pink-soft)", border: "1px solid var(--pink-line)" }}><Box component="img" src={`/api/videos/${candidate.id}/cover`} alt="" loading="lazy" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} onError={(event) => { event.currentTarget.style.display = "none"; }} /><Text size="xs" c="pink.6" fw={700} ta="center" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>视频封面</Text></Box><Box style={{ minWidth: 0 }}><Checkbox checked={selectedMergeSourceIds.includes(candidate.id)} onChange={() => toggleMergeSource(candidate.id)} aria-label={`选择${candidate.displayTitle}`} label={<Text size="sm" fw={700} lineClamp={2}>{candidate.displayTitle}</Text>} /><Text size="xs" c="ink.5" mt={5} lineClamp={2} style={{ wordBreak: "break-all" }}>{candidate.primaryPath ?? candidate.fileTitle}</Text><Text size="xs" c="ink.5" mt={4}>{candidate.episodeCount} 集 · {formatDuration(candidate.totalDurationSeconds)}</Text></Box></Box>)}{mergeCandidates.length === 0 && <Text size="sm" c="ink.5" py="md" ta="center" style={{ gridColumn: "1 / -1" }}>没有可合并的单集视频</Text>}</Box><Group justify="flex-end"><AppButton variant="outline" onClick={() => setMergeModalOpened(false)}>取消</AppButton><AppButton loading={pending === "merge"} disabled={!selectedMergeSourceIds.length} onClick={() => void mergeVideo()}>确认合并</AppButton></Group></Stack></Modal>
   </Stack>;
 }

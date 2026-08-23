@@ -48,6 +48,11 @@ describe("VideoMergeRepository", () => {
     expect(target).toMatchObject({ episodeCount: 1 });
     if (!source || !target) throw new Error("test videos were not scanned");
 
+    const targetEpisode = (await repository.getDetail(target.id))?.episodes[0];
+    if (!targetEpisode) throw new Error("target episode was not scanned");
+    await repository.updateEpisodeTitle(target.id, targetEpisode.id, "Edited target episode");
+    expect((await repository.getDetail(target.id))?.episodes[0]).toMatchObject({ title: "Edited target episode" });
+
     const merge = await mergeRepository.mergeAsEpisode(source.id, target.id);
     expect(merge).toMatchObject({ sourceVideoId: source.id, targetVideoId: target.id, physicalFilesTouched: false });
     expect((await repository.getDetail(target.id))?.episodes).toHaveLength(2);
@@ -60,6 +65,43 @@ describe("VideoMergeRepository", () => {
     await mergeRepository.restoreMergedVideo(source.id);
     expect(await repository.getDetail(source.id)).toMatchObject({ status: "readable", parentVideoId: null, mergedAsEpisodeId: null, episodes: [{ id: merge.episodeId }] });
     expect((await repository.getDetail(target.id))?.episodes).toHaveLength(1);
+  });
+
+  it("merges multiple single-episode videos and removes one without touching files", async () => {
+    const workspace = path.join(os.tmpdir(), `mangatest-video-merge-batch-${randomUUID()}`);
+    const rootPath = path.join(workspace, "videos");
+    await mkdir(rootPath, { recursive: true });
+    await writeFile(path.join(rootPath, "source-a.mp4"), "source-a");
+    await writeFile(path.join(rootPath, "source-b.mp4"), "source-b");
+    await writeFile(path.join(rootPath, "target.mp4"), "target");
+    process.env.MANGATEST_DB_PATH = path.join(workspace, "test.sqlite");
+
+    const { bootstrapDatabase, getDb, videoRoots } = await import("../core/db");
+    bootstrapDatabase();
+    const rootId = randomUUID();
+    const now = new Date().toISOString();
+    getDb().insert(videoRoots).values({ id: rootId, absolutePath: rootPath, displayName: "Test videos", scanMode: "children_as_videos", isEnabled: true, createdAt: now, updatedAt: now }).run();
+    const { scanVideoRoot } = await import("./scan-video-root");
+    await scanVideoRoot(rootId);
+
+    const { createVideoRepository } = await import("./videos.repository");
+    const { createVideoMergeRepository } = await import("./video-merge.repository");
+    const repository = createVideoRepository();
+    const mergeRepository = createVideoMergeRepository();
+    const rows = await repository.listAdminRows();
+    const sourceA = rows.find((row) => row.displayTitle === "source-a");
+    const sourceB = rows.find((row) => row.displayTitle === "source-b");
+    const target = rows.find((row) => row.displayTitle === "target");
+    if (!sourceA || !sourceB || !target) throw new Error("test videos were not scanned");
+
+    const merges = await mergeRepository.mergeAsEpisodes([sourceA.id, sourceB.id], target.id);
+    expect(merges).toHaveLength(2);
+    expect((await repository.getDetail(target.id))?.episodes).toHaveLength(3);
+    expect((await repository.getDetail(target.id))?.episodes.filter((episode) => episode.mergedFromVideoId)).toHaveLength(2);
+
+    await mergeRepository.removeMergedEpisode(target.id, merges[0]!.episodeId);
+    expect((await repository.getDetail(target.id))?.episodes).toHaveLength(2);
+    expect(await repository.getDetail(sourceA.id)).toMatchObject({ status: "readable", parentVideoId: null, mergedAsEpisodeId: null, episodes: [{ id: merges[0]!.episodeId }] });
   });
 
   it("rejects a video that already contains multiple episodes", async () => {

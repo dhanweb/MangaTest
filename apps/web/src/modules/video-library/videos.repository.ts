@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 
 import { bootstrapDatabase, getDb, tags, videoEpisodes, videoProgress, videoRoots, videos, videoTags } from "@/modules/core/db";
 
@@ -21,6 +22,7 @@ export interface VideoEpisodeRecord {
   title: string;
   sortTitle: string;
   sortOrder: number;
+  mergedFromVideoId: string | null;
   relativePath: string;
   absolutePath: string;
   extension: string;
@@ -196,6 +198,7 @@ export function createVideoRepository() {
     async getDetail(id: string): Promise<VideoDetailRecord | null> {
       bootstrapDatabase();
       const db = getDb();
+      const sourceVideos = alias(videos, "source_video");
       const video = db
         .select({
           id: videos.id,
@@ -222,6 +225,7 @@ export function createVideoRepository() {
           title: videoEpisodes.title,
           sortTitle: videoEpisodes.sortTitle,
           sortOrder: videoEpisodes.sortOrder,
+          mergedFromVideoId: sourceVideos.id,
           relativePath: videoEpisodes.relativePath,
           absolutePath: videoEpisodes.absolutePath,
           extension: videoEpisodes.extension,
@@ -233,6 +237,7 @@ export function createVideoRepository() {
           isCompleted: sql<boolean>`coalesce(${videoProgress.isCompleted}, 0)`,
         })
         .from(videoEpisodes)
+        .leftJoin(sourceVideos, eq(sourceVideos.mergedAsEpisodeId, videoEpisodes.id))
         .leftJoin(videoProgress, and(eq(videoProgress.episodeId, videoEpisodes.id), eq(videoProgress.videoId, id)))
         .where(eq(videoEpisodes.videoId, id))
         .orderBy(asc(videoEpisodes.sortOrder), asc(videoEpisodes.createdAt))
@@ -263,6 +268,26 @@ export function createVideoRepository() {
         episodes: episodeRows.map((episode) => ({ ...episode, isMissing: Boolean(episode.isMissing), isCompleted: Boolean(episode.isCompleted) })),
         tags: tagRows.map((tag) => ({ ...tag, isUserEdited: Boolean(tag.isUserEdited) })),
       };
+    },
+
+    async updateEpisodeTitle(videoId: string, episodeId: string, title: string): Promise<void> {
+      bootstrapDatabase();
+      const normalizedTitle = title.trim();
+      if (!normalizedTitle) throw new Error("集标题不能为空。");
+      if (normalizedTitle.length > 500) throw new Error("集标题不能超过 500 个字符。");
+
+      const db = getDb();
+      const episode = db
+        .select({ id: videoEpisodes.id })
+        .from(videoEpisodes)
+        .where(and(eq(videoEpisodes.id, episodeId), eq(videoEpisodes.videoId, videoId)))
+        .get();
+      if (!episode) throw new Error("找不到当前视频的集数。");
+
+      db.update(videoEpisodes)
+        .set({ title: normalizedTitle, sortTitle: normalizedTitle.toLocaleLowerCase(), updatedAt: new Date().toISOString() })
+        .where(eq(videoEpisodes.id, episodeId))
+        .run();
     },
 
     async getEpisode(id: string) {

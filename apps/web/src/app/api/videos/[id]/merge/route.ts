@@ -5,11 +5,11 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: targetVideoId } = await params;
-  const sourceVideoId = await parseSourceVideoId(request);
-  if (!sourceVideoId) return Response.json({ error: "sourceVideoId is required." }, { status: 400 });
+  const sourceVideoIds = await parseSourceVideoIds(request);
+  if (!sourceVideoIds.length) return Response.json({ error: "sourceVideoIds is required." }, { status: 400 });
 
   try {
-    const merge = await createVideoMergeRepository().mergeAsEpisode(sourceVideoId, targetVideoId);
+    const merge = await createVideoMergeRepository().mergeAsEpisodes(sourceVideoIds, targetVideoId);
     const repository = createVideoRepository();
     return Response.json({ videos: await repository.listAdminRows(), video: await repository.getDetail(targetVideoId), merge });
   } catch (error) {
@@ -33,7 +33,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   }
 }
 
-async function parseSourceVideoId(request: Request) {
-  const payload = (await request.json().catch(() => null)) as { sourceVideoId?: unknown } | null;
-  return typeof payload?.sourceVideoId === "string" && payload.sourceVideoId.trim() ? payload.sourceVideoId.trim() : null;
+async function parseSourceVideoIds(request: Request) {
+  const payload = (await request.json().catch(() => null)) as { sourceVideoIds?: unknown; sourceVideoId?: unknown } | null;
+  if (Array.isArray(payload?.sourceVideoIds)) {
+    return payload.sourceVideoIds.filter((value: unknown): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean);
+  }
+  return typeof payload?.sourceVideoId === "string" && payload.sourceVideoId.trim() ? [payload.sourceVideoId.trim()] : [];
 }

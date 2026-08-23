@@ -28,38 +28,74 @@ interface VideoMergeLogDetail {
 
 export interface VideoMergeRepository {
   mergeAsEpisode(sourceVideoId: string, targetVideoId: string): Promise<VideoMergeResult>;
+  mergeAsEpisodes(sourceVideoIds: string[], targetVideoId: string): Promise<VideoMergeResult[]>;
+  removeMergedEpisode(targetVideoId: string, episodeId: string): Promise<VideoMergeResult>;
   restoreMergedVideo(sourceVideoId: string): Promise<VideoMergeResult>;
 }
 
 export function createVideoMergeRepository(): VideoMergeRepository {
   return {
     async mergeAsEpisode(sourceVideoId, targetVideoId) {
+      const results = await mergeAsEpisodes([sourceVideoId], targetVideoId);
+      return results[0]!;
+    },
+
+    mergeAsEpisodes,
+
+    async removeMergedEpisode(targetVideoId, episodeId) {
       bootstrapDatabase();
-      if (sourceVideoId === targetVideoId) throw new Error("不能把视频合并到自己。");
+      const source = getDb()
+        .select({ id: videos.id })
+        .from(videos)
+        .where(and(eq(videos.parentVideoId, targetVideoId), eq(videos.mergedAsEpisodeId, episodeId)))
+        .get();
+      if (!source) throw new Error("这个集数不是通过合并加入当前视频的。");
+      return restoreMergedVideo(source.id);
+    },
 
-      const db = getDb();
-      const source = getVideoForMerge(sourceVideoId);
-      const target = getVideoForMerge(targetVideoId);
-      if (!source) throw new Error("找不到要合并的视频。");
-      if (!target) throw new Error("找不到目标视频。");
-      if (source.status !== "readable") throw new Error("只有当前可读的视频可以合并为集数。");
-      if (target.status !== "readable") throw new Error("目标视频必须是可读状态。");
-      if (source.parentVideoId || source.mergedAsEpisodeId) throw new Error("这个视频已经被合并为集数。");
-      if (target.parentVideoId || target.mergedAsEpisodeId) throw new Error("不能合并到已经作为集数的视频。");
+    restoreMergedVideo,
+  };
+}
 
-      const sourceEpisodes = db
-        .select({ id: videoEpisodes.id, sortOrder: videoEpisodes.sortOrder, isMissing: videoEpisodes.isMissing })
-        .from(videoEpisodes)
-        .where(eq(videoEpisodes.videoId, sourceVideoId))
-        .orderBy(asc(videoEpisodes.sortOrder), asc(videoEpisodes.createdAt))
-        .all();
-      if (sourceEpisodes.length !== 1 || sourceEpisodes[0]?.isMissing) throw new Error("仅支持把单集可读视频合并为一个集数。");
+async function mergeAsEpisodes(sourceVideoIds: string[], targetVideoId: string): Promise<VideoMergeResult[]> {
+  bootstrapDatabase();
+  const uniqueSourceIds = Array.from(new Set(sourceVideoIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueSourceIds.length === 0) throw new Error("至少选择一个要合并的视频。");
+  if (uniqueSourceIds.includes(targetVideoId)) throw new Error("不能把视频合并到自己。");
 
-      const episode = sourceEpisodes[0];
-      const nextSortOrder = Number(
-        db.select({ value: max(videoEpisodes.sortOrder) }).from(videoEpisodes).where(eq(videoEpisodes.videoId, targetVideoId)).get()?.value ?? -1,
-      ) + 1;
-      const now = new Date().toISOString();
+  const db = getDb();
+  const target = getVideoForMerge(targetVideoId);
+  if (!target) throw new Error("找不到目标视频。");
+  if (target.status !== "readable") throw new Error("目标视频必须是可读状态。");
+  if (target.parentVideoId || target.mergedAsEpisodeId) throw new Error("不能合并到已经作为集数的视频。");
+
+  const sources = uniqueSourceIds.map((sourceVideoId) => getVideoForMerge(sourceVideoId));
+  if (sources.some((source) => !source)) throw new Error("找不到要合并的视频。");
+  const validSources = sources as Array<NonNullable<(typeof sources)[number]>>;
+  for (const source of validSources) {
+    if (source.status !== "readable") throw new Error("只有当前可读的视频可以合并为集数。");
+    if (source.parentVideoId || source.mergedAsEpisodeId) throw new Error("这个视频已经被合并为集数。");
+  }
+
+  const sourceEpisodes = validSources.map((source) => {
+    const episodes = db
+      .select({ id: videoEpisodes.id, sortOrder: videoEpisodes.sortOrder, isMissing: videoEpisodes.isMissing })
+      .from(videoEpisodes)
+      .where(eq(videoEpisodes.videoId, source.id))
+      .orderBy(asc(videoEpisodes.sortOrder), asc(videoEpisodes.createdAt))
+      .all();
+    if (episodes.length !== 1 || episodes[0]?.isMissing) throw new Error("仅支持把单集可读视频合并为一个集数。");
+    return { source, episode: episodes[0]! };
+  });
+
+  let nextSortOrder = Number(
+    db.select({ value: max(videoEpisodes.sortOrder) }).from(videoEpisodes).where(eq(videoEpisodes.videoId, targetVideoId)).get()?.value ?? -1,
+  ) + 1;
+  const now = new Date().toISOString();
+  const results: VideoMergeResult[] = [];
+
+  db.transaction((tx) => {
+    for (const { source, episode } of sourceEpisodes) {
       const detail: VideoMergeLogDetail = {
         episodeId: episode.id,
         previousEpisodeSortOrder: episode.sortOrder,
@@ -70,88 +106,89 @@ export function createVideoMergeRepository(): VideoMergeRepository {
         physicalFilesTouched: false,
       };
 
-      db.transaction((tx) => {
-        tx.update(videoEpisodes)
-          .set({ videoId: targetVideoId, sortOrder: nextSortOrder, updatedAt: now })
-          .where(eq(videoEpisodes.id, episode.id))
-          .run();
-        tx.update(videos)
-          .set({ status: "hidden", parentVideoId: targetVideoId, mergedAsEpisodeId: episode.id, hiddenAt: now, updatedAt: now })
-          .where(eq(videos.id, sourceVideoId))
-          .run();
-        tx.insert(operationLogs).values({
-          id: randomUUID(),
-          operation: "merge_video_episode",
-          targetType: "video",
-          targetId: sourceVideoId,
-          summary: `合并视频为集数：${source.displayTitle} -> ${target.displayTitle}`,
-          detailJson: JSON.stringify(detail),
-          createdAt: now,
-        }).run();
-      });
+      tx.update(videoEpisodes)
+        .set({ videoId: targetVideoId, sortOrder: nextSortOrder, updatedAt: now })
+        .where(eq(videoEpisodes.id, episode.id))
+        .run();
+      tx.update(videos)
+        .set({ status: "hidden", parentVideoId: targetVideoId, mergedAsEpisodeId: episode.id, hiddenAt: now, updatedAt: now })
+        .where(eq(videos.id, source.id))
+        .run();
+      tx.insert(operationLogs).values({
+        id: randomUUID(),
+        operation: "merge_video_episode",
+        targetType: "video",
+        targetId: source.id,
+        summary: `合并视频为集数：${source.displayTitle} -> ${target.displayTitle}`,
+        detailJson: JSON.stringify(detail),
+        createdAt: now,
+      }).run();
 
-      return {
-        sourceVideoId,
+      results.push({
+        sourceVideoId: source.id,
         sourceDisplayTitle: source.displayTitle,
         sourceStatus: "hidden",
         targetVideoId,
         targetDisplayTitle: target.displayTitle,
         episodeId: episode.id,
         physicalFilesTouched: false,
-      };
-    },
-
-    async restoreMergedVideo(sourceVideoId) {
-      bootstrapDatabase();
-      const db = getDb();
-      const source = getVideoForMerge(sourceVideoId);
-      if (!source) throw new Error("找不到要恢复的视频。");
-      if (!source.parentVideoId || !source.mergedAsEpisodeId) throw new Error("这个视频没有处于合并集数状态。");
-
-      const target = getVideoForMerge(source.parentVideoId);
-      const mergeLog = getLatestMergeLog(sourceVideoId);
-      const parentVideoId = source.parentVideoId;
-      const mergedEpisodeId = source.mergedAsEpisodeId;
-      const episodeSortOrder = mergeLog?.previousEpisodeSortOrder ?? 0;
-      const previousStatus = mergeLog?.previousStatus ?? "readable";
-      const previousHiddenAt = mergeLog?.previousHiddenAt ?? null;
-      const now = new Date().toISOString();
-      db.transaction((tx) => {
-        tx.update(videoEpisodes)
-          .set({ videoId: sourceVideoId, sortOrder: episodeSortOrder, updatedAt: now })
-          .where(and(eq(videoEpisodes.id, mergedEpisodeId), eq(videoEpisodes.videoId, parentVideoId)))
-          .run();
-        tx.update(videos)
-          .set({ status: previousStatus, parentVideoId: null, mergedAsEpisodeId: null, hiddenAt: previousHiddenAt, updatedAt: now })
-          .where(eq(videos.id, sourceVideoId))
-          .run();
-        tx.insert(operationLogs).values({
-          id: randomUUID(),
-          operation: "restore",
-          targetType: "video",
-          targetId: sourceVideoId,
-          summary: `恢复合并视频：${source.displayTitle}`,
-          detailJson: JSON.stringify({
-            restoredFromMerge: true,
-            targetVideoId: parentVideoId,
-            targetDisplayTitle: target?.displayTitle ?? mergeLog?.targetDisplayTitle ?? null,
-            episodeId: mergedEpisodeId,
-            physicalFilesTouched: false,
-          }),
-          createdAt: now,
-        }).run();
       });
+      nextSortOrder += 1;
+    }
+  });
 
-      return {
-        sourceVideoId,
-        sourceDisplayTitle: source.displayTitle,
-        sourceStatus: previousStatus,
+  return results;
+}
+
+async function restoreMergedVideo(sourceVideoId: string): Promise<VideoMergeResult> {
+  bootstrapDatabase();
+  const db = getDb();
+  const source = getVideoForMerge(sourceVideoId);
+  if (!source) throw new Error("找不到要恢复的视频。");
+  if (!source.parentVideoId || !source.mergedAsEpisodeId) throw new Error("这个视频没有处于合并集数状态。");
+
+  const target = getVideoForMerge(source.parentVideoId);
+  const mergeLog = getLatestMergeLog(sourceVideoId);
+  const parentVideoId = source.parentVideoId;
+  const mergedEpisodeId = source.mergedAsEpisodeId;
+  const episodeSortOrder = mergeLog?.previousEpisodeSortOrder ?? 0;
+  const previousStatus = mergeLog?.previousStatus ?? "readable";
+  const previousHiddenAt = mergeLog?.previousHiddenAt ?? null;
+  const now = new Date().toISOString();
+  db.transaction((tx) => {
+    tx.update(videoEpisodes)
+      .set({ videoId: sourceVideoId, sortOrder: episodeSortOrder, updatedAt: now })
+      .where(and(eq(videoEpisodes.id, mergedEpisodeId), eq(videoEpisodes.videoId, parentVideoId)))
+      .run();
+    tx.update(videos)
+      .set({ status: previousStatus, parentVideoId: null, mergedAsEpisodeId: null, hiddenAt: previousHiddenAt, updatedAt: now })
+      .where(eq(videos.id, sourceVideoId))
+      .run();
+    tx.insert(operationLogs).values({
+      id: randomUUID(),
+      operation: "restore",
+      targetType: "video",
+      targetId: sourceVideoId,
+      summary: `恢复合并视频：${source.displayTitle}`,
+      detailJson: JSON.stringify({
+        restoredFromMerge: true,
         targetVideoId: parentVideoId,
-        targetDisplayTitle: target?.displayTitle ?? mergeLog?.targetDisplayTitle ?? "",
+        targetDisplayTitle: target?.displayTitle ?? mergeLog?.targetDisplayTitle ?? null,
         episodeId: mergedEpisodeId,
         physicalFilesTouched: false,
-      };
-    },
+      }),
+      createdAt: now,
+    }).run();
+  });
+
+  return {
+    sourceVideoId,
+    sourceDisplayTitle: source.displayTitle,
+    sourceStatus: previousStatus,
+    targetVideoId: parentVideoId,
+    targetDisplayTitle: target?.displayTitle ?? mergeLog?.targetDisplayTitle ?? "",
+    episodeId: mergedEpisodeId,
+    physicalFilesTouched: false,
   };
 }
 
