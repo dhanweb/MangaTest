@@ -474,7 +474,7 @@ export async function createDownloadTask(input: CreateDownloadTaskInput): Promis
   };
 }
 
-export async function createVideoDownloadTask(input: { title: string; resourceUrl: string; videoRootId: string; targetDirectory?: string | null }) {
+export async function createVideoDownloadTask(input: { title: string; resourceUrl: string; videoRootId: string; targetDirectory?: string | null; videoId?: string | null; videoSourceId?: string | null }) {
   bootstrapDatabase();
   const title = input.title.trim();
   const resourceUrl = input.resourceUrl.trim();
@@ -488,9 +488,20 @@ export async function createVideoDownloadTask(input: { title: string; resourceUr
   await mkdir(targetDirectory, { recursive: true });
   const db = getDb();
   const now = new Date().toISOString();
-  const resourceId = randomUUID();
+  const existingResource = input.videoId && input.videoSourceId
+    ? db.select({ id: videoResources.id }).from(videoResources).where(and(eq(videoResources.videoId, input.videoId), eq(videoResources.videoSourceId, input.videoSourceId), eq(videoResources.resourceType, resourceUrl.startsWith("magnet:") ? "magnet" : "http"), eq(videoResources.resourceUrl, resourceUrl))).get()
+    : null;
+  const resourceId = existingResource?.id ?? randomUUID();
+  const activeTask = db.select({ id: downloadTasks.id }).from(downloadTasks).where(and(eq(downloadTasks.videoResourceId, resourceId), inArray(downloadTasks.status, ["queued", "submitted", "downloading", "running"]))).get();
+  if (activeTask) {
+    return { created: false, task: await getVideoDownloadTask(activeTask.id) };
+  }
   const taskId = randomUUID();
-  db.insert(videoResources).values({ id: resourceId, resourceType: resourceUrl.startsWith("magnet:") ? "magnet" : "http", displayLabel: title, resourceUrl, redactedResource: redactDownloadResource(resourceUrl), createdAt: now, updatedAt: now }).run();
+  if (existingResource) {
+    db.update(videoResources).set({ displayLabel: title, resourceUrl, redactedResource: redactDownloadResource(resourceUrl), updatedAt: now }).where(eq(videoResources.id, resourceId)).run();
+  } else {
+    db.insert(videoResources).values({ id: resourceId, videoId: input.videoId ?? null, videoSourceId: input.videoSourceId ?? null, resourceType: resourceUrl.startsWith("magnet:") ? "magnet" : "http", displayLabel: title, resourceUrl, redactedResource: redactDownloadResource(resourceUrl), createdAt: now, updatedAt: now }).run();
+  }
   db.insert(downloadTasks).values({ id: taskId, videoResourceId: resourceId, mediaType: "video", provider: "aria2", taskType: "transfer", status: "queued", targetDirectory, createdAt: now, updatedAt: now }).run();
   void runVideoDownloadTask(taskId, resourceUrl, targetDirectory, root.id, settings.aria2RpcUrl, settings.aria2RpcToken);
   return { created: true, task: await getVideoDownloadTask(taskId) };

@@ -2,6 +2,7 @@
   const COLLECTOR = window.MangaTestCollector;
   const BACKEND = window.MangaTestBackend;
   const METADATA_FEATURE = window.MangaTestMetadataFeature;
+  const VIDEO_FEATURE = window.MangaTestVideoFeature;
   const DOWNLOAD_FEATURE = window.MangaTestDownloadResourceFeature;
   const currentPage = COLLECTOR?.getCurrentPage?.();
 
@@ -14,6 +15,7 @@
   const adapter = currentPage.adapter;
   const isDetailPage = page.type === "detail";
   const isResourcePage = page.type === "resource";
+  const isVideoPage = page.capabilities?.includes("video") === true;
 
   let settings = await chrome.storage.local.get({
     serverUrl: "http://127.0.0.1:4427",
@@ -60,7 +62,7 @@
     void cachePageMetadata();
     chrome.storage.onChanged.addListener(handleStorageChange);
 
-    if (page.capabilities?.includes("resource-navigation") || page.capabilities?.includes("download-resource")) {
+    if (isVideoPage || page.capabilities?.includes("resource-navigation") || page.capabilities?.includes("download-resource")) {
       injectGalleryPanel();
       void initDetailPage();
     } else {
@@ -90,6 +92,12 @@
   }
 
   async function initDetailPage() {
+    if (isVideoPage) {
+      libraryStatusLoaded = true;
+      updatePanelStatusUi();
+      return;
+    }
+
     await refreshLibraryStatus();
     updatePanelStatusUi();
 
@@ -140,6 +148,9 @@
       sourceUrl: pageMetadata.sourceUrl || cached.sourceUrl,
       site: pageMetadata.site || cached.site,
       adapterId: pageMetadata.adapterId,
+      video: pageMetadata.video?.sources?.length
+        ? { ...(cached.video || {}), ...pageMetadata.video }
+        : cached.video || pageMetadata.video,
     };
   }
 
@@ -155,6 +166,12 @@
   }
 
   async function refreshLibraryStatus() {
+    if (isVideoPage) {
+      libraryStatusLoaded = true;
+      libraryStatus = null;
+      return;
+    }
+
     try {
       libraryStatus = await BACKEND.getImportStatus(collectNormalizedMetadata());
     } catch (error) {
@@ -247,6 +264,14 @@
     const metadataButton = root.querySelector("#mangatest-btn-metadata");
     const downloadButton = root.querySelector("#mangatest-btn-download");
 
+    if (isVideoPage) {
+      autoCheckbox?.closest("label")?.remove();
+      metadataButton?.remove();
+      if (downloadButton instanceof HTMLButtonElement) {
+        downloadButton.textContent = isResourcePage ? "提交视频下载" : "打开官方下载页";
+      }
+    }
+
     if (autoCheckbox instanceof HTMLInputElement) {
       autoCheckbox.checked = settings.autoDownloadOnGalleryOpen === true;
       autoCheckbox.addEventListener("change", async () => {
@@ -272,6 +297,13 @@
     const mainElement = document.querySelector("#mangatest-status-main");
     const badge = document.querySelector("#mangatest-status-badge");
     if (!(mainElement instanceof HTMLElement)) return;
+
+    if (isVideoPage) {
+      mainElement.textContent = "视频网站：已识别";
+      mainElement.style.color = "#7c5166";
+      if (badge instanceof HTMLElement) badge.style.borderColor = "#f7c9dc";
+      return;
+    }
 
     let main = libraryStatusLoaded ? (libraryStatus ? "未入库" : "状态未知") : "检查状态…";
     let border = "#f7c9dc";
@@ -309,6 +341,10 @@
     setPanelButtonsBusy(true);
 
     try {
+      if (isVideoPage) {
+        throw new Error("视频页面请使用“提交并下载视频”。");
+      }
+
       const metadata = collectNormalizedMetadata();
       await cachePageMetadata();
       await METADATA_FEATURE.submit(metadata);
@@ -331,6 +367,16 @@
     setPanelButtonsBusy(true);
 
     try {
+      if (isVideoPage) {
+        const metadata = collectNormalizedMetadata();
+        await cachePageMetadata();
+        const link = page.findResourcePageLink?.();
+        if (!link) throw new Error("未找到 hanime1 官方下载页面入口");
+        link.click();
+        showToast("⚡ 正在打开 hanime1 官方下载页…", "success");
+        return;
+      }
+
       if (isLocallyDownloaded(libraryStatus)) {
         if (fromAuto) {
           showToast("📚 已入库，跳过自动下载", "success");
@@ -391,7 +437,7 @@
     if (document.getElementById("mangatest-float-btn")) return;
     const button = document.createElement("div");
     button.id = "mangatest-float-btn";
-    button.textContent = "📥 提交到 MangaTest";
+    button.textContent = isVideoPage ? "📥 提交视频并下载" : "📥 提交到 MangaTest";
     Object.assign(button.style, {
       position: "fixed",
       bottom: "24px",
@@ -419,7 +465,7 @@
         button.textContent = "✅ 已提交";
       } catch (error) {
         showToast("❌ " + (error instanceof Error ? error.message : "提交失败"), "error");
-        button.textContent = "📥 提交到 MangaTest";
+        button.textContent = isVideoPage ? "📥 提交视频并下载" : "📥 提交到 MangaTest";
       }
       button.style.pointerEvents = "auto";
     });
@@ -542,8 +588,22 @@
         label: page.resourceLabel?.(anchor) || "Resource",
       };
 
-      await DOWNLOAD_FEATURE.submit(metadata, [resource]);
-      showToast("✅ 已提交资源到 MangaTest", "success");
+      if (isVideoPage) {
+        const videoMetadata = {
+          ...metadata,
+          mediaType: "video",
+          resources: [resource],
+          video: {
+            ...(metadata.video || { durationSeconds: null }),
+            sources: [{ url: resource.url, label: resource.label, quality: Number(/(\d+)p/i.exec(resource.label || "")?.[1] || 0) || null }],
+          },
+        };
+        await VIDEO_FEATURE.submit(videoMetadata);
+        showToast("✅ 视频下载任务已提交", "success");
+      } else {
+        await DOWNLOAD_FEATURE.submit(metadata, [resource]);
+        showToast("✅ 已提交资源到 MangaTest", "success");
+      }
       button.textContent = "✅ 已提交";
       if (notifyDetail) {
         await notifyDetailDownloadResult({

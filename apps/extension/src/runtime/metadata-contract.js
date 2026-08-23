@@ -35,6 +35,7 @@
     return {
       adapterId: cleanText(input.adapterId) || "generic",
       pageType: cleanText(input.pageType) || "detail",
+      mediaType: input.mediaType === "video" ? "video" : "manga",
       site,
       sourceId: cleanText(input.sourceId) || null,
       sourceUrl,
@@ -43,6 +44,33 @@
       coverUrl: normalizeUrl(input.coverUrl, baseUrl),
       tags: normalizeTags(input.tags),
       resources: normalizeResources(input.resources, baseUrl),
+      video: input.mediaType === "video" ? normalizeVideo(input.video, baseUrl) : null,
+    };
+  }
+
+  function normalizeVideo(input, baseUrl) {
+    const duration = Number(input?.durationSeconds);
+    const sources = [];
+    const seen = new Set();
+
+    for (const source of Array.isArray(input?.sources) ? input.sources : []) {
+      const url = normalizeUrl(source?.url, baseUrl);
+      if (!url || seen.has(url)) {
+        continue;
+      }
+
+      seen.add(url);
+      const quality = Number(source?.quality);
+      sources.push({
+        url,
+        label: cleanText(source?.label) || "视频直链",
+        quality: Number.isFinite(quality) && quality > 0 ? Math.trunc(quality) : null,
+      });
+    }
+
+    return {
+      durationSeconds: Number.isFinite(duration) && duration >= 0 ? Math.trunc(duration) : null,
+      sources: sources.slice(0, 8),
     };
   }
 

@@ -2,28 +2,30 @@
   "manifest_version": 3,
   "name": "MangaTest Metadata Collector",
   "description": "通过站点适配器采集漫画信息和下载资源并提交到 MangaTest。",
-  "version": "0.4.7",
+  "version": "0.5.2",
   "action": {
     "default_popup": "src/popup/popup.html",
     "default_title": "MangaTest 设置"
   },
   "permissions": ["activeTab", "scripting", "storage", "downloads"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*", "https://*.nhentai.net/*"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*", "https://*.nhentai.net/*", "https://hanime1.me/*", "https://*.hanime1.me/*"],
   "background": {
     "service_worker": "src/background/service-worker.js"
   },
   "content_scripts": [
     {
-      "matches": ["https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*"],
+      "matches": ["https://exhentai.org/*", "https://e-hentai.org/*", "https://nhentai.net/*", "https://hanime1.me/*", "https://*.hanime1.me/*"],
       "js": [
         "src/adapters/exhentai/adapter.js",
         "src/adapters/nhentai/adapter.js",
+        "src/adapters/hanime1/adapter.js",
         "src/runtime/adapter-registry.js",
         "src/runtime/metadata-contract.js",
         "src/runtime/collector.js",
         "src/backend/client.js",
         "src/features/metadata/submit.js",
         "src/features/download-resources/submit.js",
+        "src/features/video/submit.js",
         "src/runtime/status-placement.js",
         "src/content/injector.js"
       ],
