@@ -302,13 +302,13 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             label="英文标签名"
             placeholder="例如: sole female"
             value={form.name}
-            onChange={(event) => setForm((current) => ({ ...current, name: event.currentTarget.value }))}
+            onChange={(event) => { const value = event.currentTarget.value; setForm((current) => ({ ...current, name: value })); }}
           />
           <AppInput
             label="中文翻译"
             placeholder="例如: 单女主"
             value={form.displayNameZh}
-            onChange={(event) => setForm((current) => ({ ...current, displayNameZh: event.currentTarget.value }))}
+            onChange={(event) => { const value = event.currentTarget.value; setForm((current) => ({ ...current, displayNameZh: value })); }}
           />
           <Group justify="flex-end" mt="sm">
             <AppButton variant="outline" onClick={close}>

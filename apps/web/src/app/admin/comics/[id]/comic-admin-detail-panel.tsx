@@ -297,10 +297,10 @@ export function ComicAdminDetailPanel({
             <Box>
               <Text size="sm" fw={700} mb="sm">编辑基本信息</Text>
               <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-                <AppInput label="展示标题" value={metadataDraft.displayTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, displayTitle: e.currentTarget.value }))} />
+                <AppInput label="展示标题" value={metadataDraft.displayTitle} onChange={(e) => { const value = e.currentTarget.value; setMetadataDraft((d) => ({ ...d, displayTitle: value })); }} />
                 <AppInput label="排序标题" value={currentComic.fileTitle} readOnly />
-                <AppInput label="原始标题" value={metadataDraft.originalTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, originalTitle: e.currentTarget.value }))} />
-                <AppInput label="元数据查询标题" value={metadataDraft.metadataQueryTitle} onChange={(e) => setMetadataDraft((d) => ({ ...d, metadataQueryTitle: e.currentTarget.value }))} />
+                <AppInput label="原始标题" value={metadataDraft.originalTitle} onChange={(e) => { const value = e.currentTarget.value; setMetadataDraft((d) => ({ ...d, originalTitle: value })); }} />
+                <AppInput label="元数据查询标题" value={metadataDraft.metadataQueryTitle} onChange={(e) => { const value = e.currentTarget.value; setMetadataDraft((d) => ({ ...d, metadataQueryTitle: value })); }} />
               </SimpleGrid>
             </Box>
             <Box>
