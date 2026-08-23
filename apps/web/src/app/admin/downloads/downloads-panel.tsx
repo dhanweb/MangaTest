@@ -372,7 +372,7 @@ export function DownloadsPanel({
               <Select label="视频根目录" placeholder="选择根目录" data={videoRoots.map((root) => ({ value: root.id, label: root.displayName || root.absolutePath }))} value={videoRootId} onChange={setVideoRootId} style={{ width: 220 }} size="xs" />
               <AppButton leftSection={<Plus size={15} />} loading={pendingCreate} disabled={!videoTitle.trim() || !videoUrl.trim() || !videoRootId} onClick={() => void createVideoTask()} size="xs">创建任务</AppButton>
             </Group>
-            <Text size="xs" c="ink.5" mt="sm">默认使用 aria2，下载到所选视频根目录的“下载入库/标题”目录，完成后自动扫描。</Text>
+            <Text size="xs" c="ink.5" mt="sm">默认使用 aria2，下载到所选视频根目录下的“标题”目录，完成后自动扫描。</Text>
           </Paper>
           <Paper p="md" style={{ border: "1px solid var(--mantine-color-pink-1)", borderRadius: 10 }}>
             <Text size="sm" fw={700} mb="sm">视频下载任务</Text>

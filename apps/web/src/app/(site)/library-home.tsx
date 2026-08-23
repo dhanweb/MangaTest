@@ -2,7 +2,7 @@
 
 import { Box, Container, Flex, Group, Pagination as MantinePagination, Text } from "@mantine/core";
 import { Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 import { ComicCard } from "@/components/comic-card";
 import { SiteHeader } from "@/components/site-header";
@@ -33,8 +33,12 @@ export function LibraryHome({
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
   const [sortMode, setSortMode] = useState<LibraryComicSortMode>(initialSort);
-  const comics = result.items;
-  const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
+  // Keep the previous page rendered while the App Router is fetching the next
+  // server result. This prevents a route transition from blanking the current
+  // page before the replacement data is ready.
+  const displayedResult = useDeferredValue(result);
+  const comics = displayedResult.items;
+  const totalPages = Math.max(1, Math.ceil(displayedResult.total / displayedResult.pageSize));
   const selectedTags = initialSelectedTags;
 
   const filterGroups = useMemo(() => {
@@ -60,7 +64,7 @@ export function LibraryHome({
     const params = new URLSearchParams();
     const nextQuery = next.query ?? query;
     const nextSort = next.sort ?? sortMode;
-    const nextPage = next.page ?? result.page;
+    const nextPage = next.page ?? displayedResult.page;
     const nextTags = next.tags ?? selectedTags;
 
     if (nextQuery.trim()) {
@@ -206,7 +210,7 @@ export function LibraryHome({
 
         <Flex justify="space-between" mb={24} className="result-summary">
           <Text size="sm" c="ink.5">
-            共 {result.total} 本
+            共 {displayedResult.total} 本
             {selectedTags.length > 0 ? `，已筛选 ${selectedTags.length} 个标签` : ""}
           </Text>
           {selectedTags.length > 0 && (
@@ -216,34 +220,34 @@ export function LibraryHome({
           )}
         </Flex>
 
-        {comics.length > 0 ? (
-          <>
-            <PaginationBar currentPage={result.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
+        <>
+          <PaginationBar currentPage={displayedResult.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
+          {comics.length > 0 ? (
             <Box component="section" aria-label="漫画列表" className="comic-grid">
               {comics.map((comic, index) => (
                 <ComicCard comic={comic} index={index} key={comic.id} />
               ))}
             </Box>
-            <PaginationBar currentPage={result.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
-          </>
-        ) : (
-          <Box
-            component="section"
-            py={48}
-            px={24}
-            style={{ borderRadius: 14, background: "white", textAlign: "center", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}
-          >
-            <Text component="h2" size="xl" fw={700}>
-              还没有可阅读漫画
-            </Text>
-            <Text size="sm" c="ink.5" maw={460} mx="auto" mt={8} mb={20}>
-              先在后台配置 manga root，再执行一次手动扫描。
-            </Text>
-            <AppLink href="/admin/paths" variant="filled" target="_blank" rel="noreferrer">
-              配置漫画路径
-            </AppLink>
-          </Box>
-        )}
+          ) : (
+            <Box
+              component="section"
+              py={48}
+              px={24}
+              style={{ borderRadius: 14, background: "white", textAlign: "center", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}
+            >
+              <Text component="h2" size="xl" fw={700}>
+                还没有可阅读漫画
+              </Text>
+              <Text size="sm" c="ink.5" maw={460} mx="auto" mt={8} mb={20}>
+                先在后台配置 manga root，再执行一次手动扫描。
+              </Text>
+              <AppLink href="/admin/paths" variant="filled" target="_blank" rel="noreferrer">
+                配置漫画路径
+              </AppLink>
+            </Box>
+          )}
+          <PaginationBar currentPage={displayedResult.page} totalPages={totalPages} onPageChange={(page) => applySearch({ page })} />
+        </>
       </Container>
     </>
   );

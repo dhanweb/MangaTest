@@ -805,12 +805,12 @@ function DownloadSettings({
 
   return (
     <>
-      <SettingsGroup title="下载入库">
-        <SettingsRow label="默认下载目录" note="任务未指定目标目录时使用的绝对路径。">
+      <SettingsGroup title="下载设置">
+        <SettingsRow label="默认下载目录" note="任务未指定目标目录时使用；留空则直接使用系统默认漫画目录根目录。">
           <AppInput
             value={settings.downloadDefaultTargetDirectory}
             onChange={(event) => onSettingsChange({ ...settings, downloadDefaultTargetDirectory: event.currentTarget.value })}
-            placeholder="例如 D:\\Manga\\下载入库"
+            placeholder="例如 D:\\hentai\\manga"
             style={{ width: 320 }}
           />
         </SettingsRow>

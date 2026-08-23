@@ -22,5 +22,5 @@ export function sanitizeVideoDirectoryName(value: string) {
 }
 
 export function buildVideoImportSourceKey(value: string) {
-  return `dir:下载入库/${sanitizeVideoDirectoryName(value)}`;
+  return `dir:${sanitizeVideoDirectoryName(value)}`;
 }

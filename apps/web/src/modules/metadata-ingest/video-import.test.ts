@@ -126,7 +126,8 @@ describe("video metadata ingest", () => {
     expect(sourceRows).toHaveLength(1);
     expect(tagAssignments).toHaveLength(1);
     expect(secondTaskInput?.targetDirectory).toBe(firstTaskInput?.targetDirectory);
-    expect(secondTaskInput?.targetDirectory).toContain(path.join("下载入库", "[Artist] Sample Video"));
+    expect(secondTaskInput?.targetDirectory).toBe(path.join(rootPath, "[Artist] Sample Video"));
+    expect(secondTaskInput?.targetDirectory).not.toContain("下载入库");
   });
 
   it("requires an enabled video root", async () => {

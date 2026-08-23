@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { bootstrapDatabase, getDb, videoEpisodes, videoRoots, videos } from "@/modules/core/db";
 
 import { probeVideoDurationSeconds } from "./media-facts";
-import { buildVideoImportSourceKey, naturalCompare, normalizeVideoSortTitle, normalizeVideoTitle } from "./title-utils";
+import { naturalCompare, normalizeVideoSortTitle, normalizeVideoTitle } from "./title-utils";
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "avi", "mov", "webm", "m4v", "ts"]);
 
@@ -204,7 +204,10 @@ async function scanVideoDirectory(rootPath: string, absolutePath: string): Promi
   const relativeDirectory = path.relative(rootPath, absolutePath).split(path.sep).join("/");
   const displayTitle = normalizeVideoTitle(path.basename(absolutePath));
   return {
-    sourceKey: relativeDirectory.startsWith("下载入库/") ? buildVideoImportSourceKey(displayTitle) : `dir:${relativeDirectory}`,
+    // Keep the full relative path for legacy staging-folder records so a
+    // rescan updates them instead of creating a duplicate video. New imports
+    // use the root-level directory source key from buildVideoImportSourceKey.
+    sourceKey: `dir:${relativeDirectory}`,
     fileTitle: displayTitle,
     displayTitle,
     episodes,

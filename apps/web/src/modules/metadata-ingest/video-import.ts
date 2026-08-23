@@ -142,7 +142,9 @@ export async function importVideoPayload(input: VideoIngestPayload): Promise<Vid
 
   const targetDirectory = sourceKey.startsWith("dir:下载入库/")
     ? path.join(root.absolutePath, sourceKey.slice("dir:".length))
-    : path.join(root.absolutePath, "下载入库", sanitizeVideoDirectoryName(payload.title));
+    : sourceKey.startsWith("dir:")
+      ? path.join(root.absolutePath, sourceKey.slice("dir:".length))
+      : path.join(root.absolutePath, sanitizeVideoDirectoryName(payload.title));
   const task = await createVideoDownloadTask({
     title: payload.title,
     resourceUrl: payload.resources[0].url,

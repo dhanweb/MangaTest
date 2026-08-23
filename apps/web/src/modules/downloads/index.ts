@@ -484,7 +484,7 @@ export async function createVideoDownloadTask(input: { title: string; resourceUr
   if (!root) throw new Error("找不到视频根目录。");
   const settings = await getRuntimeSettings();
   if (!settings.aria2Enabled || !settings.aria2RpcUrl) throw new Error("请先在设置中启用并配置 aria2。");
-  const targetDirectory = input.targetDirectory?.trim() || path.join(root.absolutePath, "下载入库", sanitizeDownloadName(title));
+  const targetDirectory = input.targetDirectory?.trim() || path.join(root.absolutePath, sanitizeDownloadName(title));
   await mkdir(targetDirectory, { recursive: true });
   const db = getDb();
   const now = new Date().toISOString();
@@ -2986,7 +2986,7 @@ function upsertDownloadTaskFinalization(input: {
 
   const finalization = getDownloadTaskFinalizationByTaskId(input.downloadTaskId);
   if (!finalization) {
-    throw new Error("读取下载入库记录失败。");
+    throw new Error("读取下载完成记录失败。");
   }
 
   return finalization;
@@ -3001,25 +3001,26 @@ async function resolveDownloadImportRoot(task: DownloadTaskRecord): Promise<Mang
     (() => {
       const enabledRoots = roots.filter((root) => root.isEnabled);
       const candidateRoots = enabledRoots.filter((root) => path.basename(root.absolutePath) !== DOWNLOAD_IMPORT_DIRECTORY_NAME);
-      // Prefer user manga roots for downloads so the system default library is not polluted by default.
+      // Downloads belong in the system default manga root so a completed task is
+      // discovered by the normal root scan without a hidden staging directory.
       const baseRoot =
-        candidateRoots.find((root) => root.kind === "user") ??
         candidateRoots.find((root) => root.kind === "system") ??
+        candidateRoots.find((root) => root.kind === "user") ??
         candidateRoots[0] ??
         enabledRoots[0];
 
       if (!baseRoot) {
-        throw new Error("没有可用的 manga root，无法确定下载入库目录。");
+        throw new Error("没有可用的 manga root，无法确定下载目标目录。");
       }
 
-      return path.join(baseRoot.absolutePath, DOWNLOAD_IMPORT_DIRECTORY_NAME);
+      return baseRoot.absolutePath;
     })();
   const normalizedImportRootPath = path.resolve(importRootPath);
   const existingRoot = roots.find((root) => path.resolve(root.absolutePath) === normalizedImportRootPath);
 
   if (existingRoot) {
     if (!existingRoot.isEnabled) {
-      throw new Error("下载入库目录对应的 manga root 已停用。");
+      throw new Error("下载目标目录对应的 manga root 已停用。");
     }
 
     return existingRoot;
@@ -3513,8 +3514,16 @@ async function resolveDownloadTargetDirectory(inputTargetDirectory: string | nul
   }
 
   const settings = await getRuntimeSettings();
+  const configuredTargetDirectory = normalizeTargetDirectory(settings.downloadDefaultTargetDirectory);
 
-  return normalizeTargetDirectory(settings.downloadDefaultTargetDirectory);
+  // The old default was the generated staging folder. Treat that persisted
+  // value as unset so existing installations automatically switch to the
+  // system root behavior without rewriting settings or touching files.
+  if (configuredTargetDirectory && path.basename(configuredTargetDirectory) === DOWNLOAD_IMPORT_DIRECTORY_NAME) {
+    return null;
+  }
+
+  return configuredTargetDirectory;
 }
 
 function normalizeLimit(value: number) {
@@ -3583,7 +3592,7 @@ function normalizeDownloadFinalizationStatus(value: unknown): DownloadFinalizati
     return value;
   }
 
-  throw new Error("下载入库状态无效。");
+  throw new Error("下载完成状态无效。");
 }
 
 function normalizeDownloadPreparationStatus(value: unknown): DownloadPreparationStatus {

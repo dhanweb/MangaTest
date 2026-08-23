@@ -2,7 +2,7 @@
 
 import { Box, Container, Flex, Group, Text } from "@mantine/core";
 import { Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { VideoCard } from "@/components/video-card";
@@ -14,6 +14,7 @@ import { namespaceLabel } from "@/modules/tags";
 export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, tagFilters }: { initialQuery: string; initialSelectedTags: string[]; result: VideoSearchResult; tagFilters: VideoTagFilterRecord[] }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
+  const displayedResult = useDeferredValue(result);
   const selectedTags = Array.from(new Set(initialSelectedTags.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean)));
   const groups = useMemo(() => {
     const map = new Map<string, VideoTagFilterRecord[]>();
@@ -31,7 +32,7 @@ export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, ta
     router.push(params.size ? `/videos?${params.toString()}` : "/videos");
   }
 
-  const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
+  const totalPages = Math.max(1, Math.ceil(displayedResult.total / displayedResult.pageSize));
   return <>
     <SiteHeader active="videos" />
     <Container size={1440} px={16} py={32} pb={56}>
@@ -49,8 +50,10 @@ export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, ta
           <Group gap={8} wrap="wrap">{group.values.map((tag) => { const tagValue = tag.canonical.toLocaleLowerCase(); const selected = selectedTags.includes(tagValue); const nextTags = selected ? selectedTags.filter((value) => value !== tagValue) : [...selectedTags, tagValue]; return <AppButton key={tag.id} className={selected ? "is-selected" : undefined} variant={selected ? "filled" : "outline"} size="xs" aria-pressed={selected} onClick={() => apply({ page: 1, tags: nextTags })}>{tag.label} ({tag.videoCount})</AppButton>; })}</Group>
         </Box>) : <Text size="sm" c="ink.5">还没有视频标签。可以在后台视频管理中手动维护。</Text>}
       </Box>
-      <Flex justify="space-between" mb={24}><Text size="sm" c="ink.5">共 {result.total} 个视频{selectedTags.length ? `，已筛选 ${selectedTags.length} 个标签` : ""}</Text>{selectedTags.length ? <AppButton variant="transparent" size="xs" onClick={() => apply({ page: 1, tags: [] })} leftSection={<X size={14} />}>清除筛选</AppButton> : null}</Flex>
-      {result.items.length ? <><Pagination current={result.page} total={totalPages} onChange={(page) => apply({ page })} /><Box component="section" className="comic-grid">{result.items.map((video) => <VideoCard key={video.id} video={video} />)}</Box><Pagination current={result.page} total={totalPages} onChange={(page) => apply({ page })} /></> : <Box py={48} px={24} style={{ borderRadius: 14, background: "white", textAlign: "center" }}><Text component="h2" size="xl" fw={700}>还没有可播放视频</Text><Text size="sm" c="ink.5" maw={460} mx="auto" mt={8} mb={20}>先在后台配置视频路径，再执行手动扫描。</Text><AppLink href="/admin/paths" variant="filled" target="_blank" rel="noreferrer">配置视频路径</AppLink></Box>}
+      <Flex justify="space-between" mb={24}><Text size="sm" c="ink.5">共 {displayedResult.total} 个视频{selectedTags.length ? `，已筛选 ${selectedTags.length} 个标签` : ""}</Text>{selectedTags.length ? <AppButton variant="transparent" size="xs" onClick={() => apply({ page: 1, tags: [] })} leftSection={<X size={14} />}>清除筛选</AppButton> : null}</Flex>
+      <Pagination current={displayedResult.page} total={totalPages} onChange={(page) => apply({ page })} />
+      {displayedResult.items.length ? <Box component="section" className="comic-grid">{displayedResult.items.map((video) => <VideoCard key={video.id} video={video} />)}</Box> : <Box py={48} px={24} style={{ borderRadius: 14, background: "white", textAlign: "center" }}><Text component="h2" size="xl" fw={700}>还没有可播放视频</Text><Text size="sm" c="ink.5" maw={460} mx="auto" mt={8} mb={20}>先在后台配置视频路径，再执行手动扫描。</Text><AppLink href="/admin/paths" variant="filled" target="_blank" rel="noreferrer">配置视频路径</AppLink></Box>}
+      <Pagination current={displayedResult.page} total={totalPages} onChange={(page) => apply({ page })} />
     </Container>
   </>;
 }

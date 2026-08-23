@@ -73,7 +73,7 @@ describe("OpenList download preparations", () => {
       });
     });
 
-    const { sqlite, task } = await seedOpenListTask("/Library/Comic.cbz");
+    const { sqlite, task, systemRootPath } = await seedOpenListTask("/Library/Comic.cbz");
     const { listDownloadTasks, runDownloadWorkerTick } = await import("./index");
 
     // createDownloadTask(transfer) dispatches immediately and writes the local temp file.
@@ -106,10 +106,11 @@ describe("OpenList download preparations", () => {
     expect(tasks[0]?.finalization?.status).toBe("completed");
     expect(tempFilePath).toContain(path.join("downloads", "tmp", task.id));
     expect(tempFileContent.equals(archiveFixture)).toBe(true);
-    expect(finalPath).toContain("下载入库");
-    expect(finalPath).toMatch(/OpenList Comic.*\.cbz$/);
+    expect(finalPath).toBe(path.join(systemRootPath, "OpenList Comic.cbz"));
+    expect(finalPath).not.toContain("下载入库");
+    expect(finalPath).toMatch(/OpenList Comic\.cbz$/);
     expect(finalFileStat.size).toBe(archiveFixture.length);
-    expect(countRows(sqlite, "manga_roots", "absolute_path like '%下载入库'")).toBe(1);
+    expect(countRows(sqlite, "manga_roots", "absolute_path like '%下载入库'")).toBe(0);
     expect(countRows(sqlite, "local_files", "relative_path = 'OpenList Comic.cbz'")).toBe(1);
     expect(countRows(sqlite, "pages")).toBe(2);
     expect(requests.some((request) => request.url === "http://127.0.0.1:5244/root/api/fs/link")).toBe(true);
@@ -219,13 +220,13 @@ describe("OpenList download preparations", () => {
     const finalizationRow = selectFinalization(sqlite, task.id);
 
     expect(finalizeTick.executed).toBe(false);
-    expect(finalizeTick.reason).toBe("没有可用的 manga root，无法确定下载入库目录。");
+    expect(finalizeTick.reason).toBe("没有可用的 manga root，无法确定下载目标目录。");
     expect(finalizeTick.finalization).toMatchObject({
       downloadTaskId: task.id,
       provider: "openlist",
       status: "failed",
       finalPath: null,
-      errorMessage: "没有可用的 manga root，无法确定下载入库目录。",
+      errorMessage: "没有可用的 manga root，无法确定下载目标目录。",
     });
     expect(tasks[0]?.status).toBe("failed");
     expect(tasks[0]?.finalization?.status).toBe("failed");
@@ -234,7 +235,7 @@ describe("OpenList download preparations", () => {
       provider: "openlist",
       status: "failed",
       final_path: null,
-      error_message: "没有可用的 manga root，无法确定下载入库目录。",
+      error_message: "没有可用的 manga root，无法确定下载目标目录。",
     });
     // The temporary file must remain intact when finalization fails so a later
     // retry can move it into the inbox without re-downloading.
@@ -333,6 +334,9 @@ async function seedOpenListTask(resourcePath: string) {
 
   bootstrapDatabase();
   const sqlite = getSqlite();
+  const systemRootPath = path.join(workspace, "SystemRoot");
+  await mkdir(systemRootPath, { recursive: true });
+  sqlite.prepare("update manga_roots set absolute_path = ? where kind = 'system'").run(systemRootPath);
   sqlite
     .prepare("insert into manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) values (?, ?, ?, ?, ?)")
     .run(mangaRootId, rootPath, "Root", "children_as_comics", 1);
@@ -348,6 +352,7 @@ async function seedOpenListTask(resourcePath: string) {
 
   await saveRuntimeSettings({
     cacheDirectory: path.join(workspace, "cache"),
+    downloadDefaultTargetDirectory: path.join(rootPath, "下载入库"),
     openlistBaseUrl: "http://127.0.0.1:5244/root",
     openlistEnabled: true,
     openlistToken: "secret-openlist-token",
@@ -355,7 +360,7 @@ async function seedOpenListTask(resourcePath: string) {
 
   const task = await createDownloadTask({ comicResourceId: resourceId, taskType: "transfer" });
 
-  return { sqlite, task: task.task };
+  return { sqlite, task: task.task, systemRootPath };
 }
 
 function selectPreparation(sqlite: Database.Database, taskId: string) {
