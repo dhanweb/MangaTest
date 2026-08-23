@@ -634,6 +634,19 @@
   background: var(--pink);
 }
 
+.author-search-link {
+  color: var(--pink);
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--pink-line);
+  text-underline-offset: 3px;
+}
+
+.author-search-link:hover {
+  color: var(--pink-strong);
+  text-decoration-color: var(--pink-strong);
+}
+
 .search-row {
   @apply mb-6 grid gap-3;
   grid-template-columns: minmax(0, 1fr) 180px;

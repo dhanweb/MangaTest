@@ -98,7 +98,7 @@ export function LibraryHome({
         <Box
           component="form"
           mb={24}
-          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px", gap: 12 }}
+          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 180px auto", gap: 12 }}
           className="search-row"
           onSubmit={(event) => {
             event.preventDefault();
@@ -148,6 +148,9 @@ export function LibraryHome({
             data={sortOptions}
             aria-label="排序方式"
           />
+          <AppButton type="submit" justify="center">
+            搜索
+          </AppButton>
         </Box>
 
         <Box
@@ -174,14 +177,17 @@ export function LibraryHome({
                 </Text>
                 <Group gap={8} wrap="wrap">
                   {group.values.map((item) => {
-                    const isSelected = selectedTags.includes(item.value);
-                    const nextTags = isSelected ? selectedTags.filter((tag) => tag !== item.value) : [...selectedTags, item.value];
+                    const tagValue = item.value.toLocaleLowerCase();
+                    const isSelected = selectedTags.includes(tagValue);
+                    const nextTags = isSelected ? selectedTags.filter((tag) => tag !== tagValue) : [...selectedTags, tagValue];
 
                     return (
                       <AppButton
                         key={item.value}
+                        className={isSelected ? "is-selected" : undefined}
                         variant={isSelected ? "filled" : "outline"}
                         size="xs"
+                        aria-pressed={isSelected}
                         onClick={() => applySearch({ page: 1, tags: nextTags })}
                       >
                         {item.label} ({item.count})

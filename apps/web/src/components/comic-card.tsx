@@ -32,7 +32,7 @@ export function ComicCard({ comic, index }: { comic: LibraryComicCardRecord; ind
           {comic.displayTitle}
         </Text>
         <Text size="xs" c="ink.5" mb="sm">
-          {formatKind(comic.localFileKind)} · {comic.pageCount} 页 · 本地
+          {comic.pageCount} 页 · 作者：{formatAuthors(comic.authorNames)}
         </Text>
         <Group justify="space-between" gap={8}>
           <Box
@@ -83,12 +83,8 @@ export function ComicCard({ comic, index }: { comic: LibraryComicCardRecord; ind
   );
 }
 
-function formatKind(kind: "directory" | "zip" | "cbz" | null) {
-  if (kind === "directory") {
-    return "DIR";
-  }
-
-  return kind?.toUpperCase() ?? "LOCAL";
+function formatAuthors(authors: string[]) {
+  return authors.length ? authors.join("、") : "N/A";
 }
 
 function formatDate(value: string) {

@@ -1,11 +1,12 @@
 "use client";
 
 import { Box, Group, Modal, Pagination, Select, Table, Text, TextInput, Tooltip, UnstyledButton, type TextProps } from "@mantine/core";
-import { Library, Search } from "lucide-react";
+import { Library, RefreshCw, Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
+import { useAdminTabs } from "@/components/admin-workbench/admin-tab-provider";
 import { ComicCover } from "@/components/comic-cover";
 import { AppButton } from "@/components/ui/app-components";
 import type { LibraryComicAdminRowRecord } from "@/modules/library";
@@ -19,9 +20,14 @@ const PAGE_SIZE_OPTIONS = [
 export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }) {
   const [page, setPage] = useAdminTabState("page", 1);
   const [pageSize, setPageSize] = useAdminTabState("pageSize", "10");
-  const [search, setSearch] = useAdminTabState("search", "");
-  const [statusFilter, setStatusFilter] = useAdminTabState("statusFilter", "all");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useAdminTabState("statusFilter:v2", "readable");
   const [previewComic, setPreviewComic] = useState<LibraryComicAdminRowRecord | null>(null);
+  const { refreshActiveTab } = useAdminTabs();
+
+  useEffect(() => {
+    setPage(1);
+  }, [setPage, statusFilter]);
 
   const filtered = useMemo(() => {
     // Server already excludes soft-deleted; client only filters remaining statuses.
@@ -36,7 +42,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
     }
 
     return rows.filter((comic) =>
-      [comic.displayTitle, comic.fileTitle, comic.originalTitle ?? "", comic.metadataQueryTitle ?? "", comic.status, comic.localFileKind ?? ""]
+        [comic.displayTitle, comic.fileTitle, comic.authorNames.join(" "), comic.originalTitle ?? "", comic.metadataQueryTitle ?? "", comic.status, comic.localFileKind ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(query),
@@ -60,6 +66,9 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
             查看扫描结果、文件状态和需要维护的漫画记录。
           </Text>
         </Box>
+        <AppButton variant="outline" size="xs" leftSection={<RefreshCw size={14} />} onClick={refreshActiveTab}>
+          刷新
+        </AppButton>
       </Box>
 
       <Group justify="space-between" mb="md" align="flex-end" wrap="wrap">
@@ -101,8 +110,8 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
       </Group>
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
-        <Table.ScrollContainer minWidth={720} type="native">
-          <Table striped highlightOnHover layout="fixed" verticalSpacing="sm" horizontalSpacing="md" style={{ minWidth: 720 }}>
+        <Table.ScrollContainer minWidth={920} type="native">
+          <Table striped highlightOnHover layout="fixed" verticalSpacing="sm" horizontalSpacing="md" style={{ minWidth: 920 }}>
             <Table.Thead>
               <Table.Tr style={{ background: "var(--mantine-color-pink-0)" }}>
                 <Table.Th fw={900} c="#8d5a6e" w={64}>
@@ -110,6 +119,9 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
                 </Table.Th>
                 <Table.Th fw={900} c="#8d5a6e" w={380}>
                   标题
+                </Table.Th>
+                <Table.Th fw={900} c="#8d5a6e" w={180}>
+                  作者
                 </Table.Th>
                 <Table.Th fw={900} c="#8d5a6e" w={80}>
                   页数
@@ -165,6 +177,9 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
                     </Box>
                   </Table.Td>
                   <Table.Td>
+                    <OverflowTooltipText size="sm">{comic.authorNames.length ? comic.authorNames.join("、") : "N/A"}</OverflowTooltipText>
+                  </Table.Td>
+                  <Table.Td>
                     <Text size="sm">{comic.pageCount}</Text>
                   </Table.Td>
                   <Table.Td>
@@ -187,7 +202,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
               ))}
               {paginated.length === 0 && (
                 <Table.Tr>
-                  <Table.Td colSpan={5}>
+                  <Table.Td colSpan={6}>
                     <Text size="sm" c="ink.5" ta="center" py="md">
                       没有找到匹配的漫画
                     </Text>

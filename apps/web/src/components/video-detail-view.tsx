@@ -2,6 +2,7 @@
 
 import { Box, Flex, Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
 import { ExternalLink, FolderOpen, Pencil, Play, Tag } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 
 import { AppBadge, AppButton, AppLink } from "@/components/ui/app-components";
@@ -76,12 +77,12 @@ export function VideoDetailView({ video }: { video: VideoDetailRecord }) {
     </Flex>
 
     <Box>
-      <Text size="xs" fw={800} c="ink.5" mb={4}>Local Video</Text>
       <Text component="h1" size="34px" fw={700} lh="1.15" c="pink.5" mb="md" mt={0}>{video.displayTitle}</Text>
+      <Text size="sm" c="ink.7" mb="md">作者：<AuthorSearchLinks tags={video.tags} fallbackNames={video.authorNames} hrefBase="/videos" /></Text>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" mb="md">
         <Stat value={String(video.episodeCount)} label="总集数" /><Stat value={formatDuration(video.totalDurationSeconds)} label="总时长" /><Stat value={formatBytes(video.totalSizeBytes)} label="文件大小" /><Stat value={selectedEpisode.extension.toUpperCase()} label="格式" />
       </SimpleGrid>
-      <Group gap={8} mb="md" wrap="wrap"><AppBadge>本地可读</AppBadge>{video.tags.map((tag) => <AppBadge key={tag.id}><Tag size={12} /> {tag.displayNameZh || tag.name}</AppBadge>)}</Group>
+      <Group gap={8} mb="md" wrap="wrap"><AppBadge>本地可读</AppBadge>{video.tags.map((tag) => <Box key={tag.id} component={Link} href={`/videos?tag=${encodeURIComponent(tag.canonical)}`} aria-label={`按标签搜索 ${tag.displayNameZh || tag.name}`} style={{ display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, padding: "0 9px", border: "1px solid var(--mantine-color-pink-2)", borderRadius: 999, color: "var(--mantine-color-pink-6)", fontSize: 12, fontWeight: 600, textDecoration: "none" }}><Tag size={12} /> {tag.displayNameZh || tag.name}</Box>)}</Group>
       <Group gap={10} wrap="wrap">
         <AppButton variant="filled" loading={isOpening} onClick={() => void openWithPotPlayer()} leftSection={<FolderOpen size={16} />}>用 PotPlayer 打开</AppButton>
         <AppButton component="a" href={protocolHref} variant="outline" leftSection={<ExternalLink size={16} />}>PotPlayer 协议打开</AppButton>
@@ -93,3 +94,31 @@ export function VideoDetailView({ video }: { video: VideoDetailRecord }) {
 
 function Stat({ value, label }: { value: string; label: string }) { return <Box style={{ display: "grid", placeItems: "center", minHeight: 70, border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}><Text fw={700} size="lg" c="pink.5">{value}</Text><Text size="xs" c="ink.5">{label}</Text></Box>; }
 function formatBytes(value: number) { if (!value) return "-"; if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`; if (value >= 1024 ** 2) return `${Math.round(value / 1024 ** 2)} MB`; return `${Math.round(value / 1024)} KB`; }
+function AuthorSearchLinks({
+  tags,
+  fallbackNames,
+  hrefBase,
+}: {
+  tags: VideoDetailRecord["tags"];
+  fallbackNames: string[];
+  hrefBase: "/" | "/videos";
+}) {
+  const authorTags = tags.filter((tag) => tag.namespace === "artist" || tag.namespace === "group");
+
+  if (authorTags.length === 0) {
+    return <>{fallbackNames.length ? fallbackNames.join("、") : "N/A"}</>;
+  }
+
+  return authorTags.map((tag, index) => (
+    <span key={tag.id}>
+      {index > 0 ? "、" : null}
+      <Link
+        className="author-search-link"
+        href={`${hrefBase}?tag=${encodeURIComponent(tag.canonical)}`}
+        aria-label={`按作者搜索 ${tag.displayNameZh || tag.name}`}
+      >
+        {tag.displayNameZh || tag.name}
+      </Link>
+    </span>
+  ));
+}

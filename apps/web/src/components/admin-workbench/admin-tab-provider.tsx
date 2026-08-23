@@ -14,18 +14,17 @@ import {
 } from "react";
 
 import { normalizeAdminTabPath } from "./admin-tab-registry";
-import { loadAdminTabCache, saveAdminTabCache } from "./admin-tab-storage";
 import {
   activateAdminTab,
   closeAdminTab,
   closeAllTabs,
   closeOtherTabs,
   closeTabsToRight,
-  createInitialAdminTabCache,
+  createAdminTabCacheForPath,
   openAdminTab,
   renameAdminTab,
 } from "./admin-tab-state";
-import { ADMIN_TAB_STATE_PREFIX, DEFAULT_ADMIN_TAB_ID, type AdminTab, type AdminTabCache } from "./admin-tab-types";
+import { ADMIN_TABS_STORAGE_KEY, ADMIN_TAB_STATE_PREFIX, DEFAULT_ADMIN_TAB_ID, type AdminTab, type AdminTabCache } from "./admin-tab-types";
 
 interface AdminTabContextValue {
   activeTabId: string;
@@ -48,36 +47,24 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentHref = useMemo(() => normalizeAdminTabPath(searchParams.size > 0 ? `${pathname}?${searchParams}` : pathname), [pathname, searchParams]);
-  const [cache, setCache] = useState<AdminTabCache>(() => openAdminTab(createInitialAdminTabCache(), currentHref));
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [cache, setCache] = useState<AdminTabCache>(() => createAdminTabCacheForPath(currentHref));
+  const routeCache = useMemo(
+    () => (cache.activeTabId === currentHref ? cache : openAdminTab(cache, currentHref)),
+    [cache, currentHref],
+  );
   const cacheRef = useRef(cache);
-  const hydratedRef = useRef(false);
 
   useEffect(() => {
-    cacheRef.current = cache;
-  }, [cache]);
+    cacheRef.current = routeCache;
+  }, [routeCache]);
 
   useEffect(() => {
-    if (!hydratedRef.current) {
-      const stored = loadAdminTabCache(window.localStorage);
-      const restored = openAdminTab(stored ?? createInitialAdminTabCache(), currentHref);
-
-      hydratedRef.current = true;
-      setCache(restored);
-      setIsHydrated(true);
-      return;
+    try {
+      window.localStorage.removeItem(ADMIN_TABS_STORAGE_KEY);
+    } catch {
+      // Removing the old persisted tab cache is best-effort.
     }
-
-    setCache((current) => openAdminTab(current, currentHref));
-  }, [currentHref]);
-
-  useEffect(() => {
-    if (!isHydrated) {
-      return;
-    }
-
-    saveAdminTabCache(window.localStorage, cache);
-  }, [cache, isHydrated]);
+  }, []);
 
   const openTab = useCallback(
     (href: string, title?: string) => {
@@ -211,8 +198,8 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AdminTabContextValue>(
     () => ({
-      activeTabId: cache.activeTabId,
-      tabs: cache.tabs,
+      activeTabId: routeCache.activeTabId,
+      tabs: routeCache.tabs,
       openTab,
       activateTab,
       closeTab,
@@ -225,8 +212,8 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
     }),
     [
       activateTab,
-      cache.activeTabId,
-      cache.tabs,
+      routeCache.activeTabId,
+      routeCache.tabs,
       closeTab,
       handleCloseAllTabs,
       handleCloseOtherTabs,

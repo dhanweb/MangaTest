@@ -20,7 +20,7 @@ describe("VideoMergeRepository", () => {
     await writeFile(path.join(rootPath, "target.mp4"), "target");
     process.env.MANGATEST_DB_PATH = path.join(workspace, "test.sqlite");
 
-    const { bootstrapDatabase, getDb, videoRoots } = await import("../core/db");
+    const { bootstrapDatabase, getDb, tags, videoRoots, videoTags } = await import("../core/db");
     bootstrapDatabase();
     const rootId = randomUUID();
     const now = new Date().toISOString();
@@ -47,6 +47,19 @@ describe("VideoMergeRepository", () => {
     expect(source).toMatchObject({ episodeCount: 1, status: "readable", parentVideoId: null, mergedAsEpisodeId: null });
     expect(target).toMatchObject({ episodeCount: 1 });
     if (!source || !target) throw new Error("test videos were not scanned");
+
+    const authorTagId = randomUUID();
+    const groupTagId = randomUUID();
+    getDb().insert(tags).values([
+      { id: authorTagId, namespace: "artist", name: "alice", canonical: "artist:alice", displayNameZh: "爱丽丝" },
+      { id: groupTagId, namespace: "group", name: "circle", canonical: "group:circle" },
+    ]).run();
+    getDb().insert(videoTags).values([
+      { videoId: source.id, tagId: authorTagId, source: "metadata" },
+      { videoId: source.id, tagId: groupTagId, source: "metadata" },
+    ]).run();
+    expect((await repository.listAdminRows()).find((row) => row.id === source.id)?.authorNames).toEqual(["爱丽丝", "circle"]);
+    expect((await repository.getDetail(source.id))?.authorNames).toEqual(["爱丽丝", "circle"]);
 
     const targetEpisode = (await repository.getDetail(target.id))?.episodes[0];
     if (!targetEpisode) throw new Error("target episode was not scanned");

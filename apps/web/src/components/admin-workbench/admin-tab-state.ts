@@ -8,15 +8,20 @@ import {
 } from "./admin-tab-types";
 
 export function createInitialAdminTabCache(now = Date.now()): AdminTabCache {
-  const info = getAdminTabInfo(DEFAULT_ADMIN_TAB_ID);
+  return createAdminTabCacheForPath(DEFAULT_ADMIN_TAB_ID, now);
+}
+
+export function createAdminTabCacheForPath(href: string, now = Date.now()): AdminTabCache {
+  const id = normalizeAdminTabPath(href);
+  const info = getAdminTabInfo(id);
 
   return {
     version: ADMIN_TAB_CACHE_VERSION,
-    activeTabId: DEFAULT_ADMIN_TAB_ID,
+    activeTabId: id,
     tabs: [
       {
-        id: DEFAULT_ADMIN_TAB_ID,
-        href: DEFAULT_ADMIN_TAB_ID,
+        id,
+        href: id,
         title: info.title,
         kind: info.kind,
         closeable: info.closeable,

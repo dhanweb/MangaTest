@@ -1,18 +1,19 @@
 "use client";
 
 import {
-  ActionIcon, Badge, Box, Group, Paper, Radio, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput,
+  ActionIcon, Badge, Box, Checkbox, Group, Paper, ScrollArea, SimpleGrid, Stack, Table, Text, TextInput,
 } from "@mantine/core";
 import {
   ArrowLeft, BookOpen, EyeOff, GitMerge, RotateCcw, Save, Search, Trash2,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useAdminTabTitle } from "@/components/admin-workbench/use-admin-tab-title";
 import { AppButton, AppInput, DraggableModal } from "@/components/ui/app-components";
 import { toast } from "@/components/ui/toast";
+import { insertItemAt } from "@/lib/order-utils";
 import type { ComicMaintenanceAction, LibraryChapterRecord, LibraryComicAdminRowRecord } from "@/modules/library";
 import type { CanonicalTag } from "@/modules/tags";
 import { namespaceLabel } from "@/modules/tags";
@@ -51,6 +52,8 @@ export function ComicAdminDetailPanel({
   const [isLoadingTags, setIsLoadingTags] = useState(true);
   const [savedChapters, setSavedChapters] = useState<LibraryChapterRecord[]>(EMPTY_CHAPTERS);
   const [chapterDrafts, setChapterDrafts] = useState<LibraryChapterRecord[]>(EMPTY_CHAPTERS);
+  const [chapterPositionDrafts, setChapterPositionDrafts] = useState<Record<string, string>>({});
+  const chapterScrollTopRef = useRef<number | null>(null);
   const [isLoadingChapters, setIsLoadingChapters] = useState(!isMergedComic(comic));
   const [sources, setSources] = useState<SourceRecord[]>([]);
   const [resources, setResources] = useState<ResourceRecord[]>([]);
@@ -65,9 +68,38 @@ export function ComicAdminDetailPanel({
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [mergeModalOpened, setMergeModalOpened] = useState(false);
   const [mergeSearch, setMergeSearch] = useState("");
-  const [selectedMergeTargetId, setSelectedMergeTargetId] = useState<string | null>(null);
+  const [selectedMergeSourceIds, setSelectedMergeSourceIds] = useState<string[]>([]);
+  const [mergeOrderDrafts, setMergeOrderDrafts] = useState<Record<string, string>>({});
+  const [chapterReloadKey, setChapterReloadKey] = useState(0);
 
   useAdminTabTitle(currentComic.displayTitle);
+
+  useLayoutEffect(() => {
+    const scrollTop = chapterScrollTopRef.current;
+    if (scrollTop === null) {
+      return;
+    }
+
+    chapterScrollTopRef.current = null;
+    let cancelled = false;
+    const restoreScroll = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const scrollContainer = document.querySelector<HTMLElement>("[data-admin-content-scroll]");
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollTop;
+      }
+    };
+
+    restoreScroll();
+    const frame = window.requestAnimationFrame(restoreScroll);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+    };
+  }, [chapterDrafts]);
 
   const editTargetIsMerged = isMergedComic(currentComic);
   const parentComic = currentComic.parentComicId ? rows.find((r) => r.id === currentComic.parentComicId) : null;
@@ -75,9 +107,13 @@ export function ComicAdminDetailPanel({
   const canReorderChapters = !editTargetIsMerged && chapterDrafts.length > 1;
   const tagGroups = useMemo(() => getTagGroups(assignedTags), [assignedTags]);
   const mergeCandidates = useMemo(
-    () => rows.filter((r) => r.id !== currentComic.id && r.status === "readable" && !r.parentComicId && !r.mergedAsChapterId)
-      .filter((r) => { const q = mergeSearch.trim().toLowerCase(); return q ? [r.displayTitle, r.fileTitle, r.originalTitle ?? "", r.metadataQueryTitle ?? "", r.primaryLocalPath ?? ""].join(" ").toLowerCase().includes(q) : true; }),
+    () => rows.filter((r) => r.id !== currentComic.id && r.status === "readable" && r.chapterCount === 1 && !r.parentComicId && !r.mergedAsChapterId)
+      .filter((r) => { const q = mergeSearch.trim().toLowerCase(); return q ? [r.displayTitle, r.fileTitle, r.authorNames.join(" "), r.originalTitle ?? "", r.metadataQueryTitle ?? "", r.primaryLocalPath ?? ""].join(" ").toLowerCase().includes(q) : true; }),
     [currentComic.id, mergeSearch, rows],
+  );
+  const selectedMergeCandidates = useMemo(
+    () => selectedMergeSourceIds.map((id) => rows.find((row) => row.id === id)).filter((row): row is LibraryComicAdminRowRecord => Boolean(row)),
+    [rows, selectedMergeSourceIds],
   );
 
   const showMsg = useCallback((text: string, tone: "success" | "error") => {
@@ -103,6 +139,7 @@ export function ComicAdminDetailPanel({
         if (!cancelled && d.chapters) {
           setSavedChapters(d.chapters);
           setChapterDrafts(d.chapters);
+          setChapterPositionDrafts(createPositionDrafts(d.chapters));
         }
       })
       .catch(() => {})
@@ -114,7 +151,7 @@ export function ComicAdminDetailPanel({
     return () => {
       cancelled = true;
     };
-  }, [currentComic.id, editTargetIsMerged]);
+  }, [chapterReloadKey, currentComic.id, editTargetIsMerged]);
 
   useEffect(() => {
     let c = false;
@@ -179,16 +216,69 @@ export function ComicAdminDetailPanel({
     } catch (err) { showMsg(err instanceof Error ? err.message : "操作失败", "error"); } finally { setPendingAction(null); }
   }
 
+  function closeMergeModal() {
+    setMergeModalOpened(false);
+    setMergeSearch("");
+    setSelectedMergeSourceIds([]);
+    setMergeOrderDrafts({});
+  }
+
+  function toggleMergeSource(id: string) {
+    if (selectedMergeSourceIds.includes(id)) {
+      setSelectedMergeSourceIds((current) => current.filter((value) => value !== id));
+      setMergeOrderDrafts((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+      return;
+    }
+
+    setSelectedMergeSourceIds((current) => [...current, id]);
+    setMergeOrderDrafts((current) => ({ ...current, [id]: String(selectedMergeSourceIds.length + 1) }));
+  }
+
+  function getOrderedMergeSourceIds() {
+    return selectedMergeSourceIds
+      .map((id, selectionIndex) => {
+        const raw = mergeOrderDrafts[id] ?? "";
+        const parsed = raw.trim() ? Number(raw) : Number.NaN;
+        return {
+          id,
+          selectionIndex,
+          order: Number.isFinite(parsed) ? Math.max(1, Math.trunc(parsed)) : selectionIndex + 1,
+        };
+      })
+      .sort((left, right) => left.order - right.order || left.selectionIndex - right.selectionIndex)
+      .map((item) => item.id);
+  }
+
+  function commitMergeOrder(id: string) {
+    const selectionIndex = selectedMergeSourceIds.indexOf(id);
+    const raw = mergeOrderDrafts[id] ?? "";
+    const parsed = raw.trim() ? Number(raw) : Number.NaN;
+    setMergeOrderDrafts((current) => ({
+      ...current,
+      [id]: Number.isFinite(parsed) ? String(Math.max(1, Math.trunc(parsed))) : String(selectionIndex + 1),
+    }));
+  }
+
   async function mergeComic() {
-    if (!selectedMergeTargetId) return;
+    if (!selectedMergeSourceIds.length) return;
+    const mergeCount = selectedMergeSourceIds.length;
+    const orderedSourceIds = getOrderedMergeSourceIds();
     setPendingAction("merge");
     try {
-      const res = await fetch(`/api/comics/${currentComic.id}/merge`, { method: "POST", body: JSON.stringify({ targetComicId: selectedMergeTargetId }), headers: { "Content-Type": "application/json" } });
+      const res = await fetch(`/api/comics/${currentComic.id}/merge`, { method: "POST", body: JSON.stringify({ sourceComicIds: orderedSourceIds }), headers: { "Content-Type": "application/json" } });
       const p = await res.json() as { comics?: LibraryComicAdminRowRecord[]; error?: string };
       if (!res.ok || !p.comics) throw new Error(p.error ?? "合并失败");
-      setRows(p.comics); setCurrentComic(p.comics.find((r) => r.id === currentComic.id) ?? currentComic);
-      setSelectedMergeTargetId(null); setMergeModalOpened(false); setIsLoadingChapters(false);
-      showMsg("已合并为章节", "success");
+      const nextCurrentComic = p.comics.find((r) => r.id === currentComic.id) ?? currentComic;
+      setRows(p.comics); setCurrentComic(nextCurrentComic);
+      closeMergeModal();
+      if (!isMergedComic(nextCurrentComic)) {
+        setSavedChapters(EMPTY_CHAPTERS); setChapterDrafts(EMPTY_CHAPTERS); setIsLoadingChapters(true); setChapterReloadKey((key) => key + 1);
+      }
+      showMsg(`已添加 ${mergeCount} 个漫画章节`, "success");
     } catch (err) { showMsg(err instanceof Error ? err.message : "合并失败", "error"); } finally { setPendingAction(null); }
   }
 
@@ -207,14 +297,35 @@ export function ComicAdminDetailPanel({
   function moveChapter(id: string, dir: -1 | 1) {
     const idx = chapterDrafts.findIndex((c) => c.id === id); const to = idx + dir;
     if (idx === to || to < 0 || to >= chapterDrafts.length) return;
-    const next = [...chapterDrafts]; const [m] = next.splice(idx, 1); if (!m) return; next.splice(to, 0, m); setChapterDrafts(next);
+    const next = [...chapterDrafts]; const [m] = next.splice(idx, 1); if (!m) return; next.splice(to, 0, m); setReorderedChapterDrafts(next);
   }
 
   function dropChapter(ev: React.DragEvent, targetId: string) {
     ev.preventDefault(); const draggedId = ev.dataTransfer.getData("text/plain");
     const from = chapterDrafts.findIndex((c) => c.id === draggedId); const to = chapterDrafts.findIndex((c) => c.id === targetId);
     if (from === to || from < 0 || to < 0) return;
-    const next = [...chapterDrafts]; const [m] = next.splice(from, 1); if (!m) return; next.splice(to, 0, m); setChapterDrafts(next);
+    const next = [...chapterDrafts]; const [m] = next.splice(from, 1); if (!m) return; next.splice(to, 0, m); setReorderedChapterDrafts(next);
+  }
+
+  function setReorderedChapterDrafts(next: LibraryChapterRecord[]) {
+    chapterScrollTopRef.current = document.querySelector<HTMLElement>("[data-admin-content-scroll]")?.scrollTop ?? null;
+    setChapterDrafts(next);
+    setChapterPositionDrafts(createPositionDrafts(next));
+  }
+
+  function commitChapterPosition(chapterId: string) {
+    const currentIndex = chapterDrafts.findIndex((chapter) => chapter.id === chapterId);
+    if (currentIndex < 0) return;
+
+    const raw = chapterPositionDrafts[chapterId] ?? "";
+    const parsed = raw.trim() ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed)) {
+      setChapterPositionDrafts((current) => ({ ...current, [chapterId]: String(currentIndex + 1) }));
+      return;
+    }
+
+    const next = insertItemAt(chapterDrafts, chapterId, parsed);
+    setReorderedChapterDrafts(next);
   }
 
   async function saveChapterOrder() {
@@ -348,7 +459,19 @@ export function ComicAdminDetailPanel({
                     style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--mantine-color-pink-1)", background: chapterOrderChanged ? "var(--mantine-color-pink-0)" : "white", cursor: canReorderChapters ? "grab" : "default" }}
                   >
                     <Text size="sm" c="ink.4" style={{ width: 20, textAlign: "center", userSelect: "none" }}>⠿</Text>
-                    <Text size="sm" fw={600} c="ink.5" style={{ minWidth: 28 }}>#{i + 1}</Text>
+                    <TextInput
+                      size="xs" type="number" min={1} max={chapterDrafts.length} step={1}
+                      value={chapterPositionDrafts[ch.id] ?? String(i + 1)}
+                      onChange={(e) => { const value = e.currentTarget.value; setChapterPositionDrafts((current) => ({ ...current, [ch.id]: value })); }}
+                      onBlur={() => commitChapterPosition(ch.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); commitChapterPosition(ch.id); e.currentTarget.blur(); }
+                        if (e.key === "Escape") { e.preventDefault(); setChapterPositionDrafts((current) => ({ ...current, [ch.id]: String(i + 1) })); e.currentTarget.blur(); }
+                      }}
+                      aria-label={`设置${ch.title ?? `章节 ${i + 1}`}的排序位置`}
+                      disabled={!canReorderChapters}
+                      styles={{ root: { width: 64 }, input: { textAlign: "center" } }}
+                    />
                     <Text size="sm" style={{ flex: 1 }}>{ch.title ?? `章节 ${i + 1}`}</Text>
                     <Text size="xs" c="ink.4">{ch.pageCount} 页</Text>
                     <Group gap={4} wrap="nowrap">
@@ -464,35 +587,88 @@ export function ComicAdminDetailPanel({
               <DangerItem title="软删除记录" desc="标记为已删除，不删除本地文件。可在扫描结果中恢复。"
                 btn={<AppButton color="red" variant="outline" size="xs" leftSection={<Trash2 size={14} />} loading={pendingAction === "soft_delete"} onClick={() => changeStatus("soft_delete")}>软删除</AppButton>} />
             )}
-            <DangerItem title="合并为章节" desc="将本漫画合并到另一本漫画作为其章节。操作可逆，不会移动物理文件。"
+            <DangerItem title="合并为章节" desc="选择其他漫画追加为本漫画的章节。操作可逆，不会移动物理文件。"
               btn={<AppButton variant="outline" size="xs" leftSection={<GitMerge size={14} />} onClick={() => setMergeModalOpened(true)} disabled={currentComic.status !== "readable"}>合并...</AppButton>} />
           </Stack>
         </Paper>
       )}
 
-      <DraggableModal opened={mergeModalOpened} onClose={() => setMergeModalOpened(false)} title="选择合并目标漫画" size="xl">
-        <Stack gap="md">
-          <TextInput placeholder="搜索标题、路径..." leftSection={<Search size={15} />} value={mergeSearch} onChange={(e) => setMergeSearch(e.currentTarget.value)} />
-          <Radio.Group value={selectedMergeTargetId} onChange={setSelectedMergeTargetId}>
-            <ScrollArea h={400} offsetScrollbars>
-              <Table striped highlightOnHover>
-                <Table.Thead><Table.Tr><Table.Th w={42} /><Table.Th>漫画</Table.Th><Table.Th w={74}>页数</Table.Th><Table.Th w={74}>章节</Table.Th><Table.Th w={90}>状态</Table.Th></Table.Tr></Table.Thead>
-                <Table.Tbody>
-                  {mergeCandidates.map((c) => (
-                    <Table.Tr key={c.id} onClick={() => setSelectedMergeTargetId(c.id)} style={{ cursor: "pointer" }}>
-                      <Table.Td><Radio value={c.id} /></Table.Td>
-                      <Table.Td><Text size="sm" fw={700}>{c.displayTitle}</Text><Text size="xs" c="ink.5">{c.fileTitle}</Text></Table.Td>
-                      <Table.Td>{c.pageCount}</Table.Td><Table.Td>{c.chapterCount}</Table.Td><Table.Td>{statusLabel(c.status)}</Table.Td>
-                    </Table.Tr>
-                  ))}
-                  {mergeCandidates.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text ta="center" py="md" c="ink.5">没有可合并的目标</Text></Table.Td></Table.Tr>}
-                </Table.Tbody>
-              </Table>
-            </ScrollArea>
-          </Radio.Group>
-          <Group justify="flex-end">
-            <AppButton variant="outline" onClick={() => setMergeModalOpened(false)}>取消</AppButton>
-            <AppButton leftSection={<GitMerge size={15} />} disabled={!selectedMergeTargetId} loading={pendingAction === "merge"} onClick={mergeComic}>确认合并</AppButton>
+      <DraggableModal
+        opened={mergeModalOpened}
+        onClose={closeMergeModal}
+        title="选择要合并的漫画"
+        size="xl"
+        styles={{
+          content: {
+            display: "flex",
+            flexDirection: "column",
+            height: "min(760px, calc(100vh - 32px))",
+            maxHeight: "calc(100vh - 32px)",
+          },
+          body: {
+            display: "flex",
+            flex: 1,
+            minHeight: 0,
+            flexDirection: "column",
+            overflow: "hidden",
+          },
+        }}
+      >
+        <Stack gap="md" style={{ flex: 1, minHeight: 0 }}>
+          <Group justify="space-between" align="flex-start">
+            <Box>
+              <Text size="sm" c="ink.6">可多选单章节漫画，追加为当前漫画的新章节。</Text>
+              <Text size="xs" c="ink.5" mt={3}>只修改数据库归属，真实漫画文件不会移动或删除。</Text>
+            </Box>
+            <Text size="sm" fw={800} c="pink.6">已选 {selectedMergeSourceIds.length} 本</Text>
+          </Group>
+          <TextInput placeholder="搜索标题、作者、路径..." leftSection={<Search size={15} />} value={mergeSearch} onChange={(e) => setMergeSearch(e.currentTarget.value)} />
+          {selectedMergeCandidates.length > 0 && (
+            <Paper p="sm" style={{ flexShrink: 0, border: "1px solid var(--mantine-color-pink-2)", background: "var(--mantine-color-pink-0)" }}>
+              <Group justify="space-between" mb="xs">
+                <Text size="sm" fw={700}>合并顺序</Text>
+                <Text size="xs" c="ink.5">数字越小越靠前，相同序号按选择顺序排列</Text>
+              </Group>
+              <Stack gap={6}>
+                {selectedMergeCandidates.map((candidate, selectionIndex) => (
+                  <Group key={candidate.id} gap="xs" wrap="nowrap">
+                    <TextInput
+                      size="xs" type="number" min={1} step={1}
+                      value={mergeOrderDrafts[candidate.id] ?? String(selectionIndex + 1)}
+                      onChange={(e) => { const value = e.currentTarget.value; setMergeOrderDrafts((current) => ({ ...current, [candidate.id]: value })); }}
+                      onBlur={() => commitMergeOrder(candidate.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") { e.preventDefault(); commitMergeOrder(candidate.id); e.currentTarget.blur(); }
+                        if (e.key === "Escape") { e.preventDefault(); setMergeOrderDrafts((current) => ({ ...current, [candidate.id]: String(selectionIndex + 1) })); e.currentTarget.blur(); }
+                      }}
+                      aria-label={`设置${candidate.displayTitle}的合并顺序`}
+                      styles={{ root: { width: 64 }, input: { textAlign: "center" } }}
+                    />
+                    <Text size="sm" fw={600} style={{ flex: 1 }} lineClamp={1}>{candidate.displayTitle}</Text>
+                    <Text size="xs" c="ink.5">{candidate.authorNames.join("、") || "N/A"}</Text>
+                  </Group>
+                ))}
+              </Stack>
+            </Paper>
+          )}
+          <ScrollArea style={{ flex: 1, minHeight: 0 }} offsetScrollbars>
+            <Table striped highlightOnHover>
+              <Table.Thead><Table.Tr><Table.Th w={42} /><Table.Th>漫画</Table.Th><Table.Th w={74}>页数</Table.Th><Table.Th w={74}>章节</Table.Th><Table.Th w={90}>状态</Table.Th></Table.Tr></Table.Thead>
+              <Table.Tbody>
+                {mergeCandidates.map((c) => (
+                  <Table.Tr key={c.id} onClick={() => toggleMergeSource(c.id)} style={{ cursor: "pointer" }}>
+                    <Table.Td><Checkbox checked={selectedMergeSourceIds.includes(c.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleMergeSource(c.id)} aria-label={`选择${c.displayTitle}`} /></Table.Td>
+                    <Table.Td><Text size="sm" fw={700}>{c.displayTitle}</Text><Text size="xs" c="ink.5">{c.fileTitle}</Text></Table.Td>
+                    <Table.Td>{c.pageCount}</Table.Td><Table.Td>{c.chapterCount}</Table.Td><Table.Td>{statusLabel(c.status)}</Table.Td>
+                  </Table.Tr>
+                ))}
+                {mergeCandidates.length === 0 && <Table.Tr><Table.Td colSpan={5}><Text ta="center" py="md" c="ink.5">没有可合并的单章节漫画</Text></Table.Td></Table.Tr>}
+              </Table.Tbody>
+            </Table>
+          </ScrollArea>
+          <Group justify="flex-end" style={{ flexShrink: 0, paddingTop: 12, borderTop: "1px solid var(--mantine-color-pink-1)" }}>
+            <AppButton variant="outline" onClick={closeMergeModal}>取消</AppButton>
+            <AppButton leftSection={<GitMerge size={15} />} disabled={!selectedMergeSourceIds.length} loading={pendingAction === "merge"} onClick={mergeComic}>确认合并</AppButton>
           </Group>
         </Stack>
       </DraggableModal>
@@ -629,6 +805,10 @@ function statusLabel(s: string, merged = false) {
 }
 
 function isMergedComic(c: { parentComicId: string | null; mergedAsChapterId: string | null }) { return Boolean(c.parentComicId || c.mergedAsChapterId); }
+
+function createPositionDrafts(items: readonly { id: string }[]) {
+  return Object.fromEntries(items.map((item, index) => [item.id, String(index + 1)]));
+}
 
 function fmtKind(k: string | null) { return k === "directory" ? "DIR" : k?.toUpperCase() ?? "LOCAL"; }
 

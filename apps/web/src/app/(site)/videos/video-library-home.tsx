@@ -14,7 +14,7 @@ import { namespaceLabel } from "@/modules/tags";
 export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, tagFilters }: { initialQuery: string; initialSelectedTags: string[]; result: VideoSearchResult; tagFilters: VideoTagFilterRecord[] }) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
-  const selectedTags = initialSelectedTags;
+  const selectedTags = Array.from(new Set(initialSelectedTags.map((tag) => tag.trim().toLocaleLowerCase()).filter(Boolean)));
   const groups = useMemo(() => {
     const map = new Map<string, VideoTagFilterRecord[]>();
     for (const tag of tagFilters) map.set(tag.namespace, [...(map.get(tag.namespace) ?? []), tag]);
@@ -44,9 +44,9 @@ export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, ta
         <AppButton type="submit">搜索</AppButton>
       </Box>
       <Box component="section" p="lg" mb={24} style={{ border: "1px solid var(--mantine-color-pink-2)", borderRadius: 14, background: "white" }}>
-        {groups.length ? groups.map((group) => <Box key={group.namespace} style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "8px 0" }}>
+        {groups.length ? groups.map((group) => <Box key={group.namespace} className="tag-filter-row" style={{ display: "grid", gridTemplateColumns: "98px minmax(0, 1fr)", gap: 10, alignItems: "center", padding: "8px 0" }}>
           <Text size="13px" ta="right" c="#8d5a6e" fw={700}>{namespaceLabel(group.namespace)}:</Text>
-          <Group gap={8} wrap="wrap">{group.values.map((tag) => { const selected = selectedTags.includes(tag.canonical); const nextTags = selected ? selectedTags.filter((value) => value !== tag.canonical) : [...selectedTags, tag.canonical]; return <AppButton key={tag.id} variant={selected ? "filled" : "outline"} size="xs" onClick={() => apply({ page: 1, tags: nextTags })}>{tag.label} ({tag.videoCount})</AppButton>; })}</Group>
+          <Group gap={8} wrap="wrap">{group.values.map((tag) => { const tagValue = tag.canonical.toLocaleLowerCase(); const selected = selectedTags.includes(tagValue); const nextTags = selected ? selectedTags.filter((value) => value !== tagValue) : [...selectedTags, tagValue]; return <AppButton key={tag.id} className={selected ? "is-selected" : undefined} variant={selected ? "filled" : "outline"} size="xs" aria-pressed={selected} onClick={() => apply({ page: 1, tags: nextTags })}>{tag.label} ({tag.videoCount})</AppButton>; })}</Group>
         </Box>) : <Text size="sm" c="ink.5">还没有视频标签。可以在后台视频管理中手动维护。</Text>}
       </Box>
       <Flex justify="space-between" mb={24}><Text size="sm" c="ink.5">共 {result.total} 个视频{selectedTags.length ? `，已筛选 ${selectedTags.length} 个标签` : ""}</Text>{selectedTags.length ? <AppButton variant="transparent" size="xs" onClick={() => apply({ page: 1, tags: [] })} leftSection={<X size={14} />}>清除筛选</AppButton> : null}</Flex>

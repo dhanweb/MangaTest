@@ -7,6 +7,7 @@ import {
   closeAllTabs,
   closeOtherTabs,
   closeTabsToRight,
+  createAdminTabCacheForPath,
   createInitialAdminTabCache,
   openAdminTab,
 } from "./admin-tab-state";
@@ -18,6 +19,14 @@ describe("admin tab state", () => {
     expect(cache.activeTabId).toBe(DEFAULT_ADMIN_TAB_ID);
     expect(cache.tabs).toHaveLength(1);
     expect(cache.tabs[0]).toMatchObject({ id: DEFAULT_ADMIN_TAB_ID, title: "后台首页", closeable: true });
+  });
+
+  it("creates only the current tab when the page is restored", () => {
+    const cache = createAdminTabCacheForPath("/admin/comics/13", 100);
+
+    expect(cache.activeTabId).toBe("/admin/comics/13");
+    expect(cache.tabs).toHaveLength(1);
+    expect(cache.tabs[0]).toMatchObject({ id: "/admin/comics/13", title: "漫画详情" });
   });
 
   it("opens a new path tab and reuses it on repeated open", () => {

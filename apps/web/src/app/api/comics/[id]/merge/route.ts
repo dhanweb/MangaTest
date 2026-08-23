@@ -6,14 +6,23 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const targetComicId = await parseTargetComicId(request);
-
-  if (!targetComicId) {
-    return Response.json({ error: "targetComicId is required." }, { status: 400 });
-  }
+  const payload = (await request.json().catch(() => null)) as { sourceComicIds?: unknown; targetComicId?: unknown } | null;
 
   try {
-    const merge = await createComicMergeRepository().mergeAsChapter(id, targetComicId);
+    const repository = createComicMergeRepository();
+    const merge = Array.isArray(payload?.sourceComicIds)
+      ? await repository.mergeAsChapters(
+          payload.sourceComicIds.filter((value): value is string => typeof value === "string" && value.trim().length > 0),
+          id,
+        )
+      : typeof payload?.targetComicId === "string" && payload.targetComicId.trim()
+        ? await repository.mergeAsChapter(id, payload.targetComicId.trim())
+        : null;
+
+    if (!merge) {
+      return Response.json({ error: "sourceComicIds or targetComicId is required." }, { status: 400 });
+    }
+
     const comics = await createComicRepository().listAdminRows();
     return Response.json({ comics, merge });
   } catch (error) {
@@ -23,7 +32,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return Response.json({ error: message }, { status });
   }
 }
-
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
@@ -37,9 +45,4 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     return Response.json({ error: message }, { status });
   }
-}
-
-async function parseTargetComicId(request: Request) {
-  const payload = (await request.json().catch(() => null)) as { targetComicId?: unknown } | null;
-  return typeof payload?.targetComicId === "string" && payload.targetComicId.trim() ? payload.targetComicId.trim() : null;
 }

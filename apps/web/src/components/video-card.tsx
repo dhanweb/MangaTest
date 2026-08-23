@@ -23,7 +23,7 @@ export function VideoCard({ video }: { video: VideoCardRecord }) {
       </Box>
       <Box p="sm" pb="md">
         <Text fw={700} size="sm" lineClamp={1} mb={2}>{video.displayTitle}</Text>
-        <Text size="xs" c="ink.5" mb="sm">{video.episodeCount} 集 · {formatDuration(video.totalDurationSeconds)} · 本地</Text>
+        <Text size="xs" c="ink.5" mb="sm">{video.episodeCount} 集 · {formatDuration(video.totalDurationSeconds)} · 作者：{formatAuthors(video.authorNames)}</Text>
         <Group justify="space-between" gap={8}>
           <Text size="xs" c="green.7" fw={800}>就绪</Text>
           <Text size="xs" c="ink.5">{formatDate(video.addedAt)}</Text>
@@ -39,6 +39,10 @@ export function formatDuration(seconds: number | null) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const rest = seconds % 60;
   return hours ? `${hours}时${String(minutes).padStart(2, "0")}分` : `${minutes}分${String(rest).padStart(2, "0")}秒`;
+}
+
+function formatAuthors(authors: string[]) {
+  return authors.length ? authors.join("、") : "N/A";
 }
 
 function formatDate(value: string) {

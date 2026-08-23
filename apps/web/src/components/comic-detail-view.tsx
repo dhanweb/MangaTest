@@ -27,14 +27,14 @@ export function ComicDetailView({ comic }: { comic: LibraryComicDetailRecord }) 
       <Flex direction={{ base: "column", sm: "row" }} gap={28} mb={42}>
         <ComicCover comicId={comic.id} title={`第1页 / 共${comic.pageCount}页`} index={hashIndex(comic.id)} compact={false} use="cover" />
         <Box style={{ flex: 1 }}>
-          <Text size="xs" fw={800} c="ink.5" mb={4}>
-            Local Scan
-          </Text>
           <Text component="h1" size="34px" fw={700} lh="1.15" c="pink.5" mb={4} mt={0}>
             {comic.displayTitle}
           </Text>
           <Text size="sm" c="ink.5" mb="md">
             {comic.originalTitle ?? comic.fileTitle}
+          </Text>
+          <Text size="sm" c="ink.7" mb="md">
+            作者：<AuthorSearchLinks tags={comic.tags} fallbackNames={comic.authorNames} hrefBase="/" />
           </Text>
 
           <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" my="lg">
@@ -64,6 +64,28 @@ export function ComicDetailView({ comic }: { comic: LibraryComicDetailRecord }) 
             <AppBadge>{statusLabel(comic.status)}</AppBadge>
             <AppBadge>{formatKind(comic.localFileKind)}</AppBadge>
             <AppBadge>本地可读</AppBadge>
+            {comic.tags.map((tag) => (
+              <Box
+                key={tag.id}
+                component={Link}
+                href={`/?tag=${encodeURIComponent(tag.canonical)}`}
+                aria-label={`按标签搜索 ${tag.displayNameZh || tag.name}`}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  minHeight: 24,
+                  padding: "0 9px",
+                  border: "1px solid var(--mantine-color-pink-2)",
+                  borderRadius: 999,
+                  color: "var(--mantine-color-pink-6)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textDecoration: "none",
+                }}
+              >
+                {tag.displayNameZh || tag.name}
+              </Box>
+            ))}
           </Group>
 
           <Text size="sm" mb="xl" c="ink.7">
@@ -183,6 +205,35 @@ function formatKind(kind: LibraryComicDetailRecord["localFileKind"]) {
   }
 
   return kind?.toUpperCase() ?? "LOCAL";
+}
+
+function AuthorSearchLinks({
+  tags,
+  fallbackNames,
+  hrefBase,
+}: {
+  tags: LibraryComicDetailRecord["tags"];
+  fallbackNames: string[];
+  hrefBase: "/" | "/videos";
+}) {
+  const authorTags = tags.filter((tag) => tag.namespace === "artist" || tag.namespace === "group");
+
+  if (authorTags.length === 0) {
+    return <>{fallbackNames.length ? fallbackNames.join("、") : "N/A"}</>;
+  }
+
+  return authorTags.map((tag, index) => (
+    <span key={tag.id}>
+      {index > 0 ? "、" : null}
+      <Link
+        className="author-search-link"
+        href={`${hrefBase}?tag=${encodeURIComponent(tag.canonical)}`}
+        aria-label={`按作者搜索 ${tag.displayNameZh || tag.name}`}
+      >
+        {tag.displayNameZh || tag.name}
+      </Link>
+    </span>
+  ));
 }
 
 function formatBytes(value: number | null) {

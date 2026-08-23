@@ -105,7 +105,7 @@ function AdminShellInner({ children }: { children: React.ReactNode }) {
 
         <Box style={{ flex: 1, minWidth: 0, overflow: "hidden", height: "100%", display: "flex", flexDirection: "column" }}>
           <AdminTabStrip />
-          <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 32px 48px" }}>
+          <Box data-admin-content-scroll style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 32px 48px" }}>
             <AdminNavigationInterceptor>
               <AdminCachedOutlet>{children}</AdminCachedOutlet>
             </AdminNavigationInterceptor>

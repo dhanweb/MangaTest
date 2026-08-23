@@ -7,6 +7,7 @@ export interface VideoCardRecord {
   id: string;
   displayTitle: string;
   fileTitle: string;
+  authorNames: string[];
   status: "readable" | "missing_local_file" | "hidden" | "deleted";
   parentVideoId: string | null;
   mergedAsEpisodeId: string | null;
@@ -106,11 +107,13 @@ export function createVideoRepository() {
       const whereClause = and(baseWhere, queryWhere, ...tagWheres);
       const episodeCountSql = sql<number>`count(distinct ${videoEpisodes.id})`;
       const totalDurationSql = sql<number>`coalesce(sum(distinct ${videoEpisodes.durationSeconds}), 0)`;
+      const authorNamesSql = videoAuthorNamesSql();
       const rows = db
         .select({
           id: videos.id,
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
+          authorNames: authorNamesSql,
           status: videos.status,
           parentVideoId: videos.parentVideoId,
           mergedAsEpisodeId: videos.mergedAsEpisodeId,
@@ -134,7 +137,7 @@ export function createVideoRepository() {
         .where(whereClause)
         .get();
       return {
-        items: rows.map((row) => ({ ...row, episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0 })),
+        items: rows.map((row) => ({ ...row, authorNames: parseAuthorNames(row.authorNames), episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0 })),
         page,
         pageSize,
         total: Number(totalRow?.count ?? 0),
@@ -173,6 +176,7 @@ export function createVideoRepository() {
           id: videos.id,
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
+          authorNames: videoAuthorNamesSql(),
           status: videos.status,
           parentVideoId: videos.parentVideoId,
           mergedAsEpisodeId: videos.mergedAsEpisodeId,
@@ -192,7 +196,7 @@ export function createVideoRepository() {
         .orderBy(desc(videos.createdAt))
         .limit(limit)
         .all();
-      return rows.map((row) => ({ ...row, episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0, isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing) }));
+      return rows.map((row) => ({ ...row, authorNames: parseAuthorNames(row.authorNames), episodeCount: Number(row.episodeCount), totalDurationSeconds: Number(row.totalDurationSeconds), watchedPercent: 0, isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing) }));
     },
 
     async getDetail(id: string): Promise<VideoDetailRecord | null> {
@@ -204,6 +208,7 @@ export function createVideoRepository() {
           id: videos.id,
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
+          authorNames: videoAuthorNamesSql(),
           status: videos.status,
           parentVideoId: videos.parentVideoId,
           mergedAsEpisodeId: videos.mergedAsEpisodeId,
@@ -260,6 +265,7 @@ export function createVideoRepository() {
       const readableEpisodes = episodeRows.filter((episode) => !episode.isMissing);
       return {
         ...video,
+        authorNames: parseAuthorNames(video.authorNames),
         primaryPath: readableEpisodes[0]?.absolutePath ?? episodeRows[0]?.absolutePath ?? null,
         episodeCount: episodeRows.length,
         totalDurationSeconds: episodeRows.reduce((sum, episode) => sum + (episode.durationSeconds ?? 0), 0),
@@ -295,6 +301,24 @@ export function createVideoRepository() {
       return getDb().select().from(videoEpisodes).where(eq(videoEpisodes.id, id)).get() ?? null;
     },
   };
+}
+
+function videoAuthorNamesSql() {
+  return sql<string | null>`(
+    select group_concat(author_tags.label, char(31))
+    from (
+      select distinct coalesce(author_tag.display_name_zh, author_tag.name) as label
+      from video_tags author_video_tags
+      inner join tags author_tag on author_tag.id = author_video_tags.tag_id
+      where author_video_tags.video_id = ${videos.id}
+        and author_tag.namespace in ('artist', 'group')
+      order by author_tag.namespace, author_tag.name
+    ) author_tags
+  )`;
+}
+
+function parseAuthorNames(value: string | null) {
+  return value ? value.split(String.fromCharCode(31)).map((name) => name.trim()).filter(Boolean) : [];
 }
 
 export type VideoRepository = ReturnType<typeof createVideoRepository>;

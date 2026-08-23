@@ -6,6 +6,7 @@ export interface LibraryComicCardRecord {
   id: string;
   displayTitle: string;
   fileTitle: string;
+  authorNames: string[];
   status: "readable" | "missing_local_file" | "remote_only" | "hidden" | "deleted";
   primaryLocalFileId: string | null;
   localFileKind: "directory" | "zip" | "cbz" | null;
@@ -73,6 +74,18 @@ export interface LibraryComicDetailRecord {
   addedAt: string;
   updatedAt: string;
   chapters: LibraryChapterRecord[];
+  authorNames: string[];
+  tags: LibraryComicTagRecord[];
+}
+
+export interface LibraryComicTagRecord {
+  id: string;
+  namespace: string;
+  name: string;
+  canonical: string;
+  displayNameZh: string | null;
+  source: "scan" | "metadata" | "manual";
+  isUserEdited: boolean;
 }
 
 export interface ReaderPageRecord {
@@ -145,6 +158,7 @@ export function createComicRepository(): ComicRepository {
       );
       const whereClause = and(baseWhere, queryWhere, ...selectedTagWhere);
       const pageCountSql = sql<number>`count(distinct ${pages.id})`;
+      const authorNamesSql = comicAuthorNamesSql();
       const sort = input.sort ?? "recent";
       const orderBy =
         sort === "title"
@@ -170,6 +184,7 @@ export function createComicRepository(): ComicRepository {
           id: comics.id,
           displayTitle: comics.displayTitle,
           fileTitle: comics.fileTitle,
+          authorNames: authorNamesSql,
           status: comics.status,
           primaryLocalFileId: comics.primaryLocalFileId,
           localFileKind: localFiles.kind,
@@ -192,6 +207,7 @@ export function createComicRepository(): ComicRepository {
       return {
         items: rows.map((row) => ({
           ...row,
+          authorNames: parseAuthorNames(row.authorNames),
           pageCount: Number(row.pageCount),
           chapterCount: Number(row.chapterCount),
         })),
@@ -250,6 +266,7 @@ export function createComicRepository(): ComicRepository {
           id: comics.id,
           displayTitle: comics.displayTitle,
           fileTitle: comics.fileTitle,
+          authorNames: comicAuthorNamesSql(),
           metadataQueryTitle: comics.metadataQueryTitle,
           originalTitle: comics.originalTitle,
           status: comics.status,
@@ -276,6 +293,7 @@ export function createComicRepository(): ComicRepository {
 
       return rows.map((row) => ({
         ...row,
+        authorNames: parseAuthorNames(row.authorNames),
         pageCount: Number(row.pageCount),
         chapterCount: Number(row.chapterCount),
         isPrimaryFileMissing: Boolean(row.isPrimaryFileMissing),
@@ -291,6 +309,7 @@ export function createComicRepository(): ComicRepository {
           id: comics.id,
           displayTitle: comics.displayTitle,
           fileTitle: comics.fileTitle,
+          authorNames: comicAuthorNamesSql(),
           metadataQueryTitle: comics.metadataQueryTitle,
           originalTitle: comics.originalTitle,
           status: comics.status,
@@ -328,11 +347,29 @@ export function createComicRepository(): ComicRepository {
         .orderBy(asc(chapters.sortOrder), asc(chapters.createdAt))
         .all();
 
+      const tagRows = db
+        .select({
+          id: tags.id,
+          namespace: tags.namespace,
+          name: tags.name,
+          canonical: tags.canonical,
+          displayNameZh: tags.displayNameZh,
+          source: comicTags.source,
+          isUserEdited: comicTags.isUserEdited,
+        })
+        .from(comicTags)
+        .innerJoin(tags, eq(tags.id, comicTags.tagId))
+        .where(eq(comicTags.comicId, id))
+        .orderBy(asc(tags.namespace), asc(tags.name))
+        .all();
+
       return {
         ...row,
+        authorNames: parseAuthorNames(row.authorNames),
         pageCount: Number(row.pageCount),
         chapterCount: Number(row.chapterCount),
         chapters: chapterRows,
+        tags: tagRows.map((tag) => ({ ...tag, isUserEdited: Boolean(tag.isUserEdited) })),
       };
     },
 
@@ -388,6 +425,24 @@ export function createComicRepository(): ComicRepository {
       };
     },
   };
+}
+
+function comicAuthorNamesSql() {
+  return sql<string | null>`(
+    select group_concat(author_tags.label, char(31))
+    from (
+      select distinct coalesce(author_tag.display_name_zh, author_tag.name) as label
+      from comic_tags author_comic_tags
+      inner join tags author_tag on author_tag.id = author_comic_tags.tag_id
+      where author_comic_tags.comic_id = ${comics.id}
+        and author_tag.namespace in ('artist', 'group')
+      order by author_tag.namespace, author_tag.name
+    ) author_tags
+  )`;
+}
+
+function parseAuthorNames(value: string | null) {
+  return value ? value.split(String.fromCharCode(31)).map((name) => name.trim()).filter(Boolean) : [];
 }
 
 function normalizeSelectedTags(input: string[] | undefined) {

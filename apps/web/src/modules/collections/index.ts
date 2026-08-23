@@ -489,6 +489,17 @@ function listCollectionItems(collectionId: string, sortMode: CollectionSortMode)
       primaryLocalFileId: comics.primaryLocalFileId,
       pageCount: sql<number>`(select count(*) from pages join chapters on chapters.id = pages.chapter_id where chapters.comic_id = ${comics.id})`,
       chapterCount: sql<number>`(select count(*) from chapters where chapters.comic_id = ${comics.id})`,
+      authorNames: sql<string | null>`(
+        select group_concat(author_tags.label, char(31))
+        from (
+          select distinct coalesce(author_tag.display_name_zh, author_tag.name) as label
+          from comic_tags author_comic_tags
+          inner join tags author_tag on author_tag.id = author_comic_tags.tag_id
+          where author_comic_tags.comic_id = ${comics.id}
+            and author_tag.namespace in ('artist', 'group')
+          order by author_tag.namespace, author_tag.name
+        ) author_tags
+      )`,
       sortOrder: collectionComics.sortOrder,
       membershipAddedAt: collectionComics.addedAt,
       localFileKind: localFiles.kind,
@@ -504,6 +515,7 @@ function listCollectionItems(collectionId: string, sortMode: CollectionSortMode)
     id: row.id,
     displayTitle: row.displayTitle,
     fileTitle: row.fileTitle,
+    authorNames: parseAuthorNames(row.authorNames),
     status: row.status as CollectionItemRecord["status"],
     primaryLocalFileId: row.primaryLocalFileId,
     localFileKind: (row.localFileKind as CollectionItemRecord["localFileKind"]) ?? null,
@@ -512,6 +524,10 @@ function listCollectionItems(collectionId: string, sortMode: CollectionSortMode)
     addedAt: row.membershipAddedAt,
     sortOrder: Number(row.sortOrder ?? 0),
   }));
+}
+
+function parseAuthorNames(value: string | null) {
+  return value ? value.split(String.fromCharCode(31)).map((name) => name.trim()).filter(Boolean) : [];
 }
 
 function mapCollectionRow(row: {
