@@ -7,7 +7,7 @@ import { and, eq } from "drizzle-orm";
 import { bootstrapDatabase, getDb, videoEpisodes, videoRoots, videos } from "@/modules/core/db";
 
 import { probeVideoDurationSeconds } from "./media-facts";
-import { naturalCompare, normalizeVideoSortTitle, normalizeVideoTitle } from "./title-utils";
+import { buildVideoImportSourceKey, naturalCompare, normalizeVideoSortTitle, normalizeVideoTitle } from "./title-utils";
 
 const SUPPORTED_EXTENSIONS = new Set(["mp4", "mkv", "avi", "mov", "webm", "m4v", "ts"]);
 
@@ -160,24 +160,21 @@ async function enumerateVideoRoot(rootPath: string): Promise<ScannedVideo[]> {
   const result: ScannedVideo[] = [];
 
   for (const entry of entries) {
-    if (entry.name === "下载入库" || entry.name.startsWith(".")) continue;
+    if (entry.name.startsWith(".")) continue;
     const absolutePath = path.join(rootPath, entry.name);
-    if (entry.isDirectory()) {
-      const files = await readdir(absolutePath, { withFileTypes: true });
-      const episodes = await Promise.all(
-        files
-          .filter((file) => file.isFile() && isSupportedVideo(file.name))
-          .sort((left, right) => naturalCompare(left.name, right.name))
-          .map((file) => toScannedEpisode(rootPath, path.join(entry.name, file.name), "directory_episode")),
-      );
-      if (episodes.length) {
-        result.push({
-          sourceKey: `dir:${entry.name}`,
-          fileTitle: normalizeVideoTitle(entry.name),
-          displayTitle: normalizeVideoTitle(entry.name),
-          episodes,
-        });
+    if (entry.name === "下载入库" && entry.isDirectory()) {
+      const importedEntries = await readdir(absolutePath, { withFileTypes: true });
+      for (const importedEntry of importedEntries) {
+        if (!importedEntry.isDirectory() || importedEntry.name.startsWith(".")) continue;
+        const importedVideo = await scanVideoDirectory(rootPath, path.join(absolutePath, importedEntry.name));
+        if (importedVideo) result.push(importedVideo);
       }
+      continue;
+    }
+
+    if (entry.isDirectory()) {
+      const scannedVideo = await scanVideoDirectory(rootPath, absolutePath);
+      if (scannedVideo) result.push(scannedVideo);
       continue;
     }
 
@@ -192,6 +189,26 @@ async function enumerateVideoRoot(rootPath: string): Promise<ScannedVideo[]> {
   }
 
   return result.sort((left, right) => naturalCompare(left.displayTitle, right.displayTitle));
+}
+
+async function scanVideoDirectory(rootPath: string, absolutePath: string): Promise<ScannedVideo | null> {
+  const files = await readdir(absolutePath, { withFileTypes: true });
+  const episodes = await Promise.all(
+    files
+      .filter((file) => file.isFile() && isSupportedVideo(file.name))
+      .sort((left, right) => naturalCompare(left.name, right.name))
+      .map((file) => toScannedEpisode(rootPath, path.join(path.relative(rootPath, absolutePath), file.name), "directory_episode")),
+  );
+  if (!episodes.length) return null;
+
+  const relativeDirectory = path.relative(rootPath, absolutePath).split(path.sep).join("/");
+  const displayTitle = normalizeVideoTitle(path.basename(absolutePath));
+  return {
+    sourceKey: relativeDirectory.startsWith("下载入库/") ? buildVideoImportSourceKey(displayTitle) : `dir:${relativeDirectory}`,
+    fileTitle: displayTitle,
+    displayTitle,
+    episodes,
+  };
 }
 
 async function toScannedEpisode(rootPath: string, relativePath: string, kind: ScannedEpisode["kind"]): Promise<ScannedEpisode> {

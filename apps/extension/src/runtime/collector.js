@@ -15,6 +15,7 @@
     const genericMetadata = {
       adapterId: currentPage?.page?.id || "generic",
       pageType: currentPage?.page?.type || "detail",
+      mediaType: "manga",
       site: location.hostname.replace(/^www\./, ""),
       sourceUrl,
       sourceId: createSourceId(sourceUrl),
@@ -28,6 +29,7 @@
       ]),
       tags: collectTags(),
       resources: [],
+      video: null,
     };
 
     return mergeMetadata(genericMetadata, adapterMetadata);
@@ -57,9 +59,10 @@
 
     return {
       ...genericMetadata,
-      ...pickPresent(adapterMetadata, ["adapterId", "pageType", "site", "sourceUrl", "sourceId", "title", "originalTitle", "coverUrl"]),
+      ...pickPresent(adapterMetadata, ["adapterId", "pageType", "mediaType", "site", "sourceUrl", "sourceId", "title", "originalTitle", "coverUrl"]),
       tags: mergeTags(adapterMetadata.tags, genericMetadata.tags),
       resources: mergeResources(adapterMetadata.resources, genericMetadata.resources),
+      video: adapterMetadata.video || genericMetadata.video,
     };
   }
 

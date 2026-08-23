@@ -1,0 +1,28 @@
+import { revalidatePath } from "next/cache";
+
+import { importVideoPayload, validateMetadataImportToken } from "@/modules/metadata-ingest";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function POST(request: Request) {
+  try {
+    await validateMetadataImportToken(getImportToken(request));
+    const payload = await request.json().catch(() => null);
+    const result = await importVideoPayload(payload);
+    revalidatePath("/videos");
+    revalidatePath("/admin/videos");
+    revalidatePath("/admin/downloads");
+    return Response.json({ result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "视频导入失败。";
+    const status = message.includes("令牌") ? 401 : 400;
+    return Response.json({ error: message }, { status });
+  }
+}
+
+function getImportToken(request: Request) {
+  const authorization = request.headers.get("authorization");
+  if (authorization?.toLowerCase().startsWith("bearer ")) return authorization.slice("bearer ".length);
+  return request.headers.get("x-mangatest-import-token");
+}

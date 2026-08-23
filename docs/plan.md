@@ -851,7 +851,7 @@ Metadata Ingest / Downloads: 校验、幂等、创建视频下载任务
 Provider: 获取或下载媒体文件
 ```
 
-视频适配器只负责来源站差异；后端合同、任务生命周期和 provider 仍由通用模块负责。视频能力预留在架构中，但不进入本地漫画 MVP。
+视频适配器只负责来源站差异；后端合同、任务生命周期和 provider 仍由通用模块负责。当前阶段按产品范围变更，先落地 hanime1.me 视频详情页的提交与 aria2 下载闭环；仍不做列表页批量采集、登录态抓取或其他视频网站适配。
 
 ### 6.5 PixivDownloader SQLite 同步
 
@@ -998,7 +998,7 @@ PixivDownloader series_id/order      → 来源 raw metadata 和系列合并候�
 - 重复导入策略
 - 详情页、资源页和单页 gallery 支持；不做列表页批量采集
 - 允许只提交 metadata，不提交可下载资源
-- 为视频信息和下载地址预留 `submitVideo` 合同，但暂不要求实现具体视频站点
+- 实现 `submitVideo` 合同和首个视频网站适配：hanime1.me 视频详情页采集、视频直链提交、视频根目录占位记录和 aria2 下载任务
 - PixivDownloader SQLite 外部同步按独立子阶段实施：先完成标题来源状态与数据迁移，再完成 schema 检查/路径解析、预览匹配、幂等写入、后台入口和真实数据库副本验证
 - PixivDownloader 同步首版不修改 Library 普通扫描、不实现 Pixiv 下载、不改造浏览器插件；如果真实数据无法满足扁平作品根约束，应先更新本计划再新增 Pixiv 专用扫描模式
 

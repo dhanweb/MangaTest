@@ -34,6 +34,8 @@ When the status panel shows a single local match, enable "提交到本地漫画"
 
 For an NHentai gallery, the adapter keeps metadata collection and download handling on the same detail page. It triggers only the native `Torrent` menu item; the service worker recognizes NHentai's signed `fmt=torrent` download URL, forwards it through the existing torrent-to-magnet flow, and can fall back to cached page metadata if the browser navigates away before the content script responds. ZIP/CBZ downloads remain untouched.
 
+For Hanime1, open a `https://hanime1.me/watch?v=<id>` detail page and use the injected `提交视频并下载` action. The extension navigates to Hanime1's official `https://hanime1.me/download?v=<id>` page, where each `a[data-url]` download entry receives a MangaTest submit button. The selected official download URL is sent to the local video import API and handed to aria2; the adapter does not extract a playback-page video source or manufacture another direct URL.
+
 ## Verification
 
 ```bash

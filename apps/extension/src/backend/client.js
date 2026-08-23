@@ -49,6 +49,14 @@
     });
   }
 
+  function submitVideo(metadata) {
+    return request({
+      method: "POST",
+      endpoint: "/api/videos/import",
+      body: metadata,
+    });
+  }
+
   async function resolveResources(resources) {
     const response = await chrome.runtime.sendMessage({
       type: "MANGATEST_RESOLVE_RESOURCES",
@@ -83,6 +91,7 @@
     getImportStatus,
     submitMetadata,
     submitDownloadResource,
+    submitVideo,
     resolveResources,
     notifySourceResult,
     closeCurrentTab,

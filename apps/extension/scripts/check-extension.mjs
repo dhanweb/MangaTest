@@ -16,6 +16,8 @@ assert(manifest.permissions.includes("storage"), "storage permission is required
 assert(manifest.permissions.includes("downloads"), "downloads permission is required");
 assert(manifest.host_permissions?.includes("https://nhentai.net/*"), "nhentai host permission is required");
 assert(manifest.host_permissions?.includes("https://*.nhentai.net/*"), "nhentai subdomain host permission is required");
+assert(manifest.host_permissions?.includes("https://hanime1.me/*"), "hanime1 host permission is required");
+assert(manifest.content_scripts?.some((contentScript) => contentScript.matches?.includes("https://hanime1.me/*")), "hanime1 content script match is required");
 
 const referencedFiles = [
   manifest.action.default_popup,
@@ -24,12 +26,14 @@ const referencedFiles = [
   "src/runtime/status-placement.js",
   "src/adapters/exhentai/adapter.js",
   "src/adapters/nhentai/adapter.js",
+  "src/adapters/hanime1/adapter.js",
   "src/runtime/adapter-registry.js",
   "src/runtime/metadata-contract.js",
   "src/runtime/collector.js",
   "src/backend/client.js",
   "src/features/metadata/submit.js",
   "src/features/download-resources/submit.js",
+  "src/features/video/submit.js",
   "src/content/injector.js",
   "src/background/torrent-magnet.js",
   "src/popup/popup.css",
@@ -54,6 +58,46 @@ checkFixture({
     title: "Generic Sample Comic",
     tagCount: 2,
     resourceCount: 0,
+  },
+});
+
+checkFixture({
+  file: "test-fixtures/hanime1-watch.html",
+  url: "https://hanime1.me/watch?v=407861",
+  expected: {
+    adapterId: "hanime1-video",
+    pageType: "detail",
+    capabilities: ["metadata", "resource-navigation", "video"],
+    mediaType: "video",
+    site: "hanime1.me",
+    sourceId: "hanime1.me/watch?v=407861",
+    sourceUrl: "https://hanime1.me/watch?v=407861",
+    title: "[Sample Artist] Sample Hanime Video",
+    originalTitle: "Sample Hanime Video",
+    coverUrl: "https://vdownload.hembed.com/image/thumbnail/407861h.jpg?secure=fixture",
+    tagCount: 6,
+    resourceCount: 0,
+    videoSourceCount: 0,
+    durationSeconds: 65,
+  },
+});
+
+checkFixture({
+  file: "test-fixtures/hanime1-download.html",
+  url: "https://hanime1.me/download?v=407861",
+  expected: {
+    adapterId: "hanime1-video-download",
+    pageType: "resource",
+    capabilities: ["download-resource", "video"],
+    mediaType: "video",
+    site: "hanime1.me",
+    sourceId: "hanime1.me/watch?v=407861",
+    sourceUrl: "https://hanime1.me/watch?v=407861",
+    title: "[Sample Artist] Sample Hanime Video",
+    tagCount: 0,
+    resourceCount: 3,
+    firstResourceUrl: "https://vdownload.hembed.com/407861-1080p.mp4?secure=fixture",
+    videoSourceCount: 3,
   },
 });
 
@@ -127,11 +171,23 @@ function checkFixture({ file, url, expected }) {
   if (expected.sourceUrl) {
     assert(result.sourceUrl === expected.sourceUrl, `${file} sourceUrl mismatch`);
   }
+  if (expected.coverUrl) {
+    assert(result.coverUrl === expected.coverUrl, `${file} coverUrl mismatch`);
+  }
+  if (expected.mediaType) {
+    assert(result.mediaType === expected.mediaType, `${file} mediaType mismatch`);
+  }
   assert((result.originalTitle ?? null) === (expected.originalTitle ?? result.originalTitle ?? null), `${file} originalTitle mismatch`);
   assert(result.tags.length === expected.tagCount, `${file} tag count mismatch`);
   assert(result.resources.length === expected.resourceCount, `${file} resource count mismatch`);
   if (expected.firstResourceUrl) {
     assert(result.resources[0]?.url === expected.firstResourceUrl, `${file} first resource URL mismatch`);
+  }
+  if (expected.videoSourceCount !== undefined) {
+    assert(result.video?.sources?.length === expected.videoSourceCount, `${file} video source count mismatch`);
+  }
+  if (expected.durationSeconds !== undefined) {
+    assert(result.video?.durationSeconds === expected.durationSeconds, `${file} duration mismatch`);
   }
   if (expected.tags) {
     for (const tag of expected.tags) {
@@ -166,6 +222,7 @@ function runCollector(html, url) {
   for (const file of [
     "src/adapters/exhentai/adapter.js",
     "src/adapters/nhentai/adapter.js",
+    "src/adapters/hanime1/adapter.js",
     "src/runtime/adapter-registry.js",
     "src/runtime/metadata-contract.js",
   ]) {
@@ -220,6 +277,15 @@ function querySelector(html, selector, location) {
     return elementFromTag(html, "h1", location);
   }
 
+  const classSelector = /^([a-z0-9]+)\.([a-z0-9_-]+)$/i.exec(selector);
+  if (classSelector) {
+    return parseElements(html, classSelector[1], location).find((element) => element.className.split(/\s+/).includes(classSelector[2])) ?? null;
+  }
+
+  if (/^[a-z0-9]+$/i.test(selector)) {
+    return elementFromTag(html, selector, location);
+  }
+
   if (selector === "#gd1 img") {
     return parseElements(sectionById(html, "gd1"), "img", location)[0] ?? null;
   }
@@ -256,6 +322,18 @@ function querySelectorAll(html, selector, location) {
 
   if (selector === 'a[href*="/torrent/"]') {
     return parseElements(html, "a", location).filter((element) => element.href.includes("/torrent/"));
+  }
+
+  if (selector === 'a[href*="/download"]') {
+    return parseElements(html, "a", location).find((element) => element.href.includes("/download")) ?? null;
+  }
+
+  if (selector === 'a[href*="tags"]') {
+    return parseElements(html, "a", location).filter((element) => element.href.includes("tags"));
+  }
+
+  if (selector === "a[data-url]") {
+    return parseElements(html, "a", location).filter((element) => Boolean(element.getAttribute("data-url")));
   }
 
   if (selector === "#tags .tag-container") {
