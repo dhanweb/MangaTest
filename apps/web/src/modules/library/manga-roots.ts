@@ -4,7 +4,7 @@ import path from "node:path";
 import { DEFAULT_SCAN_MODE } from "@/modules/core/config";
 import { validateAbsolutePath } from "@/modules/local-files/path-safety";
 
-export type MangaRootKind = "user" | "system";
+export type MangaRootKind = "user" | "system" | "pixiv";
 
 export interface MangaRootDraft {
   absolutePath: string;

@@ -7,7 +7,6 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     dbPath?: unknown;
     downloadRoot?: unknown;
-    mangaRootId?: unknown;
   } | null;
 
   const override =
@@ -15,7 +14,6 @@ export async function POST(request: Request) {
       ? {
           dbPath: typeof payload.dbPath === "string" ? payload.dbPath : undefined,
           downloadRoot: typeof payload.downloadRoot === "string" ? payload.downloadRoot : undefined,
-          mangaRootId: typeof payload.mangaRootId === "string" ? payload.mangaRootId : undefined,
         }
       : undefined;
 

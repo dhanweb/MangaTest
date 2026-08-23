@@ -247,6 +247,12 @@
   }
 }
 
+@media (min-width: 1400px) {
+  .comic-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 .cover-block {
   @apply grid place-items-center rounded-[14px] shadow-lg;
   aspect-ratio: 2 / 3;

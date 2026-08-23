@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { getRuntimeSettings, saveRuntimeSettings } from "@/modules/core/settings";
+import { ensurePixivDownloaderMangaRoot } from "@/modules/metadata-ingest/sources/pixiv-downloader";
 import type { RuntimeSettingsInput } from "@/modules/core/settings/repository";
 
 export const runtime = "nodejs";
@@ -147,11 +148,12 @@ export async function PATCH(request: Request) {
     input.pixivDownloaderDownloadRoot = normalized.value;
   }
 
-  if (typeof payload.pixivDownloaderMangaRootId === "string") {
-    input.pixivDownloaderMangaRootId = payload.pixivDownloaderMangaRootId.trim();
-  }
-
   try {
+    if (typeof input.pixivDownloaderDownloadRoot === "string") {
+      input.pixivDownloaderMangaRootId = input.pixivDownloaderDownloadRoot
+        ? (await ensurePixivDownloaderMangaRoot(input.pixivDownloaderDownloadRoot)).id
+        : "";
+    }
     return Response.json({ settings: await saveRuntimeSettings(input) });
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Failed to save settings." }, { status: 400 });

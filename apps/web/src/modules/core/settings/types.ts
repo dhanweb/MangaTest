@@ -39,6 +39,6 @@ export interface RuntimeSettings {
   pixivDownloaderDbPath: string;
   /** PixivDownloader 下载根目录的绝对路径，用于解析 artworks.folder 中的 {0}。 */
   pixivDownloaderDownloadRoot: string;
-  /** PixivDownloader 下载内容对应的 MangaTest 漫画根目录 ID。 */
+  /** PixivDownloader 受管媒体路径 ID；由下载根目录派生，保留用于旧数据库兼容。 */
   pixivDownloaderMangaRootId: string;
 }

@@ -4,3 +4,4 @@ export * from "./sqlite-reader";
 export * from "./path-resolver";
 export * from "./comic-matcher";
 export * from "./sync-service";
+export * from "./managed-root";

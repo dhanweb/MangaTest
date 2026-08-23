@@ -112,6 +112,8 @@ export function bootstrapDatabase() {
       file_title TEXT NOT NULL,
       sort_title TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'readable',
+      parent_video_id TEXT,
+      merged_as_episode_id TEXT,
       last_watched_episode_id TEXT,
       last_watched_position_seconds INTEGER,
       last_watched_at TEXT,
@@ -740,6 +742,8 @@ export function bootstrapDatabase() {
   ensureColumn("download_tasks", "media_type", "TEXT NOT NULL DEFAULT 'comic'");
   ensureColumn("media_assets", "video_id", "TEXT");
   ensureColumn("media_assets", "video_episode_id", "TEXT");
+  ensureColumn("videos", "parent_video_id", "TEXT");
+  ensureColumn("videos", "merged_as_episode_id", "TEXT");
 
   // Backfill display title provenance for databases created before the
   // display_title_source columns existed. Titles that still equal the scanned
@@ -784,6 +788,9 @@ export function bootstrapDatabase() {
   } catch { /* index may already exist */ }
   try {
     sqlite2.exec("CREATE INDEX IF NOT EXISTS media_assets_video_episode_idx ON media_assets (video_episode_id)");
+  } catch { /* index may already exist */ }
+  try {
+    sqlite2.exec("CREATE INDEX IF NOT EXISTS videos_parent_idx ON videos (parent_video_id)");
   } catch { /* index may already exist */ }
 
   // Auto-create system manga root if it doesn't exist

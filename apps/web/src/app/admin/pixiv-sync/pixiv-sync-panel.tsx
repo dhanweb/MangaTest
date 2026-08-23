@@ -4,9 +4,8 @@ import { Box, Group, Stack, Table, Text } from "@mantine/core";
 import { Database, Link2, RefreshCcw, ScanSearch, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { AppButton, AppInput, AppSelect } from "@/components/ui/app-components";
+import { AppButton, AppInput } from "@/components/ui/app-components";
 import { toast } from "@/components/ui/toast";
-import type { MangaRootRecord } from "@/modules/library/manga-roots";
 import type {
   PixivConnectionCheckResult,
   PixivSyncEntry,
@@ -176,10 +175,9 @@ function EntryTable({ entries }: { entries: PixivSyncEntry[] }) {
   );
 }
 
-export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }) {
+export function PixivSyncPanel() {
   const [dbPath, setDbPath] = useState("");
   const [downloadRoot, setDownloadRoot] = useState("");
-  const [mangaRootId, setMangaRootId] = useState("");
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isChecking, setIsChecking] = useState(false);
@@ -193,23 +191,14 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
   const [openSessionId, setOpenSessionId] = useState<string | null>(null);
   const [openSessionEntries, setOpenSessionEntries] = useState<PixivSyncEntry[] | null>(null);
 
-  const rootOptions = [
-    { value: "", label: "选择漫画根目录" },
-    ...mangaRoots.map((root) => ({
-      value: root.id,
-      label: `${root.displayName ?? root.absolutePath} (${root.absolutePath})`,
-    })),
-  ];
-
   useEffect(() => {
     let mounted = true;
     fetch("/api/settings")
       .then((response) => response.json())
-      .then((payload: { settings?: { pixivDownloaderDbPath?: string; pixivDownloaderDownloadRoot?: string; pixivDownloaderMangaRootId?: string } }) => {
+      .then((payload: { settings?: { pixivDownloaderDbPath?: string; pixivDownloaderDownloadRoot?: string } }) => {
         if (!mounted || !payload.settings) return;
         setDbPath(payload.settings.pixivDownloaderDbPath ?? "");
         setDownloadRoot(payload.settings.pixivDownloaderDownloadRoot ?? "");
-        setMangaRootId(payload.settings.pixivDownloaderMangaRootId ?? "");
       })
       .catch(() => undefined);
     return () => {
@@ -253,16 +242,14 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
         body: JSON.stringify({
           pixivDownloaderDbPath: dbPath,
           pixivDownloaderDownloadRoot: downloadRoot,
-          pixivDownloaderMangaRootId: mangaRootId,
         }),
       });
-      const payload = (await response.json()) as { settings?: { pixivDownloaderDbPath: string; pixivDownloaderDownloadRoot: string; pixivDownloaderMangaRootId: string }; error?: string };
+      const payload = (await response.json()) as { settings?: { pixivDownloaderDbPath: string; pixivDownloaderDownloadRoot: string }; error?: string };
       if (!response.ok || !payload.settings) {
         throw new Error(payload.error ?? "保存失败。");
       }
       setDbPath(payload.settings.pixivDownloaderDbPath);
       setDownloadRoot(payload.settings.pixivDownloaderDownloadRoot);
-      setMangaRootId(payload.settings.pixivDownloaderMangaRootId);
       setIsDirty(false);
       toast.success("PixivDownloader 配置已保存");
     } catch (error) {
@@ -279,7 +266,7 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
       const response = await fetch("/api/pixiv-downloader/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dbPath, downloadRoot, mangaRootId }),
+        body: JSON.stringify({ dbPath, downloadRoot }),
       });
       const payload = (await response.json()) as { result?: PixivConnectionCheckResult; error?: string };
       if (!payload.result) {
@@ -338,7 +325,7 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
 
   async function runSync(scanFirst: boolean) {
     const label = scanFirst ? "扫描并同步" : "同步";
-    if (scanFirst && !window.confirm("将先对配置的漫画根目录执行普通扫描，再执行 Pixiv 元数据同步。继续吗？")) {
+    if (scanFirst && !window.confirm("将先对 PixivDownloader 下载根目录执行普通扫描，再执行 Pixiv 元数据同步。继续吗？")) {
       return;
     }
     if (!scanFirst && !window.confirm("将按当前本地库直接执行 Pixiv 元数据同步（不重新扫描）。继续吗？")) {
@@ -408,7 +395,7 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
             Pixiv 元数据同步
           </Text>
           <Text size="sm" c="ink.5">
-            从 PixivDownloader SQLite 数据库只读同步标题、来源、作者和标签。本地漫画仍由普通扫描创建，同步只补充元数据，不移动文件。
+            从 PixivDownloader SQLite 数据库只读同步标题、来源、作者和标签。下载根目录会自动注册为媒体路径，普通路径管理页不可编辑或删除；扫描和同步都会使用这条受管路径。
           </Text>
         </Box>
       </Box>
@@ -428,7 +415,7 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
             }}
           />
           <AppInput
-            label="PixivDownloader 下载根目录（绝对路径，解析 {0}）"
+            label="PixivDownloader 下载根目录（绝对路径，解析 {0}；自动添加为受管媒体路径）"
             placeholder="例如 D:\\hentai\\pixiv"
             value={downloadRoot}
             onChange={(event) => {
@@ -436,15 +423,9 @@ export function PixivSyncPanel({ mangaRoots }: { mangaRoots: MangaRootRecord[] }
               setIsDirty(true);
             }}
           />
-          <AppSelect
-            label="对应 MangaTest 漫画根目录"
-            data={rootOptions}
-            value={mangaRootId || ""}
-            onChange={(value) => {
-              setMangaRootId(value ?? "");
-              setIsDirty(true);
-            }}
-          />
+          <Text size="xs" c="ink.5">
+            保存后会自动创建或更新同路径的 MangaTest 媒体路径；如需修改，只能从本页修改下载根目录。
+          </Text>
           <Group gap="sm" mt={4}>
             <AppButton loading={isSaving} disabled={!isDirty} onClick={saveConfig}>
               保存配置

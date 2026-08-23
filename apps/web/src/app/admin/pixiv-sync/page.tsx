@@ -1,11 +1,10 @@
-import { createMangaRootRepository } from "@/modules/library/manga-roots.repository";
+import { ensureConfiguredPixivDownloaderMangaRoot } from "@/modules/metadata-ingest/sources/pixiv-downloader";
 
 import { PixivSyncPanel } from "./pixiv-sync-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminPixivSyncPage() {
-  const mangaRoots = await createMangaRootRepository().list();
-
-  return <PixivSyncPanel mangaRoots={mangaRoots} />;
+  await ensureConfiguredPixivDownloaderMangaRoot();
+  return <PixivSyncPanel />;
 }

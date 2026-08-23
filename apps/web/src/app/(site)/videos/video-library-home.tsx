@@ -34,7 +34,7 @@ export function VideoLibraryHome({ initialQuery, initialSelectedTags, result, ta
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   return <>
     <SiteHeader active="videos" />
-    <Container size={1200} px={16} py={32} pb={56}>
+    <Container size={1440} px={16} py={32} pb={56}>
       <Box mb={24}><Text component="h1" size="28px" fw={700} c="pink.5" mb={6} mt={0}>视频库</Text><Text size="sm" c="ink.5">浏览本地视频，按标签和标题快速找到要看的内容。</Text></Box>
       <Box component="form" mb={24} style={{ display: "flex", gap: 12 }} onSubmit={(event) => { event.preventDefault(); apply({ page: 1 }); }}>
         <Box component="label" style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, minHeight: 42, padding: "0 13px", border: "1px solid var(--mantine-color-pink-2)", borderRadius: 10, background: "white" }}>

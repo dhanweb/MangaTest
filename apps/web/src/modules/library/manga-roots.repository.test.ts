@@ -73,4 +73,36 @@ describe("MangaRootRepository", () => {
 
     await expect(repository.deleteUnused(usedRoot.id)).rejects.toThrow("已有入库漫画");
   });
+
+  it("registers Pixiv roots idempotently and protects them from ordinary path management", async () => {
+    vi.resetModules();
+
+    const workspace = path.join(os.tmpdir(), `mangatest-pixiv-root-${randomUUID()}`);
+    const rootPath = path.join(workspace, "Pixiv");
+    process.env.MANGATEST_DB_PATH = path.join(workspace, "test.sqlite");
+
+    await mkdir(rootPath, { recursive: true });
+
+    const { createMangaRootRepository } = await import("./manga-roots.repository");
+    const repository = createMangaRootRepository();
+    const existing = await repository.create({ absolutePath: rootPath, displayName: "旧路径" });
+
+    const managed = await repository.ensureManaged({
+      absolutePath: rootPath,
+      displayName: "PixivDownloader 下载目录",
+      kind: "pixiv",
+    });
+    const repeated = await repository.ensureManaged({
+      absolutePath: rootPath,
+      displayName: "PixivDownloader 下载目录",
+      kind: "pixiv",
+    });
+
+    expect(managed).toMatchObject({ id: existing.id, kind: "pixiv", isEnabled: true });
+    expect(repeated.id).toBe(managed.id);
+    await expect(repository.updateSettings({ id: managed.id, displayName: "改名", isEnabled: false })).rejects.toThrow(
+      "只能在 Pixiv 同步菜单中修改",
+    );
+    await expect(repository.deleteUnused(managed.id)).rejects.toThrow("只能在 Pixiv 同步菜单中删除");
+  });
 });

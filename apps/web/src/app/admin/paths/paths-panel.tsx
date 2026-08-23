@@ -1,7 +1,7 @@
 "use client";
 
 import { ActionIcon, Box, Group, Table, Text, TextInput, Tooltip } from "@mantine/core";
-import { Folder, FolderOpen, RefreshCcw, Search, Trash2 } from "lucide-react";
+import { Folder, FolderOpen, LockKeyhole, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
@@ -135,13 +135,15 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
-                    {root.kind === "system" && (
-                      <Text component="span" size="sm" title="系统目录，不可删除">
-                        🔒
-                      </Text>
+                    {(root.kind === "system" || root.kind === "pixiv") && (
+                      <LockKeyhole size={14} aria-label={root.kind === "pixiv" ? "PixivDownloader 受管路径" : "系统目录，不可删除"} />
                     )}
                     <Text size="sm">
-                      {root.kind === "system" ? "系统默认目录" : root.displayName || "本地漫画库"}
+                      {root.kind === "system"
+                        ? "系统默认目录"
+                        : root.kind === "pixiv"
+                          ? "PixivDownloader 下载目录"
+                          : root.displayName || "本地漫画库"}
                     </Text>
                   </Group>
                 </Table.Td>
@@ -182,6 +184,12 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                     </form>
                     {root.kind === "system" ? (
                       <SystemRootPathDialog root={root} />
+                    ) : root.kind === "pixiv" ? (
+                      <Tooltip label="PixivDownloader 路径只能在 Pixiv 同步菜单中修改" withArrow>
+                        <ActionIcon variant="subtle" color="gray" size="md" disabled aria-label={`PixivDownloader 路径 ${root.absolutePath} 不可在此编辑`}>
+                          <LockKeyhole size={15} />
+                        </ActionIcon>
+                      </Tooltip>
                     ) : (
                       <MangaRootEditDialog root={root} />
                     )}
@@ -198,6 +206,8 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                         label={
                           root.kind === "system"
                             ? "系统目录不可删除"
+                            : root.kind === "pixiv"
+                              ? "PixivDownloader 路径只能在 Pixiv 同步菜单中修改"
                             : root.comicCount > 0
                               ? "已有入库漫画，不能删除；可先停用路径"
                               : "删除路径记录"
@@ -209,7 +219,7 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                           color="red"
                           size="md"
                           type="submit"
-                          disabled={root.kind === "system" || root.comicCount > 0}
+                          disabled={root.kind === "system" || root.kind === "pixiv" || root.comicCount > 0}
                           aria-label={`删除 ${root.absolutePath}`}
                         >
                           <Trash2 size={15} />

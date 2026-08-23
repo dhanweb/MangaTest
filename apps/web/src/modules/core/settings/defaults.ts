@@ -201,8 +201,8 @@ export const settingDefinitions = [
   },
   {
     key: "pixivDownloaderMangaRootId",
-    label: "PixivDownloader 对应漫画根目录",
-    description: "PixivDownloader 下载内容对应的 MangaTest 漫画根目录，扫描并同步时会先扫描该根目录。",
+    label: "PixivDownloader 受管媒体路径（内部）",
+    description: "由 PixivDownloader 下载根目录自动派生，仅用于兼容旧配置，不在界面中手动选择。",
     valueType: "string",
     defaultValue: defaultRuntimeSettings.pixivDownloaderMangaRootId,
   },

@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Container, Flex, Group, Text } from "@mantine/core";
+import { Box, Container, Flex, Group, Pagination as MantinePagination, Text } from "@mantine/core";
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -85,7 +85,7 @@ export function LibraryHome({
   return (
     <>
       <SiteHeader active="library" />
-      <Container size={1200} px={16} py={32} pb={56}>
+      <Container size={1440} px={16} py={32} pb={56}>
         <Box mb={24}>
           <Text component="h1" size="28px" fw={700} lh="1.15" c="pink.5" mb={6} mt={0}>
             漫画库
@@ -258,15 +258,19 @@ function PaginationBar({
 
   return (
     <Group justify="center" my={20}>
-      <AppButton variant="outline" disabled={currentPage <= 1} onClick={() => onPageChange(currentPage - 1)}>
-        上一页
-      </AppButton>
+      <MantinePagination
+        total={totalPages}
+        value={currentPage}
+        onChange={onPageChange}
+        siblings={1}
+        boundaries={1}
+        withEdges
+        color="pink"
+        aria-label="漫画库页码"
+      />
       <Text size="sm" c="ink.5">
-        {currentPage} / {totalPages}
+        第 {currentPage} / {totalPages} 页
       </Text>
-      <AppButton variant="outline" disabled={currentPage >= totalPages} onClick={() => onPageChange(currentPage + 1)}>
-        下一页
-      </AppButton>
     </Group>
   );
 }

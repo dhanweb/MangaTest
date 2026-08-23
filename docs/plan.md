@@ -38,6 +38,7 @@ MangaTest 是一个本地自托管的个人漫画库系统。
 - 视频详情页使用原生 video 播放器但不自动播放；播放进度绑定 `video + episode`，保存当前秒数、百分比和完成状态。
 - 封面从视频首帧按需生成并缓存，失败时使用占位图。
 - 视频标签复用全局 `tags` 字典，新增 `video_tags` 关联表；无命名空间的来源标签内部使用 `general` namespace，展示时隐藏 namespace。
+- 后台可以把一个单集视频可逆地合并为另一个视频的集数；只改数据库归属，不移动真实文件。被合并的视频隐藏，恢复时还原原视频和原集数顺序；多集视频不能作为单个集数合并。
 - 视频下载任务支持后台输入直链，默认使用 aria2，完成后触发视频扫描；后续保留 Metadata Ingest/浏览器插件提交视频 metadata 和资源的能力，但本次不开发插件。
 - PotPlayer 同时支持配置可执行文件路径后由本机服务启动，以及浏览器 `potplayer://` 协议启动。
 
@@ -67,7 +68,7 @@ PixivDownloader 外部同步：
 - PixivDownloader 作为独立的外部采集和下载程序运行，不 fork、不嵌入 MangaTest，也不作为 MangaTest 的 Downloads provider。
 - MangaTest 先通过正常 manga root 扫描建立 `comic`、`local_file`、`chapter` 和 `page`；PixivDownloader 同步只补充 metadata，不替代 Library 扫描，不直接创建页面文件事实。
 - 首版通过只读方式查询 PixivDownloader SQLite。MangaTest 不写入、不迁移、不修复 PixivDownloader 数据库，也不在页面请求中实时依赖该数据库。
-- 用户必须在后台指定 PixivDownloader SQLite `.db` 文件的绝对路径，并另行指定 PixivDownloader 下载根目录和对应的 MangaTest `manga_root_id`；三者分别保存，不能假设数据库文件位于下载根目录内，也不能把某个安装目录硬编码为所有用户的默认值。Windows 安装示例为 `C:\Program Files\PixivDownload\data\pixiv_download.db`。
+- 用户必须在后台指定 PixivDownloader SQLite `.db` 文件的绝对路径和 PixivDownloader 下载根目录；数据库路径与下载根目录分别保存，不能假设数据库文件位于下载根目录内，也不能把某个安装目录硬编码为所有用户的默认值。保存下载根目录时，系统自动把它注册为 `manga_roots.kind=pixiv` 的受管媒体路径，扫描和同步都使用这条路径；路径管理页只读展示、禁止编辑和删除，路径只能在 Pixiv 同步页修改。Windows 安装示例为 `C:\Program Files\PixivDownload\data\pixiv_download.db`。
 - 首次关联以解析后的作品绝对路径匹配 `local_files.absolute_path`，成功后以 `site=pixiv + source_id=artwork_id` 作为长期幂等身份；标题只用于展示和人工候选，不用于自动绑定。
 - PixivDownloader `artworks.folder` / `artworks.move_folder` 中的 `{0}` 由所配置下载根目录解析，`{N}` 由其 `path_prefixes` 表解析；`moved` 生效且 `move_folder` 非空时优先使用移动后路径。
 - 同步只修改 MangaTest 的 `display_title`、来源 metadata 和允许自动更新的派生字段；`file_title`、真实目录名和物理文件保持不变。
@@ -697,7 +698,7 @@ api/             该模块专用请求解析和响应 DTO
 首批表：
 
 - `settings`：系统设置，例如监听地址、缓存目录、缓存上限、阅读偏好。
-- `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode`。
+- `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode` 和管理类型（`user` / `system` / `pixiv`）；`pixiv` 路径由 Pixiv 同步配置维护，普通路径管理不能编辑或删除。
 - `video_roots`：视频根目录，保存绝对路径、启用状态和扫描模式。
 - `scan_sessions`：扫描批次，保存开始时间、结束时间、root、统计结果、错误摘要。
 - `comics`：漫画业务实体，保存展示标题、展示标题来源（`scan` / `metadata` / `manual`）及可选来源身份、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
@@ -855,9 +856,11 @@ Provider: 获取或下载媒体文件
 ### 6.5 PixivDownloader SQLite 同步
 
 ```text
-Admin 配置 PixivDownloader 数据库、下载根目录和对应 manga root
+Admin 配置 PixivDownloader 数据库和下载根目录
   ↓
 用户通过文件选择器或绝对路径输入指定具体 .db 文件；设置持久化该绝对路径
+  ↓
+系统按下载根目录自动创建或更新 `manga_roots.kind=pixiv` 媒体路径；普通媒体路径管理只读展示该路径
   ↓
 连接测试：确认目标是存在的文件，以只读方式打开 SQLite，检查 artworks/authors/tags/artwork_tags/path_prefixes 表与必需列
   ↓
@@ -893,6 +896,7 @@ PixivDownloader series_id/order      → 来源 raw metadata 和系列合并候�
 
 - 扫描 `artwork_id` 目录后，同步可以按绝对路径找到 `local_file`，把未手动编辑的 `display_title` 更新为 `artworks.title`，同时保持 `file_title` 和物理目录不变。
 - 用户手动编辑标题后再次同步，`display_title` 保持用户值，Pixiv 最新标题仍写入对应 `comic_source` 供后台查看或手动恢复。
+- 保存 PixivDownloader 下载根目录后，该绝对路径自动出现在媒体路径中；媒体路径页不能编辑或删除它，修改只能从 Pixiv 同步页进行，并且修改后扫描和同步使用新的受管路径。
 - 相同数据库重复同步不新增重复 comic/source/tag；作品移动后仍优先通过 `site + source_id` 更新原漫画，并把路径差异交给正常扫描或路径维护处理。
 - schema 不兼容、路径越界、来源身份冲突和本地文件未匹配都有明确同步条目结果，且不会删除 MangaTest 记录或物理文件。
 

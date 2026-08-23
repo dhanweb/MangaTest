@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, desc, eq, inArray } from "drizzle-orm";
 
-import { bootstrapDatabase, comicSources, comicTags, comics, getDb, mangaRoots, metadataSyncEntries, metadataSyncSessions, tags } from "@/modules/core/db";
+import { bootstrapDatabase, comicSources, comicTags, comics, getDb, metadataSyncEntries, metadataSyncSessions, tags } from "@/modules/core/db";
 import { getRuntimeSettings } from "@/modules/core/settings";
 import { scanMangaRoot } from "@/modules/library/scan-library-root";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
@@ -33,6 +33,7 @@ import {
   type PixivSyncStats,
   type PixivSyncSummary,
 } from "./types";
+import { ensurePixivDownloaderMangaRoot } from "./managed-root";
 
 const ENTRY_INSERT_BATCH_SIZE = 50;
 
@@ -42,12 +43,11 @@ export interface PixivConfigOverride {
   mangaRootId?: string;
 }
 
-/** 读取并校验用户分别配置的三项 PixivDownloader 设置。 */
+/** 读取并校验 PixivDownloader 设置，并按下载根目录解析受管媒体路径。 */
 export async function getPixivDownloaderConfig(override?: PixivConfigOverride): Promise<PixivDownloaderConfig> {
   const settings = await getRuntimeSettings();
   const dbPath = (override?.dbPath ?? settings.pixivDownloaderDbPath ?? "").trim();
   const downloadRoot = (override?.downloadRoot ?? settings.pixivDownloaderDownloadRoot ?? "").trim();
-  const mangaRootId = (override?.mangaRootId ?? settings.pixivDownloaderMangaRootId ?? "").trim();
 
   if (!dbPath) {
     throw new Error("请先在设置中配置 PixivDownloader 数据库文件路径。");
@@ -55,17 +55,8 @@ export async function getPixivDownloaderConfig(override?: PixivConfigOverride): 
   if (!downloadRoot) {
     throw new Error("请先在设置中配置 PixivDownloader 下载根目录。");
   }
-  if (!mangaRootId) {
-    throw new Error("请先在设置中选择 PixivDownloader 对应的漫画根目录。");
-  }
-
-  bootstrapDatabase();
-  const root = getDb().select({ id: mangaRoots.id }).from(mangaRoots).where(eq(mangaRoots.id, mangaRootId)).get();
-  if (!root) {
-    throw new Error("配置的漫画根目录不存在，请重新选择。");
-  }
-
-  return { dbPath, downloadRoot, mangaRootId };
+  const root = await ensurePixivDownloaderMangaRoot(downloadRoot);
+  return { dbPath, downloadRoot, mangaRootId: root.id };
 }
 
 export async function checkPixivDownloaderConnection(override?: PixivConfigOverride): Promise<PixivConnectionCheckResult> {

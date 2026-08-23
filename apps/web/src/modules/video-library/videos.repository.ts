@@ -7,6 +7,8 @@ export interface VideoCardRecord {
   displayTitle: string;
   fileTitle: string;
   status: "readable" | "missing_local_file" | "hidden" | "deleted";
+  parentVideoId: string | null;
+  mergedAsEpisodeId: string | null;
   episodeCount: number;
   totalDurationSeconds: number;
   watchedPercent: number;
@@ -108,6 +110,8 @@ export function createVideoRepository() {
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
           status: videos.status,
+          parentVideoId: videos.parentVideoId,
+          mergedAsEpisodeId: videos.mergedAsEpisodeId,
           episodeCount: episodeCountSql,
           totalDurationSeconds: totalDurationSql,
           lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
@@ -168,6 +172,8 @@ export function createVideoRepository() {
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
           status: videos.status,
+          parentVideoId: videos.parentVideoId,
+          mergedAsEpisodeId: videos.mergedAsEpisodeId,
           episodeCount: episodeCountSql,
           totalDurationSeconds: durationSql,
           lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
@@ -196,6 +202,8 @@ export function createVideoRepository() {
           displayTitle: videos.displayTitle,
           fileTitle: videos.fileTitle,
           status: videos.status,
+          parentVideoId: videos.parentVideoId,
+          mergedAsEpisodeId: videos.mergedAsEpisodeId,
           lastWatchedEpisodeId: videos.lastWatchedEpisodeId,
           addedAt: videos.createdAt,
           updatedAt: videos.updatedAt,

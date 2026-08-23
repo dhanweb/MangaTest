@@ -1,4 +1,5 @@
 import { asc, eq, sql } from "drizzle-orm";
+import path from "node:path";
 
 import { bootstrapDatabase, getDb } from "@/modules/core/db";
 import { localFiles, mangaRoots, scanSessions } from "@/modules/core/db/schema";
@@ -16,8 +17,15 @@ export interface MangaRootRepository {
   list(): Promise<MangaRootRecord[]>;
   listWithStats(): Promise<MangaRootWithStats[]>;
   create(input: MangaRootDraft): Promise<MangaRootRecord>;
+  ensureManaged(input: ManagedMangaRootInput): Promise<MangaRootRecord>;
   updateSettings(input: MangaRootSettingsUpdate): Promise<MangaRootRecord>;
   deleteUnused(id: string): Promise<{ deleted: boolean }>;
+}
+
+export interface ManagedMangaRootInput {
+  absolutePath: string;
+  displayName: string;
+  kind: "pixiv";
 }
 
 export interface MangaRootSettingsUpdate {
@@ -34,14 +42,7 @@ export function createMangaRootRepository(): MangaRootRepository {
       const rows = db.select().from(mangaRoots).orderBy(asc(mangaRoots.createdAt)).all();
 
       // Keep download-import root for downloads module (caller can filter further); include all here.
-      return rows.map((row) => ({
-        id: row.id,
-        absolutePath: row.absolutePath,
-        displayName: row.displayName,
-        scanMode: row.scanMode,
-        kind: row.kind,
-        isEnabled: row.isEnabled,
-      }));
+      return rows.map(toMangaRootRecord);
     },
 
     async listWithStats() {
@@ -67,7 +68,7 @@ export function createMangaRootRepository(): MangaRootRepository {
 
       // Path management UI: hide download staging root so it is not treated as a user library path.
       return rows
-        .filter((row) => !isDownloadImportRoot(row))
+        .filter((row) => row.kind === "pixiv" || !isDownloadImportRoot(row))
         .map((row) => ({
           id: row.id,
           absolutePath: row.absolutePath,
@@ -104,6 +105,77 @@ export function createMangaRootRepository(): MangaRootRepository {
       return record;
     },
 
+    async ensureManaged(input) {
+      bootstrapDatabase();
+      const record = createMangaRootRecord(input);
+      const db = getDb();
+      const existingAtPath = db.select().from(mangaRoots).where(eq(mangaRoots.absolutePath, record.absolutePath)).get();
+      const currentPixivRoot = db.select().from(mangaRoots).where(eq(mangaRoots.kind, "pixiv")).get();
+      const now = new Date().toISOString();
+
+      if (existingAtPath?.kind === "system") {
+        throw new Error("PixivDownloader 下载根目录不能覆盖系统默认目录。");
+      }
+
+      if (existingAtPath) {
+        if (currentPixivRoot && currentPixivRoot.id !== existingAtPath.id) {
+          db.update(mangaRoots)
+            .set({ kind: "user", updatedAt: now })
+            .where(eq(mangaRoots.id, currentPixivRoot.id))
+            .run();
+        }
+
+        db.update(mangaRoots)
+          .set({ kind: "pixiv", displayName: input.displayName.trim() || null, isEnabled: true, updatedAt: now })
+          .where(eq(mangaRoots.id, existingAtPath.id))
+          .run();
+        return toMangaRootRecord({ ...existingAtPath, kind: "pixiv", displayName: input.displayName.trim() || null, isEnabled: true });
+      }
+
+      if (currentPixivRoot) {
+        const localFilesInRoot = db
+          .select({ id: localFiles.id, relativePath: localFiles.relativePath })
+          .from(localFiles)
+          .where(eq(localFiles.mangaRootId, currentPixivRoot.id))
+          .all();
+
+        db.update(mangaRoots)
+          .set({ absolutePath: record.absolutePath, displayName: input.displayName.trim() || null, isEnabled: true, updatedAt: now })
+          .where(eq(mangaRoots.id, currentPixivRoot.id))
+          .run();
+
+        for (const localFile of localFilesInRoot) {
+          db.update(localFiles)
+            .set({ absolutePath: path.resolve(record.absolutePath, localFile.relativePath), updatedAt: now })
+            .where(eq(localFiles.id, localFile.id))
+            .run();
+        }
+
+        return toMangaRootRecord({
+          ...currentPixivRoot,
+          absolutePath: record.absolutePath,
+          displayName: input.displayName.trim() || null,
+          isEnabled: true,
+          updatedAt: now,
+        });
+      }
+
+      db.insert(mangaRoots)
+        .values({
+          id: record.id,
+          absolutePath: record.absolutePath,
+          displayName: record.displayName,
+          scanMode: record.scanMode,
+          kind: record.kind,
+          isEnabled: true,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      return record;
+    },
+
     async updateSettings(input) {
       bootstrapDatabase();
       const db = getDb();
@@ -111,6 +183,10 @@ export function createMangaRootRepository(): MangaRootRepository {
 
       if (!existing) {
         throw new Error("漫画根目录不存在。");
+      }
+
+      if (existing.kind === "pixiv") {
+        throw new Error("PixivDownloader 媒体路径只能在 Pixiv 同步菜单中修改。");
       }
 
       const now = new Date().toISOString();
@@ -145,6 +221,9 @@ export function createMangaRootRepository(): MangaRootRepository {
       if (existing.kind === "system") {
         throw new Error("系统根目录不可删除。");
       }
+      if (existing.kind === "pixiv") {
+        throw new Error("PixivDownloader 媒体路径只能在 Pixiv 同步菜单中删除。");
+      }
 
       const usage = db
         .select({ count: sql<number>`count(*)` })
@@ -161,5 +240,24 @@ export function createMangaRootRepository(): MangaRootRepository {
 
       return { deleted: true };
     },
+  };
+}
+
+function toMangaRootRecord(row: {
+  id: string;
+  absolutePath: string;
+  displayName: string | null;
+  scanMode: "children_as_comics";
+  kind: "user" | "system" | "pixiv";
+  isEnabled: boolean;
+  updatedAt?: string;
+}): MangaRootRecord {
+  return {
+    id: row.id,
+    absolutePath: row.absolutePath,
+    displayName: row.displayName,
+    scanMode: row.scanMode,
+    kind: row.kind,
+    isEnabled: row.isEnabled,
   };
 }

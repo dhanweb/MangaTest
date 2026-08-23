@@ -15,12 +15,13 @@ export default async function HomePage({
   }>;
 }) {
   const params = await searchParams;
+  const page = parsePage(params.page);
   const sort = params.sort === "title" || params.sort === "pages" ? params.sort : "recent";
   const selectedTags = normalizeSelectedTags(Array.isArray(params.tag) ? params.tag : params.tag ? [params.tag] : []);
   const comicRepository = createComicRepository();
   const [result, tagFilters] = await Promise.all([
     comicRepository.searchReadableCards({
-      page: Number(params.page ?? 1),
+      page,
       pageSize: 48,
       query: params.q,
       sort,
@@ -30,6 +31,11 @@ export default async function HomePage({
   ]);
 
   return <LibraryHome initialQuery={params.q ?? ""} initialSelectedTags={selectedTags} initialSort={sort} result={result} tagFilters={tagFilters} />;
+}
+
+function parsePage(value: string | undefined) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 1;
 }
 
 function normalizeSelectedTags(tags: string[]) {

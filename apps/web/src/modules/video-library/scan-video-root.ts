@@ -53,6 +53,7 @@ export async function scanVideoRoot(videoRootId: string): Promise<VideoScanResul
     let missingCount = 0;
     let episodeCount = 0;
     const existingEpisodes = tx.select().from(videoEpisodes).where(eq(videoEpisodes.videoRootId, videoRootId)).all();
+    const existingByRootPath = new Map(existingEpisodes.map((episode) => [episode.relativePath, episode]));
 
     for (const existing of existingEpisodes) {
       if (!scannedEpisodePaths.has(existing.relativePath) && !existing.isMissing) {
@@ -94,13 +95,14 @@ export async function scanVideoRoot(videoRootId: string): Promise<VideoScanResul
       const existingForVideo = tx.select().from(videoEpisodes).where(eq(videoEpisodes.videoId, video.id)).all();
       const existingByPath = new Map(existingForVideo.map((episode) => [episode.relativePath, episode]));
       for (const [sortOrder, episode] of scannedVideo.episodes.entries()) {
-        const existing = existingByPath.get(episode.relativePath);
+        const existing = existingByPath.get(episode.relativePath) ?? existingByRootPath.get(episode.relativePath);
         if (existing) {
+          const isOwnedByScannedVideo = existing.videoId === video.id;
           tx.update(videoEpisodes)
             .set({
               title: existing.title || episode.title,
-              sortTitle: episode.sortTitle,
-              sortOrder,
+              sortTitle: isOwnedByScannedVideo ? episode.sortTitle : existing.sortTitle,
+              ...(isOwnedByScannedVideo ? { sortOrder } : {}),
               absolutePath: episode.absolutePath,
               extension: episode.extension,
               kind: episode.kind,
@@ -140,7 +142,11 @@ export async function scanVideoRoot(videoRootId: string): Promise<VideoScanResul
         .from(videoEpisodes)
         .where(and(eq(videoEpisodes.videoId, video.id), eq(videoEpisodes.isMissing, false)))
         .all().length;
-      const nextStatus = readableEpisodeCount > 0 ? (video.status === "hidden" || video.status === "deleted" ? video.status : "readable") : "missing_local_file";
+      const nextStatus = video.parentVideoId || video.mergedAsEpisodeId
+        ? "hidden"
+        : readableEpisodeCount > 0
+          ? (video.status === "hidden" || video.status === "deleted" ? video.status : "readable")
+          : "missing_local_file";
       tx.update(videos).set({ status: nextStatus, updatedAt: now }).where(eq(videos.id, video.id)).run();
     }
 

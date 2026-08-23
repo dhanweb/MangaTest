@@ -111,7 +111,8 @@ export function createComicRepository(): ComicRepository {
     async searchReadableCards(input = {}) {
       bootstrapDatabase();
       const db = getDb();
-      const page = Math.max(1, Math.trunc(input.page ?? 1));
+      const requestedPage =
+        typeof input.page === "number" && Number.isFinite(input.page) ? Math.max(1, Math.trunc(input.page)) : 1;
       const pageSize = Math.max(12, Math.min(96, Math.trunc(input.pageSize ?? 48)));
       const query = input.query?.trim();
       const selectedTags = normalizeSelectedTags(input.tags);
@@ -152,6 +153,18 @@ export function createComicRepository(): ComicRepository {
             ? [desc(pageCountSql), desc(comics.createdAt)]
             : [desc(comics.createdAt)];
 
+      const totalRow = db
+        .select({ count: sql<number>`count(distinct ${comics.id})` })
+        .from(comics)
+        .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
+        .leftJoin(comicTags, eq(comicTags.comicId, comics.id))
+        .leftJoin(tags, eq(tags.id, comicTags.tagId))
+        .where(whereClause)
+        .get();
+      const total = Number(totalRow?.count ?? 0);
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, totalPages);
+
       const rows = db
         .select({
           id: comics.id,
@@ -176,15 +189,6 @@ export function createComicRepository(): ComicRepository {
         .limit(pageSize)
         .offset((page - 1) * pageSize)
         .all();
-      const totalRow = db
-        .select({ count: sql<number>`count(distinct ${comics.id})` })
-        .from(comics)
-        .leftJoin(localFiles, eq(localFiles.id, comics.primaryLocalFileId))
-        .leftJoin(comicTags, eq(comicTags.comicId, comics.id))
-        .leftJoin(tags, eq(tags.id, comicTags.tagId))
-        .where(whereClause)
-        .get();
-
       return {
         items: rows.map((row) => ({
           ...row,
@@ -193,7 +197,7 @@ export function createComicRepository(): ComicRepository {
         })),
         page,
         pageSize,
-        total: Number(totalRow?.count ?? 0),
+        total,
       };
     },
 

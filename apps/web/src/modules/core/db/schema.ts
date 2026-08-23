@@ -47,7 +47,7 @@ export const settings = sqliteTable("settings", {
   ...timestamps,
 });
 
-export const mangaRootKinds = ["user", "system"] as const;
+export const mangaRootKinds = ["user", "system", "pixiv"] as const;
 
 export const mangaRoots = sqliteTable(
   "manga_roots",
@@ -94,6 +94,8 @@ export const videos = sqliteTable(
     fileTitle: text("file_title").notNull(),
     sortTitle: text("sort_title").notNull(),
     status: text("status", { enum: videoStatuses }).notNull().default("readable"),
+    parentVideoId: text("parent_video_id"),
+    mergedAsEpisodeId: text("merged_as_episode_id"),
     lastWatchedEpisodeId: text("last_watched_episode_id"),
     lastWatchedPositionSeconds: integer("last_watched_position_seconds"),
     lastWatchedAt: text("last_watched_at"),
@@ -103,6 +105,7 @@ export const videos = sqliteTable(
   },
   (table) => ({
     statusIdx: index("videos_status_idx").on(table.status),
+    parentIdx: index("videos_parent_idx").on(table.parentVideoId),
     sortTitleIdx: index("videos_sort_title_idx").on(table.sortTitle),
     rootSourceIdx: uniqueIndex("videos_root_source_idx").on(table.videoRootId, table.sourceKey),
   }),
@@ -796,6 +799,7 @@ export const operationLogs = sqliteTable(
         "restore",
         "path_repair",
         "merge_chapter",
+        "merge_video_episode",
         "switch_primary_file",
         "cache_cleanup",
         "download_task_create",

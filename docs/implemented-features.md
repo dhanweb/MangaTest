@@ -84,6 +84,12 @@ MangaTest 是一个本地自托管的个人漫画库系统。核心流程是把�
 - 漫画详情展示封面、标题、标签、页数、章节列表和每章阅读入口。
 - 前台详情页不展示完整本地路径；维护入口会打开独立后台漫画详情页。
 
+### 4.2.1 视频库
+
+- 支持视频根目录扫描单文件单集和子目录多集视频，提供列表、搜索、标签筛选、详情和播放进度。
+- 后台视频详情可调整集数顺序，也可以选择其他单集视频合并为当前视频的集数。
+- 视频合并和恢复只修改数据库归属，不移动、复制或删除真实视频文件；被合并视频可从后台恢复为独立视频。
+
 ### 4.3 阅读器
 
 - 通过漫画 ID 加载阅读数据，以纵向长页方式渲染漫画。
@@ -156,7 +162,7 @@ MangaTest 是一个本地自托管的个人漫画库系统。核心流程是把�
 ### 4.8.1 PixivDownloader SQLite 同步
 
 - PixivDownloader 作为独立外部程序运行；MangaTest 以只读方式查询其 SQLite 数据库，不写入、不迁移、不修复，也不把它作为下载 provider。
-- 后台 `/admin/pixiv-sync` 分别配置三项内容：数据库 `.db` 文件绝对路径、下载根目录和对应的 MangaTest 漫画根目录；三者独立保存，安装目录只作为输入示例。
+- 后台 `/admin/pixiv-sync` 配置数据库 `.db` 文件绝对路径和下载根目录；保存下载根目录会自动创建或复用 `manga_roots.kind=pixiv` 媒体路径。路径管理页只读展示并禁止编辑、删除，修改只能回到 Pixiv 同步页。
 - 连接测试会检查 artworks、authors、tags、artwork_tags、path_prefixes 及必需列；schema 不兼容时整次同步停止。
 - 路径解析遵循 `moved` + `move_folder` 优先、`{0}` 替换下载根目录、`{N}` 替换 path_prefixes；解析后做 Windows 规范化，越界路径只记录条目结果。
 - 首次关联按解析后的作品绝对路径匹配 `local_files.absolute_path`；之后以 `site=pixiv + source_id=artwork_id` 作为幂等身份；标题不参与自动绑定。
@@ -285,6 +291,12 @@ Route Handler 只负责请求解析、鉴权、调用模块服务和返回响应
 | `GET` | `/api/pages/[pageId]` | 按 page ID 读取原图 |
 | `GET` | `/api/pages/[pageId]/thumbnail` | 按 page ID 读取或生成缩略图 |
 | `POST` | `/api/reader/progress` | 保存阅读进度 |
+| `GET` | `/api/videos` | 查询前台可读视频 |
+| `GET` | `/api/videos/[id]` | 查看视频详情 |
+| `PATCH` | `/api/videos/[id]` | 编辑视频展示标题 |
+| `POST`, `DELETE` | `/api/videos/[id]/merge` | 合并单集视频为当前视频的集数或恢复独立视频 |
+| `PATCH` | `/api/videos/[id]/episodes/order` | 保存视频集数顺序 |
+| `PATCH` | `/api/videos/[id]/status` | 隐藏、软删除或恢复视频记录 |
 
 ### 5.3 元数据、标签和集合
 
@@ -351,6 +363,7 @@ Route Handler 只负责请求解析、鉴权、调用模块服务和返回响应
 
 - 核心配置：`settings`、`manga_roots`、`scan_sessions`。
 - 漫画库：`comics`、`local_files`、`chapters`、`pages`。
+- 视频库：`video_roots`、`videos`、`video_episodes`、`video_progress`、`video_tags`；`videos.parent_video_id` 和 `videos.merged_as_episode_id` 保存可逆的集数合并关系。
 - 标签：`tags`、`comic_tags`、`chapter_tags`（章节标签关系已预留，暂无 UI）。
 - 阅读：`reading_progress`。
 - 元数据：`comic_sources`、`comic_resources`。

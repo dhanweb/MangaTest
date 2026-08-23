@@ -26,24 +26,20 @@ async function setup(fixture: FixtureOptions): Promise<SetupExtras & DynamicModu
   const core = await import("@/modules/core/db");
   core.bootstrapDatabase();
   const sqlite = core.getSqlite();
-  const mangaRootId = randomUUID();
-  sqlite
-    .prepare("INSERT INTO manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) VALUES (?, ?, ?, ?, 1)")
-    .run(mangaRootId, workspace.downloadRoot, "Pixiv Root", "children_as_comics");
 
   const settingsModule = await import("@/modules/core/settings");
   await settingsModule.saveRuntimeSettings({
     pixivDownloaderDbPath: workspace.dbPath,
     pixivDownloaderDownloadRoot: workspace.downloadRoot,
-    pixivDownloaderMangaRootId: mangaRootId,
   });
 
   const syncModule = await import("./sync-service");
+  const config = await syncModule.getPixivDownloaderConfig();
 
   return {
     workspace,
     sqlite,
-    mangaRootId,
+    mangaRootId: config.mangaRootId,
     ...syncModule,
   };
 }
@@ -420,16 +416,11 @@ describe("pixiv downloader sync service", () => {
     const core = await import("@/modules/core/db");
     core.bootstrapDatabase();
     const sqlite = core.getSqlite();
-    const mangaRootId = randomUUID();
-    sqlite
-      .prepare("INSERT INTO manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) VALUES (?, ?, ?, ?, 1)")
-      .run(mangaRootId, workspace.downloadRoot, "Pixiv Root", "children_as_comics");
 
     const settingsModule = await import("@/modules/core/settings");
     await settingsModule.saveRuntimeSettings({
       pixivDownloaderDbPath: workspace.dbPath,
       pixivDownloaderDownloadRoot: workspace.downloadRoot,
-      pixivDownloaderMangaRootId: mangaRootId,
     });
 
     const { runPixivDownloaderSync } = await import("./sync-service");
