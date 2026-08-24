@@ -3,7 +3,7 @@
   "name": "reader-performance-virtualization",
   "title": "修复阅读页大漫画加载卡顿",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": "web",

@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function ReaderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [comic, settings, queueContext] = await Promise.all([
-    createComicRepository().getReaderData(id),
+    createComicRepository().getReaderManifest(id),
     getRuntimeSettings(),
     createCollectionRepository().getQueueContext(id),
   ]);

@@ -361,6 +361,12 @@
     padding 0.18s ease;
 }
 
+.reader-thumb-virtual-content {
+  position: relative;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
 .reader-thumb-rail.is-hidden {
   width: 0;
   opacity: 0;
@@ -370,12 +376,15 @@
 }
 
 .reader-thumb-btn {
+  position: absolute;
+  left: 0;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   width: 100%;
-  min-height: 138px;
+  height: 140px;
+  min-height: 140px;
   padding: 10px 10px 10px 0;
   border: 0;
   border-radius: 0 14px 14px 0;
@@ -495,6 +504,18 @@
   width: min(760px, 100%);
 }
 
+.reader-virtual-content {
+  position: relative;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.reader-virtual-item {
+  position: absolute;
+  left: 0;
+  width: 100%;
+}
+
 .reader-edge-toggle {
   position: fixed;
   right: 22px;
@@ -514,9 +535,20 @@
 .reader-page {
   display: block;
   width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background: #f8f3f7;
   content-visibility: auto;
   contain-intrinsic-size: auto 1100px;
+}
+
+.reader-page-placeholder {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  color: #9b879f;
+  font-size: 13px;
 }
 
 .reader-page-image {
@@ -535,6 +567,24 @@
   color: #d9c8df;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.05);
+}
+
+.reader-window-error {
+  position: fixed;
+  top: 68px;
+  right: 20px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(460px, calc(100vw - 40px));
+  padding: 7px 10px 7px 12px;
+  border: 1px solid rgba(255, 118, 161, 0.42);
+  border-radius: 9px;
+  background: rgba(62, 25, 47, 0.96);
+  color: #ffdce9;
+  font-size: 12px;
+  box-shadow: 0 8px 20px rgba(5, 2, 9, 0.3);
 }
 
 .admin-shell {

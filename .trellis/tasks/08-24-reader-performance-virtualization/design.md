@@ -31,6 +31,7 @@ interface ReaderManifestRecord {
   lastReadPageIndex: number | null;
   totalPages: number;
   chapters: ReaderChapterManifest[];
+  initialStartIndex: number;
   initialPages: ReaderPageRecord[];
 }
 

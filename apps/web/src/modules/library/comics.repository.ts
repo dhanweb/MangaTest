@@ -97,6 +97,28 @@ export interface ReaderPageRecord {
   height: number | null;
 }
 
+export interface ReaderChapterManifestRecord extends LibraryChapterRecord {
+  startIndex: number;
+}
+
+export interface ReaderManifestRecord {
+  id: string;
+  displayTitle: string;
+  lastReadPageId: string | null;
+  lastReadPageIndex: number | null;
+  totalPages: number;
+  chapters: ReaderChapterManifestRecord[];
+  initialStartIndex: number;
+  initialPages: ReaderPageRecord[];
+}
+
+export interface ReaderPageWindowRecord {
+  comicId: string;
+  startIndex: number;
+  totalPages: number;
+  pages: ReaderPageRecord[];
+}
+
 export interface ReaderComicRecord {
   id: string;
   displayTitle: string;
@@ -111,6 +133,8 @@ export interface ComicRepository {
   listReadableTagFilters(limit?: number): Promise<LibraryTagFilterRecord[]>;
   listAdminRows(limit?: number): Promise<LibraryComicAdminRowRecord[]>;
   getDetail(id: string): Promise<LibraryComicDetailRecord | null>;
+  getReaderManifest(id: string): Promise<ReaderManifestRecord | null>;
+  getReaderPageWindow(id: string, startIndex: number, limit: number): Promise<ReaderPageWindowRecord | null>;
   getReaderData(id: string): Promise<ReaderComicRecord | null>;
 }
 
@@ -373,6 +397,71 @@ export function createComicRepository(): ComicRepository {
       };
     },
 
+    async getReaderManifest(id) {
+      bootstrapDatabase();
+      const db = getDb();
+      const comic = db
+        .select({
+          id: comics.id,
+          displayTitle: comics.displayTitle,
+          lastReadPageId: comics.lastReadPageId,
+        })
+        .from(comics)
+        .where(and(eq(comics.id, id), eq(comics.status, "readable")))
+        .get();
+
+      if (!comic) {
+        return null;
+      }
+
+      const chaptersWithStartIndex = listReaderChapterManifest(db, id);
+      const totalPages = chaptersWithStartIndex.reduce((total, chapter) => total + chapter.pageCount, 0);
+      const lastReadPageIndex = findReaderPageIndex(db, id, comic.lastReadPageId, chaptersWithStartIndex);
+      const initialCenter = lastReadPageIndex ?? 0;
+      const initialStartIndex = clampReaderPageStart(initialCenter - Math.floor(READER_PAGE_WINDOW_DEFAULT / 2), totalPages);
+      const initialPages = listReaderPageWindow(
+        db,
+        chaptersWithStartIndex,
+        initialStartIndex,
+        READER_PAGE_WINDOW_DEFAULT,
+      );
+
+      return {
+        ...comic,
+        lastReadPageIndex,
+        totalPages,
+        chapters: chaptersWithStartIndex,
+        initialStartIndex,
+        initialPages,
+      };
+    },
+
+    async getReaderPageWindow(id, startIndex, limit) {
+      bootstrapDatabase();
+      const db = getDb();
+      const comic = db
+        .select({ id: comics.id })
+        .from(comics)
+        .where(and(eq(comics.id, id), eq(comics.status, "readable")))
+        .get();
+
+      if (!comic) {
+        return null;
+      }
+
+      const chaptersWithStartIndex = listReaderChapterManifest(db, id);
+      const totalPages = chaptersWithStartIndex.reduce((total, chapter) => total + chapter.pageCount, 0);
+      const normalizedStartIndex = clampReaderPageStart(startIndex, totalPages);
+      const normalizedLimit = clampReaderPageLimit(limit);
+
+      return {
+        comicId: id,
+        startIndex: normalizedStartIndex,
+        totalPages,
+        pages: listReaderPageWindow(db, chaptersWithStartIndex, normalizedStartIndex, normalizedLimit),
+      };
+    },
+
     async getReaderData(id) {
       bootstrapDatabase();
       const db = getDb();
@@ -425,6 +514,124 @@ export function createComicRepository(): ComicRepository {
       };
     },
   };
+}
+
+const READER_PAGE_WINDOW_DEFAULT = 48;
+const READER_PAGE_WINDOW_MAX = 96;
+
+function listReaderChapterManifest(db: ReturnType<typeof getDb>, comicId: string): ReaderChapterManifestRecord[] {
+  const rows = db
+    .select({
+      id: chapters.id,
+      title: chapters.title,
+      sortOrder: chapters.sortOrder,
+      pageCount: chapters.pageCount,
+      addedAt: chapters.createdAt,
+    })
+    .from(chapters)
+    .where(eq(chapters.comicId, comicId))
+    .orderBy(asc(chapters.sortOrder), asc(chapters.createdAt))
+    .all();
+
+  let startIndex = 0;
+  return rows.map((chapter) => {
+    const manifest = { ...chapter, startIndex };
+    startIndex += chapter.pageCount;
+    return manifest;
+  });
+}
+
+function findReaderPageIndex(
+  db: ReturnType<typeof getDb>,
+  comicId: string,
+  pageId: string | null,
+  chaptersWithStartIndex: ReaderChapterManifestRecord[],
+) {
+  if (!pageId) {
+    return null;
+  }
+
+  const page = db
+    .select({ chapterId: pages.chapterId, pageNumber: pages.pageNumber })
+    .from(pages)
+    .innerJoin(chapters, eq(chapters.id, pages.chapterId))
+    .where(and(eq(pages.id, pageId), eq(chapters.comicId, comicId)))
+    .get();
+
+  if (!page) {
+    return null;
+  }
+
+  const chapter = chaptersWithStartIndex.find((candidate) => candidate.id === page.chapterId);
+  if (!chapter) {
+    return null;
+  }
+
+  return Math.max(chapter.startIndex, chapter.startIndex + Math.min(Math.max(page.pageNumber - 1, 0), Math.max(chapter.pageCount - 1, 0)));
+}
+
+function listReaderPageWindow(
+  db: ReturnType<typeof getDb>,
+  chaptersWithStartIndex: ReaderChapterManifestRecord[],
+  startIndex: number,
+  limit: number,
+): ReaderPageRecord[] {
+  const result: ReaderPageRecord[] = [];
+  let remainingStart = startIndex;
+  let remainingLimit = limit;
+
+  for (const chapter of chaptersWithStartIndex) {
+    if (remainingLimit <= 0) {
+      break;
+    }
+
+    if (remainingStart >= chapter.pageCount) {
+      remainingStart -= chapter.pageCount;
+      continue;
+    }
+
+    const chapterPages = db
+      .select({
+        id: pages.id,
+        chapterId: pages.chapterId,
+        pageNumber: pages.pageNumber,
+        width: pages.width,
+        height: pages.height,
+      })
+      .from(pages)
+      .where(eq(pages.chapterId, chapter.id))
+      .orderBy(asc(pages.pageNumber))
+      .limit(remainingLimit)
+      .offset(remainingStart)
+      .all();
+
+    result.push(
+      ...chapterPages.map((page) => ({
+        ...page,
+        chapterTitle: chapter.title,
+      })),
+    );
+    remainingLimit -= chapterPages.length;
+    remainingStart = 0;
+  }
+
+  return result;
+}
+
+function clampReaderPageStart(value: number, totalPages: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(totalPages, Math.trunc(value)));
+}
+
+function clampReaderPageLimit(value: number) {
+  if (!Number.isFinite(value)) {
+    return READER_PAGE_WINDOW_DEFAULT;
+  }
+
+  return Math.max(1, Math.min(READER_PAGE_WINDOW_MAX, Math.trunc(value)));
 }
 
 function comicAuthorNamesSql() {
