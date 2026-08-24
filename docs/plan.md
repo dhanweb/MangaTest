@@ -1086,4 +1086,13 @@ Downloads 和 OpenList provider：
 
 `apps/web` 实现与原型对应的页面或工作流时，应安装并使用这些原型 UI 依赖，优先复用 Mantine 和原型中的 `AppButton`、`AppInput`、`AppSelect`、`AppSwitch`、`AppModal`、`AppTabs` 等组件方式。shadcn/ui 可以保留为已有组件或低层 primitives，但不能在已有 Mantine 原型的页面上用另一套视觉系统近似替代，除非计划先记录原因。
 
+后台 UI 统一约定：
+
+- 后台所有业务表格使用统一的 `AdminDataTable` 展示层；需要搜索、筛选、刷新和分页的记录管理页再通过 `AdminCrudList` 组合。组件只负责展示和受控状态交互，不持有领域规则、数据请求或写操作。
+- 列表搜索、筛选、刷新、批量操作和新增等主操作属于同一个工具栏；桌面端保持在同一行，窄屏允许按功能分组换行，刷新不再放在页面标题区。
+- 统一表格支持跨页序号、多选/当页全选、固定列和固定右侧操作列；详情页和任务页等不需要完整 CRUD 工具栏的表格仍复用统一表格基础层。
+- `apps/web` 的业务界面统一使用类型安全的 `AppButton` / `AppLinkButton` / `AppIconButton`、`AppTag` 和 `AppModal`。按钮和 Tag 使用语义色与统一 hover/focus/disabled/loading 状态，不在页面内重复拼装交互样式。
+- `AppModal` 固定标题头和底部操作区，只有中间 body 可以滚动；弹框必须受视口高度约束，长内容不能把底部按钮挤出可见区域。业务确认流程使用同一弹框体系，不直接使用 `window.confirm`。
+- 后台页面标题、空状态、溢出文本提示等高频展示模式可以使用小型共享组件，但不引入拥有数据请求、领域状态或表单 schema 的巨型通用组件。
+
 原型只保留 mock 数据和 mock 状态，不得迁移到 `apps/web` 作为真实业务实现。
