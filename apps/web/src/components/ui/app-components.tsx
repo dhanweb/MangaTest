@@ -69,22 +69,13 @@ export function AppSelect(props: SelectProps) {
         input: {
           borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
-          "&:focus, &:focus-within": { borderColor: "var(--mantine-color-pink-5)" },
         },
         dropdown: {
           borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
         },
-        option: {
-          "&[data-combobox-selected]": {
-            background: "var(--mantine-color-pink-0)",
-            color: "var(--mantine-color-pink-5)",
-          },
-          "&:hover": {
-            background: "var(--mantine-color-pink-1)",
-          },
-        },
       }}
+      classNames={{ input: "app-select-input", option: "app-select-option" }}
       {...props}
     />
   );
@@ -97,9 +88,9 @@ export function AppInput(props: TextInputProps) {
         input: {
           borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
-          "&:focus": { borderColor: "var(--mantine-color-pink-5)" },
         },
       }}
+      classNames={{ input: "app-input" }}
       {...props}
     />
   );
@@ -112,9 +103,9 @@ export function AppTextarea(props: TextareaProps) {
         input: {
           borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
-          "&:focus": { borderColor: "var(--mantine-color-pink-5)" },
         },
       }}
+      classNames={{ input: "app-textarea" }}
       {...props}
     />
   );

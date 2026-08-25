@@ -65,6 +65,7 @@ export function AppTag({
       <X size={12} aria-hidden="true" />
     </AppIconButton>
   ) : undefined;
+  const rootClassName = [className, isInteractive ? "app-tag-interactive" : undefined].filter(Boolean).join(" ") || undefined;
 
   const commonProps = {
     color: toneToMantineColor[tone],
@@ -72,23 +73,13 @@ export function AppTag({
     size,
     leftSection: icon,
     rightSection: removeButton,
-    className,
+    className: rootClassName,
     style: {
       textTransform: "none" as const,
       fontWeight: 600,
       cursor: isInteractive ? "pointer" : "default",
       transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
       ...style,
-    },
-    styles: {
-      root: isInteractive
-        ? {
-            "&:hover": {
-              backgroundColor: "var(--mantine-color-pink-1)",
-              borderColor: "var(--mantine-color-pink-3)",
-            },
-          }
-        : undefined,
     },
   };
 

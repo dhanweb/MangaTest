@@ -155,6 +155,27 @@
   }
 }
 
+.app-select-input:focus,
+.app-select-input:focus-within,
+.app-input:focus,
+.app-textarea:focus {
+  border-color: var(--mantine-color-pink-5);
+}
+
+.app-select-option[data-combobox-selected] {
+  background: var(--mantine-color-pink-0);
+  color: var(--mantine-color-pink-5);
+}
+
+.app-select-option:hover,
+.app-tag-interactive:hover {
+  background: var(--mantine-color-pink-1);
+}
+
+.app-tag-interactive:hover {
+  border-color: var(--mantine-color-pink-3);
+}
+
 .pinned-actions {
   position: fixed;
   right: calc(18px + env(safe-area-inset-right));
