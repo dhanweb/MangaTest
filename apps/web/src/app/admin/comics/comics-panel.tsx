@@ -22,9 +22,9 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
   const [page, setPage] = useAdminTabState("page", 1);
   const [pageSize, setPageSize] = useAdminTabState("pageSize", "10");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useAdminTabState("statusFilter:v2", "readable");
+  const [statusFilter, setStatusFilter] = useAdminTabState<string | null>("statusFilter:v2", "readable");
   const [previewComic, setPreviewComic] = useState<LibraryComicAdminRowRecord | null>(null);
-  const { refreshActiveTab } = useAdminTabs();
+  const { refreshActiveTab, refreshing } = useAdminTabs();
 
   useEffect(() => {
     setPage(1);
@@ -32,7 +32,7 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
 
   const filtered = useMemo(() => {
     let rows = comics;
-    if (statusFilter !== "all") {
+    if (statusFilter && statusFilter !== "all") {
       rows = rows.filter((comic) => comic.status === statusFilter);
     }
 
@@ -92,13 +92,14 @@ export function ComicsPanel({ comics }: { comics: LibraryComicAdminRowRecord[] }
               { value: "hidden", label: "已隐藏" },
             ],
             onChange: (value) => {
-              setStatusFilter(value ?? "all");
+              setStatusFilter(value);
               setPage(1);
             },
             width: 160,
           },
         ]}
         onRefresh={refreshActiveTab}
+        refreshing={refreshing}
         pagination={{
           page,
           pageSize: limit,

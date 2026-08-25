@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionIcon, Group, Stack, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Stack, Text, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { FolderPen } from "lucide-react";
 import { useActionState, useEffect, useRef, useState } from "react";
@@ -27,13 +27,6 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (opened) {
-      setStep("edit");
-      setNextAbsolutePath(root.absolutePath);
-    }
-  }, [opened, root.absolutePath]);
-
-  useEffect(() => {
     if (!state.message || state.message === lastMessageRef.current) {
       return;
     }
@@ -49,6 +42,12 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
   function handleClose() {
     if (isPending) return;
     close();
+  }
+
+  function handleOpen() {
+    setStep("edit");
+    setNextAbsolutePath(root.absolutePath);
+    open();
   }
 
   function goConfirm() {
@@ -85,7 +84,7 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
           variant="subtle"
           color="pink"
           size="md"
-          onClick={open}
+          onClick={handleOpen}
           aria-label={`修改系统路径 ${root.absolutePath}`}
         >
           <FolderPen size={15} />
@@ -97,6 +96,30 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
         onClose={handleClose}
         title={step === "edit" ? "修改系统默认目录路径" : "是否移动目录内的漫画？"}
         size="lg"
+        draggable
+        bodyMaxHeight="calc(100dvh - 180px)"
+        footer={step === "edit" ? (
+          <>
+            <AppButton type="button" variant="outline" disabled={isPending} onClick={handleClose}>
+              取消
+            </AppButton>
+            <AppButton type="button" disabled={isPending} onClick={goConfirm}>
+              下一步
+            </AppButton>
+          </>
+        ) : (
+          <>
+            <AppButton type="button" variant="outline" disabled={isPending} onClick={() => setStep("edit")}>
+              返回
+            </AppButton>
+            <AppButton type="button" variant="outline" disabled={isPending} loading={isPending} onClick={() => submitMoveFiles(false)}>
+              否，只改路径
+            </AppButton>
+            <AppButton type="button" color="red" disabled={isPending} loading={isPending} onClick={() => submitMoveFiles(true)}>
+              是，移动文件
+            </AppButton>
+          </>
+        )}
       >
         <form ref={formRef} action={formAction}>
           <input name="mangaRootId" type="hidden" value={root.id} />
@@ -117,14 +140,6 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
               <Text size="sm" c="ink.5">
                 下一步会询问是否把目录内的漫画一起移动到新路径。用户添加的其它根目录不受影响。
               </Text>
-              <Group justify="flex-end" mt="sm">
-                <AppButton type="button" variant="outline" disabled={isPending} onClick={handleClose}>
-                  取消
-                </AppButton>
-                <AppButton type="button" disabled={isPending} onClick={goConfirm}>
-                  下一步
-                </AppButton>
-              </Group>
             </Stack>
           ) : (
             <Stack gap="md" py="sm">
@@ -147,17 +162,6 @@ export function SystemRootPathDialog({ root }: { root: MangaRootWithStats }) {
               <Text size="sm" c="ink.5">
                 关联漫画约 {root.comicCount} 本。目标目录在移动时必须为空。
               </Text>
-              <Group justify="flex-end" mt="sm" gap="sm" wrap="wrap">
-                <AppButton type="button" variant="outline" disabled={isPending} onClick={() => setStep("edit")}>
-                  返回
-                </AppButton>
-                <AppButton type="button" variant="outline" disabled={isPending} loading={isPending} onClick={() => submitMoveFiles(false)}>
-                  否，只改路径
-                </AppButton>
-                <AppButton type="button" color="red" disabled={isPending} loading={isPending} onClick={() => submitMoveFiles(true)}>
-                  是，移动文件
-                </AppButton>
-              </Group>
             </Stack>
           )}
         </form>

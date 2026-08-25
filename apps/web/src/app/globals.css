@@ -156,10 +156,46 @@
 }
 
 .app-select-input:focus,
+.app-select-input:focus-visible,
 .app-select-input:focus-within,
 .app-input:focus,
-.app-textarea:focus {
+.app-input:focus-visible,
+.app-textarea:focus,
+.app-textarea:focus-visible,
+input:not([type="hidden"]):focus,
+input:not([type="hidden"]):focus-visible,
+textarea:focus,
+textarea:focus-visible,
+select:focus,
+select:focus-visible {
   border-color: var(--mantine-color-pink-5);
+  box-shadow: 0 0 0 3px rgba(239, 59, 145, 0.18);
+  outline: none;
+}
+
+.app-select-input,
+.app-input,
+.app-textarea {
+  border-color: var(--mantine-color-pink-2);
+  border-radius: var(--mantine-radius-md);
+}
+
+.app-button__loading-content {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-button__loading-label,
+.app-button__loading-section {
+  visibility: hidden;
+}
+
+.app-button__loading-indicator {
+  position: absolute;
+  inset: 0;
+  margin: auto;
 }
 
 .app-select-option[data-combobox-selected] {

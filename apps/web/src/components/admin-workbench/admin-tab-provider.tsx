@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type ReactNode,
 } from "react";
 
@@ -36,6 +37,7 @@ interface AdminTabContextValue {
   closeTabsToRight(tabId: string): void;
   closeAllTabs(): void;
   refreshActiveTab(): void;
+  refreshing: boolean;
   setCurrentTabTitle(title: string): void;
   setTabTitle(tabId: string, title: string): void;
 }
@@ -53,6 +55,7 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
     [cache, currentHref],
   );
   const cacheRef = useRef(cache);
+  const [refreshing, startRefreshTransition] = useTransition();
 
   useEffect(() => {
     cacheRef.current = routeCache;
@@ -185,8 +188,8 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
   }, [currentHref, router]);
 
   const refreshActiveTab = useCallback(() => {
-    router.refresh();
-  }, [router]);
+    startRefreshTransition(() => router.refresh());
+  }, [router, startRefreshTransition]);
 
   const setCurrentTabTitle = useCallback((title: string) => {
     setCache((current) => renameAdminTab(current, current.activeTabId, title));
@@ -207,6 +210,7 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
       closeTabsToRight: handleCloseTabsToRight,
       closeAllTabs: handleCloseAllTabs,
       refreshActiveTab,
+      refreshing,
       setCurrentTabTitle,
       setTabTitle,
     }),
@@ -220,6 +224,7 @@ export function AdminTabProvider({ children }: { children: ReactNode }) {
       handleCloseTabsToRight,
       openTab,
       refreshActiveTab,
+      refreshing,
       setCurrentTabTitle,
       setTabTitle,
     ],

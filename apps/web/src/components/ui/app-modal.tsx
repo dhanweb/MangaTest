@@ -18,6 +18,9 @@ export type AppModalProps = Omit<MantineModalProps, "children" | "title" | "size
   draggable?: boolean;
   preventClose?: boolean;
   bodyPadding?: MantineSpacing;
+  bodyHeight?: CSSProperties["height"];
+  bodyMinHeight?: CSSProperties["minHeight"];
+  bodyMaxHeight?: CSSProperties["maxHeight"];
 };
 
 type ModalPosition = { x: number; y: number };
@@ -36,6 +39,9 @@ export function AppModal({
   draggable = false,
   preventClose = false,
   bodyPadding,
+  bodyHeight,
+  bodyMinHeight,
+  bodyMaxHeight,
   withCloseButton = true,
   withOverlay = true,
   overlayProps,
@@ -49,6 +55,9 @@ export function AppModal({
   const modalId = useId();
   const descriptionId = description ? `${modalId.replace(/:/g, "")}-description` : undefined;
   const rootSize = size === "fullscreen" ? "100%" : size;
+  const modalWidth = size === "fullscreen"
+    ? "100%"
+    : `min(${({ sm: "420px", md: "560px", lg: "720px", xl: "960px" } as const)[size]}, calc(100vw - 32px))`;
 
   useEffect(() => {
     if (!draggable) {
@@ -75,13 +84,31 @@ export function AppModal({
     }
   };
 
+  useEffect(() => {
+    if (!opened) {
+      const resetFrame = window.requestAnimationFrame(() => setPosition(initialPosition));
+      return () => window.cancelAnimationFrame(resetFrame);
+    }
+  }, [opened]);
+
   const handleDrag = (_event: MouseEvent, data: DraggableData) => {
-    setPosition((current) => ({ x: current.x + data.deltaX, y: current.y + data.deltaY }));
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+
+    const rect = content.getBoundingClientRect();
+    const viewportMargin = 12;
+    const deltaX = Math.max(viewportMargin - rect.left, Math.min(window.innerWidth - viewportMargin - rect.right, data.deltaX));
+    const deltaY = Math.max(viewportMargin - rect.top, Math.min(window.innerHeight - viewportMargin - rect.bottom, data.deltaY));
+
+    setPosition((current) => ({ x: current.x + deltaX, y: current.y + deltaY }));
   };
 
   const contentStyle: CSSProperties = {
     display: "flex",
     flexDirection: "column",
+    width: modalWidth,
     maxHeight: size === "fullscreen" ? "100dvh" : "calc(100dvh - 32px)",
     overflow: "hidden",
     transform: position.x || position.y ? `translate3d(${position.x}px, ${position.y}px, 0)` : undefined,
@@ -113,8 +140,10 @@ export function AppModal({
         p={bodyPadding}
         style={{
           flex: "1 1 auto",
-          minHeight: 0,
+          minHeight: bodyMinHeight ?? 0,
           overflowY: "auto",
+          height: bodyHeight,
+          maxHeight: bodyMaxHeight ?? "calc(100dvh - 160px)",
         }}
       >
         {children}

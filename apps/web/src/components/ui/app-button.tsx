@@ -3,6 +3,7 @@
 import {
   ActionIcon,
   Button,
+  Loader,
   Tooltip,
   type ActionIconProps,
   type ButtonProps,
@@ -88,17 +89,33 @@ export function AppButton({
   href,
   target,
   rel,
+  loading = false,
+  disabled = false,
   children,
   ...props
 }: AppButtonProps) {
   const resolvedColor = tone ? toneToMantineColor[tone] : color ?? toneToMantineColor.primary;
+  const loadingSection = (section: ReactNode) => (
+    loading && section != null
+      ? <span className="app-button__loading-section" aria-hidden="true">{section}</span>
+      : section
+  );
+  const buttonContent = loading ? (
+    <span className="app-button__loading-content">
+      <span className="app-button__loading-label" aria-hidden="true">{children}</span>
+      <Loader className="app-button__loading-indicator" color="currentColor" size="1em" aria-hidden="true" />
+    </span>
+  ) : children;
 
   const buttonProps = {
     color: resolvedColor,
     variant: normalizeVariant(variant),
     size,
-    leftSection: leftIcon ?? leftSection,
-    rightSection: rightIcon ?? rightSection,
+    leftSection: loadingSection(leftIcon ?? leftSection),
+    rightSection: loadingSection(rightIcon ?? rightSection),
+    loading: false,
+    disabled: disabled || loading,
+    "aria-busy": loading || undefined,
     ...props,
   };
 
@@ -111,7 +128,7 @@ export function AppButton({
         rel={rel}
         {...(buttonProps as CompatibilityLinkButtonProps)}
       >
-        {children}
+        {buttonContent}
       </Button>
     );
   }
@@ -125,12 +142,12 @@ export function AppButton({
         rel={rel}
         {...(buttonProps as CompatibilityAnchorButtonProps)}
       >
-        {children}
+        {buttonContent}
       </Button>
     );
   }
 
-  return <Button {...buttonProps}>{children}</Button>;
+  return <Button {...buttonProps}>{buttonContent}</Button>;
 }
 
 export type AppLinkButtonProps = Omit<AppButtonProps, "component" | "href" | "children"> & {

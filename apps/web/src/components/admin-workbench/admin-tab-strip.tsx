@@ -19,6 +19,7 @@ export function AdminTabStrip() {
     closeTabsToRight,
     closeAllTabs,
     refreshActiveTab,
+    refreshing,
   } = useAdminTabs();
   const [ctxTabId, setCtxTabId] = useState<string | null>(null);
   const [ctxPos, setCtxPos] = useState<{ x: number; y: number } | null>(null);
@@ -148,6 +149,8 @@ export function AdminTabStrip() {
           radius={0}
           variant="subtle"
           w={42}
+          loading={refreshing}
+          disabled={refreshing}
           onClick={refreshActiveTab}
         >
           <RefreshCw size={16} />

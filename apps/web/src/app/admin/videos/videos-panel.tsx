@@ -19,13 +19,13 @@ import type { VideoAdminRowRecord } from "@/modules/video-library";
 
 export function VideosPanel({ videos }: { videos: VideoAdminRowRecord[] }) {
   const [search, setSearch] = useAdminTabState("search", "");
-  const [status, setStatus] = useAdminTabState("status", "all");
+  const [status, setStatus] = useAdminTabState<string | null>("status", "all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const { refreshActiveTab } = useAdminTabs();
+  const { refreshActiveTab, refreshing } = useAdminTabs();
 
   const rows = useMemo(
-    () => videos.filter((video) => (status === "all" || video.status === status) && (!search.trim() || [video.displayTitle, video.fileTitle, video.status, video.primaryPath ?? ""].join(" ").toLowerCase().includes(search.trim().toLowerCase()))),
+    () => videos.filter((video) => (!status || status === "all" || video.status === status) && (!search.trim() || [video.displayTitle, video.fileTitle, video.status, video.primaryPath ?? ""].join(" ").toLowerCase().includes(search.trim().toLowerCase()))),
     [videos, status, search],
   );
   const safePage = clampPage(page, rows.length, pageSize);
@@ -61,13 +61,14 @@ export function VideosPanel({ videos }: { videos: VideoAdminRowRecord[] }) {
               { value: "deleted", label: "已删除" },
             ],
             onChange: (value) => {
-              setStatus(value ?? "all");
+              setStatus(value);
               setPage(1);
             },
             width: 150,
           },
         ]}
         onRefresh={refreshActiveTab}
+        refreshing={refreshing}
         pagination={{
           page,
           pageSize,

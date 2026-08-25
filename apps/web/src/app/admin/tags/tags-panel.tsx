@@ -1,10 +1,11 @@
 "use client";
 
-import { ActionIcon, Box, Group, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { ActionIcon, Box, Group, Pagination, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { clampPage } from "@/components/admin-ui/admin-list-state";
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppButton, AppInput, AppSelect, DraggableModal } from "@/components/ui/app-components";
 import { toast } from "@/components/ui/toast";
@@ -31,6 +32,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
   const [items, setItems] = useState(tags);
   const [search, setSearch] = useAdminTabState("search", "");
   const [namespaceFilter, setNamespaceFilter] = useAdminTabState<string | null>("namespaceFilter", null);
+  const [page, setPage] = useAdminTabState("page", 1);
   const [opened, { open, close }] = useDisclosure(false);
   const [editTarget, setEditTarget] = useState<TagRow | null>(null);
   const [form, setForm] = useState<TagFormState>(DEFAULT_TAG_FORM);
@@ -62,6 +64,10 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
 
     return list;
   }, [namespaceFilter, search, items]);
+
+  const pageSize = 20;
+  const safePage = clampPage(page, filtered.length, pageSize);
+  const paginated = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const openAdd = () => {
     setEditTarget(null);
@@ -157,14 +163,20 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             placeholder="搜索标签名或翻译..."
             leftSection={<Search size={16} style={{ color: "var(--mantine-color-ink-5)" }} />}
             value={search}
-            onChange={(event) => setSearch(event.currentTarget.value)}
+            onChange={(event) => {
+              setSearch(event.currentTarget.value);
+              setPage(1);
+            }}
             style={{ width: 280 }}
           />
           <AppSelect
             placeholder="全部分类"
             data={namespaceOptions}
             value={namespaceFilter}
-            onChange={setNamespaceFilter}
+            onChange={(value) => {
+              setNamespaceFilter(value);
+              setPage(1);
+            }}
             clearable
             searchable
             nothingFoundMessage="无匹配分类"
@@ -198,7 +210,7 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {filtered.map((tag) => {
+            {paginated.map((tag) => {
               const nsLabel = namespaceLabel(tag.namespace);
               return (
                 <Table.Tr key={tag.id}>
@@ -276,15 +288,34 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
         </Table>
       </Box>
 
+      <Group justify="space-between" align="center" mt="md" gap="md" wrap="wrap">
+        <Text size="sm" c="ink.5">共 {filtered.length} 条</Text>
+        <Pagination
+          value={safePage}
+          total={Math.max(1, Math.ceil(filtered.length / pageSize))}
+          onChange={setPage}
+        />
+      </Group>
+
       <DraggableModal
         opened={opened}
         onClose={close}
         title={editTarget ? "编辑标签" : "添加标签"}
-        size="md"
+        size="lg"
         styles={{
           title: { fontWeight: 700, fontSize: "18px" },
           header: { borderBottom: "1px solid var(--mantine-color-pink-1)" },
         }}
+        footer={
+          <>
+            <AppButton variant="outline" onClick={close}>
+              取消
+            </AppButton>
+            <AppButton leftSection={<Plus size={16} />} loading={isSaving} onClick={saveTag}>
+              {editTarget ? "保存" : "添加"}
+            </AppButton>
+          </>
+        }
       >
         <Stack gap="md" py="sm">
           <AppSelect
@@ -310,14 +341,6 @@ export function TagsPanel({ tags }: { tags: TagRow[] }) {
             value={form.displayNameZh}
             onChange={(event) => { const value = event.currentTarget.value; setForm((current) => ({ ...current, displayNameZh: value })); }}
           />
-          <Group justify="flex-end" mt="sm">
-            <AppButton variant="outline" onClick={close}>
-              取消
-            </AppButton>
-            <AppButton leftSection={<Plus size={16} />} loading={isSaving} onClick={saveTag}>
-              {editTarget ? "保存" : "添加"}
-            </AppButton>
-          </Group>
         </Stack>
       </DraggableModal>
     </Box>

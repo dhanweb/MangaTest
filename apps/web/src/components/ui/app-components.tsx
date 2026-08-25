@@ -67,7 +67,6 @@ export function AppSelect(props: SelectProps) {
       comboboxProps={{ withinPortal: false }}
       styles={{
         input: {
-          borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
         },
         dropdown: {
@@ -86,7 +85,6 @@ export function AppInput(props: TextInputProps) {
     <MantineTextInput
       styles={{
         input: {
-          borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
         },
       }}
@@ -101,7 +99,6 @@ export function AppTextarea(props: TextareaProps) {
     <MantineTextarea
       styles={{
         input: {
-          borderColor: "var(--mantine-color-pink-2)",
           borderRadius: "var(--mantine-radius-md)",
         },
       }}

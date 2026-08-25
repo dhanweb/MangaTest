@@ -73,7 +73,6 @@ function cellStyle<T>(column: TableColumn<T>, offsets: ReturnType<typeof fixedOf
   if (column.fixed) {
     style.position = "sticky";
     style.zIndex = isHeader ? 4 : 2;
-    style.backgroundColor = isHeader ? "var(--mantine-color-pink-0)" : "var(--mantine-color-white)";
     if (column.fixed === "left") {
       style.left = offsets.left.get(column.key);
     } else {
@@ -138,7 +137,12 @@ export function AdminDataTable<T>({
             {renderedColumns.map((column, index) => {
               const style = cellStyle(column, offsets, true, isRightBoundary(column, index));
               return (
-                <Table.Th key={column.key} style={style} aria-label={column.headerLabel}>
+                  <Table.Th
+                    key={column.key}
+                    className={column.fixed ? "admin-data-table__fixed-cell admin-data-table__fixed-cell--header" : undefined}
+                    style={style}
+                    aria-label={column.headerLabel}
+                  >
                   {column.special === "selection" && selection ? (
                     <Checkbox
                       aria-label="选择当前页全部可选行"
@@ -210,6 +214,8 @@ export function AdminDataTable<T>({
         </Table.Tbody>
       </Table>
       <style>{`
+        .admin-data-table__fixed-cell { background: var(--mantine-color-white); }
+        .admin-data-table__fixed-cell--header { background: var(--mantine-color-pink-0); }
         .admin-data-table__row:hover .admin-data-table__fixed-cell { background: var(--mantine-color-pink-0); }
         .admin-data-table__row[data-selected="true"] .admin-data-table__fixed-cell { background: var(--mantine-color-pink-1); }
       `}</style>
