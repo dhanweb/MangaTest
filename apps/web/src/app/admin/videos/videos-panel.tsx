@@ -1,31 +1,160 @@
 "use client";
 
-import { Box, Group, Select, Table, Text, TextInput } from "@mantine/core";
-import { RefreshCw, Search, Video } from "lucide-react";
-import Link from "next/link";
+import { Box, Text } from "@mantine/core";
+import { Video } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
+import { AdminCrudList } from "@/components/admin-ui/admin-crud-list";
+import { clampPage } from "@/components/admin-ui/admin-list-state";
+import { AdminDataTable } from "@/components/admin-ui/admin-data-table";
+import { AdminPageHeader } from "@/components/admin-ui/admin-page-header";
 import { useAdminTabs } from "@/components/admin-workbench/admin-tab-provider";
-import { AppButton } from "@/components/ui/app-components";
-import type { VideoAdminRowRecord } from "@/modules/video-library";
+import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
+import { AppLinkButton } from "@/components/ui/app-button";
+import { AppTag } from "@/components/ui/app-tag";
+import { OverflowTooltipText } from "@/components/ui/overflow-tooltip-text";
+import type { AppTone } from "@/components/admin-ui/types";
 import { formatDuration } from "@/components/video-card";
+import type { VideoAdminRowRecord } from "@/modules/video-library";
 
 export function VideosPanel({ videos }: { videos: VideoAdminRowRecord[] }) {
   const [search, setSearch] = useAdminTabState("search", "");
   const [status, setStatus] = useAdminTabState("status", "all");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
   const { refreshActiveTab } = useAdminTabs();
-  const rows = useMemo(() => videos.filter((video) => (status === "all" || video.status === status) && (!search.trim() || [video.displayTitle, video.fileTitle, video.status, video.primaryPath ?? ""].join(" ").toLowerCase().includes(search.trim().toLowerCase()))), [videos, status, search]);
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
-  const paginated = rows.slice((page - 1) * pageSize, page * pageSize);
-  return <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
-    <Group mb="lg" justify="space-between" align="flex-start"><Group gap="sm"><Video size={22} /><Box><Text component="h1" size="20px" fw={700} mb={2}>视频管理</Text><Text size="sm" c="ink.5">维护视频标题、标签、集数顺序和文件状态。</Text></Box></Group><AppButton variant="outline" size="xs" leftSection={<RefreshCw size={14} />} onClick={refreshActiveTab}>刷新</AppButton></Group>
-    <Group mb="md" align="flex-end"><TextInput placeholder="搜索标题、路径或状态..." leftSection={<Search size={16} />} value={search} onChange={(event) => { setSearch(event.currentTarget.value); setPage(1); }} style={{ flex: 1, maxWidth: 440 }} /><Select label="状态" value={status} onChange={(value) => { setStatus(value ?? "all"); setPage(1); }} data={[{ value: "all", label: "全部" }, { value: "readable", label: "就绪" }, { value: "missing_local_file", label: "缺文件" }, { value: "hidden", label: "已隐藏" }, { value: "deleted", label: "已删除" }]} w={150} /></Group>
-    <Table.ScrollContainer minWidth={820} type="native"><Table striped highlightOnHover><Table.Thead><Table.Tr><Table.Th>封面</Table.Th><Table.Th>标题</Table.Th><Table.Th w={90}>集数</Table.Th><Table.Th w={120}>总时长</Table.Th><Table.Th w={100}>状态</Table.Th><Table.Th w={90}>操作</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{paginated.map((video) => <Table.Tr key={video.id}><Table.Td><Box component="img" src={`/api/videos/${video.id}/cover`} alt="" style={{ width: 74, height: 42, objectFit: "cover", borderRadius: 6, background: "#251a2d" }} /></Table.Td><Table.Td><Text fw={700} size="sm">{video.displayTitle}</Text><Text size="xs" c="ink.5" style={{ wordBreak: "break-all" }}>{video.primaryPath ?? video.fileTitle}</Text></Table.Td><Table.Td>{video.episodeCount}</Table.Td><Table.Td>{formatDuration(video.totalDurationSeconds)}</Table.Td><Table.Td><StatusLabel status={video.status} missing={video.isPrimaryFileMissing} /></Table.Td><Table.Td><AppButton component={Link} href={`/admin/videos/${video.id}`} variant="outline" size="xs">查看</AppButton></Table.Td></Table.Tr>)}{paginated.length === 0 ? <Table.Tr><Table.Td colSpan={6}><Text ta="center" c="ink.5" py="md">没有找到匹配的视频</Text></Table.Td></Table.Tr> : null}</Table.Tbody></Table></Table.ScrollContainer>
-    <Group justify="flex-end" mt="md"><Text size="sm" c="ink.5">共 {rows.length} 条</Text><AppButton variant="outline" size="xs" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>上一页</AppButton><Text size="sm">{page} / {totalPages}</Text><AppButton variant="outline" size="xs" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}>下一页</AppButton></Group>
-  </Box>;
+
+  const rows = useMemo(
+    () => videos.filter((video) => (status === "all" || video.status === status) && (!search.trim() || [video.displayTitle, video.fileTitle, video.status, video.primaryPath ?? ""].join(" ").toLowerCase().includes(search.trim().toLowerCase()))),
+    [videos, status, search],
+  );
+  const safePage = clampPage(page, rows.length, pageSize);
+  const paginated = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  return (
+    <Box p="xl" style={{ borderRadius: 14, background: "white", boxShadow: "0 8px 24px rgba(239,59,145,0.08)" }}>
+      <AdminPageHeader
+        title="视频管理"
+        icon={<Video size={22} />}
+        description="维护视频标题、标签、集数顺序和文件状态。"
+      />
+      <AdminCrudList
+        search={{
+          value: search,
+          placeholder: "搜索标题、路径或状态...",
+          ariaLabel: "搜索视频标题、路径或状态",
+          onChange: (value) => {
+            setSearch(value);
+            setPage(1);
+          },
+        }}
+        filters={[
+          {
+            key: "status",
+            label: "状态",
+            value: status,
+            options: [
+              { value: "all", label: "全部" },
+              { value: "readable", label: "就绪" },
+              { value: "missing_local_file", label: "缺文件" },
+              { value: "hidden", label: "已隐藏" },
+              { value: "deleted", label: "已删除" },
+            ],
+            onChange: (value) => {
+              setStatus(value ?? "all");
+              setPage(1);
+            },
+            width: 150,
+          },
+        ]}
+        onRefresh={refreshActiveTab}
+        pagination={{
+          page,
+          pageSize,
+          total: rows.length,
+          pageSizeOptions: [10, 20, 50],
+          onPageChange: setPage,
+          onPageSizeChange: (value) => {
+            setPageSize(value);
+            setPage(1);
+          },
+        }}
+      >
+        <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
+          <AdminDataTable
+            rows={paginated}
+            getRowKey={(video) => video.id}
+            rowNumber={{ page: safePage, pageSize }}
+            minWidth={820}
+            empty="没有找到匹配的视频"
+            columns={[
+              {
+                key: "cover",
+                header: "封面",
+                width: 100,
+                cell: (video) => (
+                  <Box
+                    component="img"
+                    src={`/api/videos/${video.id}/cover`}
+                    alt=""
+                    style={{ width: 74, height: 42, objectFit: "cover", borderRadius: 6, background: "var(--mantine-color-ink-8)" }}
+                  />
+                ),
+              },
+              {
+                key: "title",
+                header: "标题",
+                minWidth: 240,
+                cell: (video) => (
+                  <Box style={{ minWidth: 0 }}>
+                    <OverflowTooltipText fw={700} size="sm">{video.displayTitle}</OverflowTooltipText>
+                    <OverflowTooltipText size="xs" c="ink.5">{video.primaryPath ?? video.fileTitle}</OverflowTooltipText>
+                  </Box>
+                ),
+              },
+              {
+                key: "episodes",
+                header: "集数",
+                width: 90,
+                align: "right",
+                cell: (video) => <Text size="sm">{video.episodeCount}</Text>,
+              },
+              {
+                key: "duration",
+                header: "总时长",
+                width: 120,
+                cell: (video) => <Text size="sm">{formatDuration(video.totalDurationSeconds)}</Text>,
+              },
+              {
+                key: "status",
+                header: "状态",
+                width: 100,
+                cell: (video) => <VideoStatusTag status={video.status} missing={video.isPrimaryFileMissing} />,
+              },
+              {
+                key: "actions",
+                header: "操作",
+                headerLabel: "操作",
+                width: 90,
+                fixed: "right",
+                wrap: false,
+                cell: (video) => <AppLinkButton href={`/admin/videos/${video.id}`} variant="outline" size="xs">查看</AppLinkButton>,
+              },
+            ]}
+          />
+        </Box>
+      </AdminCrudList>
+    </Box>
+  );
 }
 
-function StatusLabel({ status, missing }: { status: VideoAdminRowRecord["status"]; missing: boolean }) { const label: Record<VideoAdminRowRecord["status"], string> = { readable: "就绪", missing_local_file: "缺文件", hidden: "已隐藏", deleted: "已删除" }; return <Text size="xs" fw={800} c={missing || status !== "readable" ? "red" : "green"}>{missing ? "缺文件" : label[status]}</Text>; }
+function VideoStatusTag({ status, missing }: { status: VideoAdminRowRecord["status"]; missing: boolean }) {
+  const tone: AppTone = missing || status === "missing_local_file" || status === "deleted" ? "danger" : status === "hidden" ? "warning" : "success";
+  const label: Record<VideoAdminRowRecord["status"], string> = {
+    readable: "就绪",
+    missing_local_file: "缺文件",
+    hidden: "已隐藏",
+    deleted: "已删除",
+  };
+  return <AppTag tone={tone} size="sm">{missing ? "缺文件" : label[status]}</AppTag>;
+}
