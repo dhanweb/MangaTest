@@ -40,6 +40,29 @@ icon-only action, or page-local sticky-column styles.
 Use typed generic columns and stable keys. Shared controls use semantic tones,
 and page-local styling must not recreate button, tag, or fixed-column states.
 
+### Admin UI performance and state gotchas
+
+- Fixed table cells must use the shared fixed-cell class for their opaque
+  background states. An inline `backgroundColor` on the cell wins over the
+  row hover selector and makes the fixed operation column appear to lose its
+  hover style.
+- A client-side admin list must not synchronously mount hundreds of rows when
+  a filter is cleared. Paginate the visible rows (the default is 20) or use a
+  deliberately virtualized surface before adding expensive row action
+  controls.
+- `AppModal` consumers may provide `bodyHeight`, `bodyMinHeight`, and
+  `bodyMaxHeight`; the shared modal must cap content width and body height with
+  viewport-relative values so a nested draggable wrapper cannot shrink the
+  dialog to its children or push the footer off-screen.
+
+```tsx
+// Correct: CSS owns the fixed-cell state transitions.
+<Table.Td className="admin-data-table__fixed-cell" />
+
+// Avoid: this masks the shared row hover background.
+<Table.Td style={{ backgroundColor: "white" }} />
+```
+
 ---
 
 ## Testing Requirements
