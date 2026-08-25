@@ -16,7 +16,10 @@ Questions to answer:
 - What are the patterns for derived state?
 -->
 
-(To be filled by the team)
+Local page state owns search predicates, filter values, visible slices,
+mutation loading, and selected stable row keys. Admin presentation components
+do not keep a second copy of those values. URL or admin-tab persistence remains
+owned by the page adapter (`useAdminTabState` where already established).
 
 ---
 
@@ -24,7 +27,9 @@ Questions to answer:
 
 <!-- Local state, global state, server state, URL state -->
 
-(To be filled by the team)
+Use `AdminDataTable` selection with a `ReadonlySet<string>` keyed by a stable
+domain identifier. Selecting or clearing the current page changes only keys
+on that page; keys selected on another page remain in the set.
 
 ---
 
@@ -32,7 +37,9 @@ Questions to answer:
 
 <!-- Criteria for promoting state to global -->
 
-(To be filled by the team)
+Use `clampPage(page, total, pageSize)` after filtering, deletion, or page-size
+changes. The empty result page is always `1`, and the shell reports a clamped
+page through the controlled `onPageChange` callback.
 
 ---
 
@@ -40,7 +47,9 @@ Questions to answer:
 
 <!-- How server data is cached and synchronized -->
 
-(To be filled by the team)
+The web MVP currently uses React local state and existing admin-tab state
+helpers. Do not introduce a global store or data-fetching framework for a
+shared presentation component.
 
 ---
 
@@ -48,4 +57,6 @@ Questions to answer:
 
 <!-- State management mistakes your team has made -->
 
-(To be filled by the team)
+Avoid index-based selection and avoid duplicating pagination logic in each
+page. Keep filtering and slicing in the page, then pass the resulting rows and
+total to `AdminCrudList`/`AdminDataTable`.
