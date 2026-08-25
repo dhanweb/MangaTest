@@ -3,6 +3,7 @@
 import { createTheme, MantineProvider } from "@mantine/core";
 import type { ReactNode } from "react";
 
+import { AppConfirmProvider } from "@/components/ui/app-confirm-dialog";
 import { Toaster } from "@/components/ui/toast";
 
 const theme = createTheme({
@@ -91,7 +92,7 @@ export { theme };
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
-      {children}
+      <AppConfirmProvider>{children}</AppConfirmProvider>
       <Toaster />
     </MantineProvider>
   );
