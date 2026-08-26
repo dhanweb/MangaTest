@@ -1,0 +1,3 @@
+{"file":".trellis/tasks/08-26-cross-platform-path-integrations/design.md","reason":"Provider dialect, Pixiv, video, desktop, and migration integration design."}
+{"file":"docs/superpowers/plans/2026-08-26-cross-platform-path-integrations.md","reason":"Detailed integration TDD sequence and validation matrix."}
+{"file":"docs/plan.md","reason":"Full path-consumer compatibility and fail-closed product constraints."}

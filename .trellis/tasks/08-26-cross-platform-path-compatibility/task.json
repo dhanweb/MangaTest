@@ -1,0 +1,29 @@
+{
+  "id": "cross-platform-path-compatibility",
+  "name": "cross-platform-path-compatibility",
+  "title": "Windows 与 WSL 路径兼容和无损迁移",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": "web",
+  "priority": "P2",
+  "creator": "dhanweb",
+  "assignee": "dhanweb",
+  "createdAt": "2026-08-26",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-26-portable-manga-paths",
+    "08-26-cross-platform-path-integrations"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

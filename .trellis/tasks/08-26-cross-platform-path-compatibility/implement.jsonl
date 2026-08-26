@@ -1,0 +1,3 @@
+{"file":"docs/plan.md","reason":"Product source of truth for cross-platform path identity, migration, and full-scope compatibility."}
+{"file":".trellis/tasks/08-26-cross-platform-path-compatibility/design.md","reason":"Parent architecture, invariants, child boundaries, and rollback contract."}
+{"file":".trellis/tasks/08-26-cross-platform-path-compatibility/implement.md","reason":"Ordered child execution and cross-platform integration gates."}

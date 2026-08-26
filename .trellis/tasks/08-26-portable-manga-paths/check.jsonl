@@ -1,0 +1,2 @@
+{"file":".trellis/tasks/08-26-portable-manga-paths/prd.md","reason":"Verify stable IDs, offline-root protection, no file movement, and migration rollback acceptance."}
+{"file":"docs/superpowers/plans/2026-08-26-portable-manga-paths.md","reason":"Verify all planned tests and platform smoke gates were executed."}

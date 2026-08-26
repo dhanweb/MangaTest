@@ -698,11 +698,13 @@ api/             该模块专用请求解析和响应 DTO
 首批表：
 
 - `settings`：系统设置，例如监听地址、缓存目录、缓存上限、阅读偏好。
-- `manga_roots`：漫画根目录，保存绝对路径、启用状态、预留 `scan_mode` 和管理类型（`user` / `system` / `pixiv`）；`pixiv` 路径由 Pixiv 同步配置维护，普通路径管理不能编辑或删除。
-- `video_roots`：视频根目录，保存绝对路径、启用状态和扫描模式。
+- `manga_roots`：逻辑漫画根目录，保存稳定 ID、启用状态、预留 `scan_mode` 和管理类型（`user` / `system` / `pixiv`）；根目录 ID 不因 Windows / WSL 运行位置变化而改变。现有 `absolute_path` 在跨平台迁移期只作为兼容字段，不再作为跨平台业务身份。
+- `manga_root_locations`：逻辑漫画根目录在各 runtime profile（`windows` / `wsl` / `linux`）下的绝对路径、验证状态和最近验证时间；同一 root 每个 profile 最多一个 location。`pixiv` location 仍由 Pixiv 同步配置维护，普通路径管理不能编辑或删除。
+- `video_roots`：逻辑视频根目录，保存稳定 ID、启用状态和扫描模式。
+- `video_root_locations`：逻辑视频根目录在各 runtime profile 下的绝对路径和验证状态。
 - `scan_sessions`：扫描批次，保存开始时间、结束时间、root、统计结果、错误摘要。
 - `comics`：漫画业务实体，保存展示标题、展示标题来源（`scan` / `metadata` / `manual`）及可选来源身份、文件标题、原始标题、元数据查询标题、排序标题、状态、主 `local_file`、last_read 快照。
-- `local_files`：本地文件实体，保存 root、路径、类型、size、mtime、可选 hash、是否主文件、缺失状态。
+- `local_files`：本地文件实体，使用 `manga_root_id + portable relative_path` 作为稳定磁盘身份，并保存类型、size、mtime、可选 hash、是否主文件、缺失状态；portable relative path 统一使用 `/`。现有 `absolute_path` 在迁移期仅作为当前 profile 派生/兼容值。
 - `chapters`：章节实体，保存 comic 归属、可选标题、排序值、来源 local_file。
 - `pages`：页面实体，保存 chapter 归属、页码、page source、宽高、读取状态。
 - `tags`：canonical 标签，保存 namespace、name、中文翻译、别名信息。
@@ -750,6 +752,39 @@ metadata_sync_session 1 ── * metadata_sync_entry
 - manga root 必须是绝对路径，且不得默默自动创建父目录。
 - video root 必须是绝对路径；视频播放、首帧和 PotPlayer 启动 API 只接受受控的 `videoId`/`episodeId`，不接受客户端任意路径。
 - 外部 metadata 同步解析出的路径只能用于匹配已经配置并扫描出的 `local_file`；不得把外部数据库中的任意路径直接变成客户端可读取路径。
+
+### 5.1 Windows / WSL 跨平台路径模型与迁移
+
+运行环境决策：
+
+- Windows 或 WSL 只选择一个作为长期唯一 MangaTest 后端；不支持两个后端同时运行或同时访问同一 SQLite。
+- 数据库允许在停止原后端后通过一致性备份、恢复和路径 location 切换迁移到另一环境；不提供高频热切换或实时同步。
+- 项目代码、目标平台安装的原生依赖、SQLite、`.next` 和缓存优先放在当前后端的原生文件系统。漫画和视频等大体积媒体允许继续位于 Windows 文件系统，由 WSL 通过 `/mnt/<drive>/...` 访问。
+- Windows 安装的 `node_modules` 不得在 WSL 复用；`better-sqlite3`、Sharp 等原生依赖必须在目标运行环境重新安装。
+
+路径身份与解析：
+
+- `manga_root_id` / `video_root_id` 是与绝对路径无关的逻辑身份。一个逻辑 root 可以同时保存 `windows -> D:\library`、`wsl -> /mnt/d/library` 等 runtime location。
+- 漫画和视频文件分别以 `root_id + portable relative_path` 作为稳定身份。portable relative path 统一使用 `/`，不得包含盘符、UNC 前缀、绝对路径或越界 `..`。
+- 扫描、Reader、封面/缩略图、视频流、下载 finalization、Pixiv 匹配和桌面集成都必须通过统一 location/path resolver 得到当前环境的绝对路径，不得自行读取并拼接其他平台的绝对路径。
+- runtime profile 自动区分 `windows`、`wsl` 和普通 `linux`，并允许显式配置覆盖。`D:\path -> /mnt/d/path` 只能作为可验证的迁移建议；UNC、自定义 WSL automount root 和普通 Linux 路径不得静默猜测。
+- 当前 profile 没有 location、盘符未挂载或根目录不可访问时，root 状态是 `unconfigured` 或 `offline`。此时禁止扫描，且不得把 root 下全部文件批量标记为缺失。
+
+无损迁移：
+
+- 跨平台迁移不移动、重命名或删除真实媒体文件，不改变 comic、local_file、chapter、page、tag、source、merge、video、episode 或 progress ID。
+- 迁移必须先检查活跃下载任务，使用 SQLite Backup API 创建一致性备份，并生成只读 dry-run 报告；报告包含 root 映射、不可映射路径、目标可用性、受影响记录和迁移前数据计数。
+- location 与派生路径变更在单个数据库事务中完成。目标平台路径不得注册成新的逻辑 root；迁移后的首次扫描必须按 `root_id + relative_path` 对账，避免重复漫画或视频。
+- 历史 operation log、历史同步结果中的绝对路径作为审计信息保留。依赖绝对路径的 archive file-list、封面和缩略图缓存允许失效并懒惰重建。
+- 迁移失败时恢复备份；回滚不涉及真实媒体文件。Windows 与 WSL 不得同时打开同一 SQLite 数据库文件。
+
+全量兼容范围：
+
+- 第一阶段交付 runtime profile、root location、dry-run/备份/迁移、root offline 语义，以及 Library、Local Files、Reader、Media Assets 和后台路径管理。
+- 第二阶段在同一路径合同上兼容 PixivDownloader、Downloads/aria2、video-library、资源管理器和 PotPlayer。
+- PixivDownloader 外部数据库中的 Windows 路径先按 Windows 方言解析为逻辑 root + relative path，再映射到当前 runtime location；不得在 WSL 中直接把 `/mnt/...` 传给 `path.win32.resolve`。
+- Downloads 必须显式区分应用运行时路径和 provider 返回路径。无法通过已配置 location 转换的 aria2 路径必须阻止 finalization，不得通过当前平台 `path.resolve` 猜测。
+- WSL 打开 Windows 媒体目录时应把 `/mnt/...` 转为 Windows 路径后调用 `explorer.exe`。PotPlayer 在 Windows 直接启用；WSL 仅在媒体路径和可执行文件都能安全转换并调用 Windows 进程时启用，否则明确显示不支持。
 
 ## 6. 模块交互示例
 
