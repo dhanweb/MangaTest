@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
-- **Last Active**: 2026-08-24
+- **Total Sessions**: 2
+- **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~29 | Active |
+| `journal-1.md` | ~52 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-08-26 | 实现可移植漫画路径与 Windows WSL 迁移 | `e4c6b19`, `9b44ffd` | `main` |
 | 1 | 2026-08-24 | 修复大漫画阅读页加载卡顿 | `9c3177c`, `174f71a` | `main` |
 <!-- @@@/auto:session-history -->
 

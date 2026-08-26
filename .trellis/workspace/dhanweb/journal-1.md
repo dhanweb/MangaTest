@@ -27,3 +27,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: 实现可移植漫画路径与 Windows WSL 迁移
+
+**Date**: 2026-08-26
+**Task**: 实现可移植漫画路径与 Windows WSL 迁移
+**Package**: web
+**Branch**: `main`
+
+### Summary
+
+完成运行时路径 profile、manga root location、跨平台 portable relative path、SQLite 备份与 dry-run/apply 迁移流程，并接入扫描、Reader、媒体资源和文件维护；补充管理页面、API、回归测试及 Windows/WSL 部署文档。未执行真实数据迁移。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e4c6b19` | (see git log) |
+| `9b44ffd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
