@@ -54,6 +54,10 @@ and page-local styling must not recreate button, tag, or fixed-column states.
   `bodyMaxHeight`; the shared modal must cap content width and body height with
   viewport-relative values so a nested draggable wrapper cannot shrink the
   dialog to its children or push the footer off-screen.
+- Client components may import runtime profile constants and types only from a
+  pure contract module. Do not import the runtime detector or database/filesystem
+  modules into a client component; a transitive `node:fs` import can make the
+  Turbopack client chunk fail.
 
 ```tsx
 // Correct: CSS owns the fixed-cell state transitions.
