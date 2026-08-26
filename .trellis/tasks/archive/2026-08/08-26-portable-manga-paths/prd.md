@@ -18,15 +18,15 @@
 
 ## Acceptance Criteria
 
-- [ ] Windows 与 WSL runtime profile 检测和显式覆盖有单元测试。
-- [ ] portable relative path 拒绝绝对路径、盘符、UNC、NUL 和越界段。
-- [ ] 旧数据库 backfill 当前 profile location 后，comic/local-file/chapter/page/tag/progress ID 不变。
-- [ ] dry-run 不写数据库，并正确建议本地盘符到 `/mnt/<drive>` 的 WSL location。
-- [ ] 迁移 apply 前自动创建可恢复 SQLite backup，并在单事务中更新 location/派生路径。
-- [ ] 迁移后的首次扫描按 root ID + relative path 对账，不新增重复 comic/local file。
-- [ ] root offline 时扫描被阻止，已有漫画不会批量变 missing。
-- [ ] 目录、zip、cbz 的扫描、封面、缩略图和 pageId 阅读在两种 profile 下通过。
-- [ ] 后台可以查看 profile/location 状态、执行 dry-run，并且必须确认 backup 和 target verification 后才允许 apply。
+- [x] Windows 与 WSL runtime profile 检测和显式覆盖有单元测试。
+- [x] portable relative path 拒绝绝对路径、盘符、UNC、NUL 和越界段。
+- [x] 旧数据库 backfill 当前 profile location 后，comic/local-file/chapter/page/tag/progress ID 不变。
+- [x] dry-run 不写数据库，并正确建议本地盘符到 `/mnt/<drive>` 的 WSL location。
+- [x] 迁移 apply 前自动创建可恢复 SQLite backup，并在单事务中更新 location/派生路径。
+- [x] 迁移后的首次扫描按 root ID + relative path 对账，不新增重复 comic/local file。
+- [x] root offline 时扫描被阻止，已有漫画不会批量变 missing。
+- [x] 目录、zip、cbz 的扫描、封面、缩略图和 pageId 阅读在两种 profile 下通过。
+- [x] 后台可以查看 profile/location 状态、执行 dry-run，并且必须确认 backup 和 target verification 后才允许 apply。
 
 ## Out of Scope
 
