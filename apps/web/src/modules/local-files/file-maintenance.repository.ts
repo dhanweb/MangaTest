@@ -4,14 +4,16 @@ import path from "node:path";
 
 import { and, eq } from "drizzle-orm";
 
-import { bootstrapDatabase, comics, getDb, localFiles, mangaRoots, operationLogs } from "@/modules/core/db";
+import { bootstrapDatabase, comics, getDb, localFiles, operationLogs } from "@/modules/core/db";
+import { createRootLocationService } from "./root-location.service";
+import { toPortableRelativePath } from "./portable-relative-path";
 import { validateAbsolutePath } from "@/modules/local-files/path-safety";
 
 export interface FileMaintenanceIssueRecord {
   id: string;
   comicId: string | null;
   comicTitle: string;
-  issueType: "missing";
+  issueType: "missing" | "root_offline";
   filePath: string;
   expectedSize: string;
   detail: string;
@@ -35,7 +37,9 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
           id: localFiles.id,
           comicId: localFiles.comicId,
           comicTitle: comics.displayTitle,
-          filePath: localFiles.absolutePath,
+          legacyFilePath: localFiles.absolutePath,
+          mangaRootId: localFiles.mangaRootId,
+          relativePath: localFiles.relativePath,
           sizeBytes: localFiles.sizeBytes,
           missingSince: localFiles.missingSince,
           updatedAt: localFiles.updatedAt,
@@ -45,16 +49,45 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         .where(and(eq(localFiles.isMissing, true), eq(localFiles.isIgnored, false)))
         .all();
 
-      return rows.map((row) => ({
-        id: row.id,
-        comicId: row.comicId,
-        comicTitle: row.comicTitle ?? "未关联漫画",
-        issueType: "missing" as const,
-        filePath: row.filePath,
-        expectedSize: formatBytes(row.sizeBytes),
-        detail: "文件路径不存在，可能是磁盘已断开连接或文件被移动。",
-        detectedAt: row.missingSince ?? row.updatedAt,
-      }));
+      const locationService = createRootLocationService();
+      const offlineRootIds = new Set<string>();
+      const issues: FileMaintenanceIssueRecord[] = [];
+
+      for (const row of rows) {
+        const state = row.mangaRootId ? await locationService.resolveMangaRoot(row.mangaRootId) : null;
+        if (state && state.status !== "available") {
+          if (!offlineRootIds.has(row.mangaRootId!)) {
+            offlineRootIds.add(row.mangaRootId!);
+            issues.push({
+              id: `root-offline:${row.mangaRootId}`,
+              comicId: null,
+              comicTitle: row.comicTitle ?? "未关联漫画",
+              issueType: "root_offline",
+              filePath: state.status === "unconfigured" ? "未配置当前运行环境路径" : state.absolutePath,
+              expectedSize: "-",
+              detail: state.status === "unconfigured" ? "当前运行环境没有配置这个漫画根目录的位置。" : `漫画根目录当前不可用：${state.reason}`,
+              detectedAt: row.missingSince ?? row.updatedAt,
+            });
+          }
+          continue;
+        }
+
+        const filePath = state?.status === "available" && row.mangaRootId
+          ? await locationService.resolveMangaFile(row.mangaRootId, row.relativePath).catch(() => row.legacyFilePath)
+          : row.legacyFilePath;
+        issues.push({
+          id: row.id,
+          comicId: row.comicId,
+          comicTitle: row.comicTitle ?? "未关联漫画",
+          issueType: "missing",
+          filePath,
+          expectedSize: formatBytes(row.sizeBytes),
+          detail: "文件路径不存在，可能是磁盘已断开连接或文件被移动。",
+          detectedAt: row.missingSince ?? row.updatedAt,
+        });
+      }
+
+      return issues;
     },
 
     async recheckMissingFiles() {
@@ -64,7 +97,9 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         .select({
           id: localFiles.id,
           comicId: localFiles.comicId,
-          absolutePath: localFiles.absolutePath,
+          legacyAbsolutePath: localFiles.absolutePath,
+          mangaRootId: localFiles.mangaRootId,
+          relativePath: localFiles.relativePath,
           kind: localFiles.kind,
         })
         .from(localFiles)
@@ -73,9 +108,19 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
 
       let restoredCount = 0;
       const now = new Date().toISOString();
+      const locationService = createRootLocationService();
 
       for (const row of missingRows) {
-        const stat = await fs.stat(row.absolutePath).catch(() => null);
+        let absolutePath = row.legacyAbsolutePath;
+        if (row.mangaRootId) {
+          const root = await locationService.resolveMangaRoot(row.mangaRootId);
+          if (root.status !== "available" && root.status !== "unconfigured") {
+            continue;
+          }
+          absolutePath = await locationService.resolveMangaFile(row.mangaRootId, row.relativePath).catch(() => row.legacyAbsolutePath);
+        }
+
+        const stat = await fs.stat(absolutePath).catch(() => null);
         const existsAsExpected =
           Boolean(stat) &&
           ((row.kind === "directory" && stat?.isDirectory()) || ((row.kind === "zip" || row.kind === "cbz") && stat?.isFile()));
@@ -187,10 +232,9 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
           kind: localFiles.kind,
           oldAbsolutePath: localFiles.absolutePath,
           mangaRootId: localFiles.mangaRootId,
-          rootPath: mangaRoots.absolutePath,
+          relativePath: localFiles.relativePath,
         })
         .from(localFiles)
-        .leftJoin(mangaRoots, eq(mangaRoots.id, localFiles.mangaRootId))
         .where(eq(localFiles.id, localFileId))
         .get();
 
@@ -198,8 +242,13 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         throw new Error("找不到要修复的本地文件记录。");
       }
 
-      if (!row.rootPath) {
+      if (!row.mangaRootId) {
         throw new Error("这个文件记录没有关联 manga root，暂时不能自动修复。");
+      }
+
+      const root = await createRootLocationService().resolveMangaRoot(row.mangaRootId);
+      if (root.status !== "available") {
+        throw new Error(root.status === "unconfigured" ? "当前运行环境没有配置漫画根目录位置。" : root.reason);
       }
 
       const stat = await fs.stat(normalizedPath).catch(() => null);
@@ -215,16 +264,17 @@ export function createFileMaintenanceRepository(): FileMaintenanceRepository {
         throw new Error("这个记录是压缩包漫画，新路径也必须是文件。");
       }
 
-      const relativePath = path.relative(row.rootPath, normalizedPath);
+      const relativePath = path.relative(root.absolutePath, normalizedPath);
       if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
         throw new Error("新路径必须位于原 manga root 下。");
       }
+      const portableRelativePath = toPortableRelativePath(relativePath);
 
       const now = new Date().toISOString();
       db.transaction((tx) => {
         const localFileUpdate = {
           absolutePath: normalizedPath,
-          relativePath,
+          relativePath: portableRelativePath,
           mtimeMs: Math.trunc(stat.mtimeMs),
           isMissing: false,
           missingSince: null,

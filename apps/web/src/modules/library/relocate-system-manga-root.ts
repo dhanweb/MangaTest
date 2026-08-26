@@ -10,9 +10,11 @@ import {
   getDb,
   getSqlite,
   localFiles,
+  mangaRootLocations,
   mangaRoots,
   operationLogs,
 } from "@/modules/core/db";
+import { detectCurrentRuntimeEnvironment } from "@/modules/core/runtime-paths";
 import { getRuntimeSettings, saveRuntimeSettings } from "@/modules/core/settings";
 import {
   moveMangaRootContents,
@@ -111,6 +113,7 @@ export async function relocateSystemMangaRoot(
   let updatedLocalFileCount = 0;
   let updatedFinalizationCount = 0;
   const now = new Date().toISOString();
+  const runtimeProfile = detectCurrentRuntimeEnvironment().profile;
 
   // Collect filesystem stats outside the transaction (async I/O).
   const localFileUpdates: Array<{
@@ -151,6 +154,30 @@ export async function relocateSystemMangaRoot(
   }
 
   const run = sqlite.transaction(() => {
+    db.insert(mangaRootLocations)
+      .values({
+        id: randomUUID(),
+        mangaRootId: root.id,
+        runtimeProfile,
+        absolutePath: toPath,
+        verificationStatus: "available",
+        lastVerifiedAt: now,
+        lastError: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [mangaRootLocations.mangaRootId, mangaRootLocations.runtimeProfile],
+        set: {
+          absolutePath: toPath,
+          verificationStatus: "available",
+          lastVerifiedAt: now,
+          lastError: null,
+          updatedAt: now,
+        },
+      })
+      .run();
+
     db.update(mangaRoots)
       .set({
         absolutePath: toPath,

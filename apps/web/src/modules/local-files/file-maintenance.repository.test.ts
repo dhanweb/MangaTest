@@ -24,6 +24,8 @@ describe("FileMaintenanceRepository", () => {
     await writeFile(restoredPath, Buffer.from("zip-like fixture"));
 
     const { bootstrapDatabase, comics, getDb, localFiles, mangaRoots } = await import("../core/db");
+    const { detectCurrentRuntimeEnvironment } = await import("../core/runtime-paths");
+    const { createMangaRootLocationRepository } = await import("./manga-root-locations.repository");
     const { createFileMaintenanceRepository } = await import("./file-maintenance.repository");
     bootstrapDatabase();
     const db = getDb();
@@ -41,6 +43,11 @@ describe("FileMaintenanceRepository", () => {
         scanMode: "children_as_comics",
       })
       .run();
+    createMangaRootLocationRepository().upsert({
+      mangaRootId: rootId,
+      runtimeProfile: detectCurrentRuntimeEnvironment().profile,
+      absolutePath: rootPath,
+    });
     db.insert(comics)
       .values([
         {

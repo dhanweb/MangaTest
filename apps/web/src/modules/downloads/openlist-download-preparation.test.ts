@@ -337,6 +337,7 @@ async function seedOpenListTask(resourcePath: string) {
   const systemRootPath = path.join(workspace, "SystemRoot");
   await mkdir(systemRootPath, { recursive: true });
   sqlite.prepare("update manga_roots set absolute_path = ? where kind = 'system'").run(systemRootPath);
+  sqlite.prepare("update manga_root_locations set absolute_path = ? where manga_root_id in (select id from manga_roots where kind = 'system')").run(systemRootPath);
   sqlite
     .prepare("insert into manga_roots (id, absolute_path, display_name, scan_mode, is_enabled) values (?, ?, ?, ?, ?)")
     .run(mangaRootId, rootPath, "Root", "children_as_comics", 1);
@@ -361,10 +362,6 @@ async function seedOpenListTask(resourcePath: string) {
   const task = await createDownloadTask({ comicResourceId: resourceId, taskType: "transfer" });
 
   return { sqlite, task: task.task, systemRootPath };
-}
-
-function selectPreparation(sqlite: Database.Database, taskId: string) {
-  return sqlite.prepare("select * from download_task_preparations where download_task_id = ?").get(taskId) as Record<string, unknown> | undefined;
 }
 
 function selectTransfer(sqlite: Database.Database, taskId: string) {

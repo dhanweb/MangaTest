@@ -7,19 +7,22 @@ import { useMemo, useState } from "react";
 import { useAdminTabState } from "@/components/admin-workbench/use-admin-tab-state";
 import { AppBadge } from "@/components/ui/app-components";
 import { toast } from "@/components/ui/toast";
+import type { RuntimeProfile } from "@/modules/core/runtime-paths";
 import type { MangaRootWithStats, ScanSessionRecord } from "@/modules/library";
 
 import { deleteMangaRootAction, scanMangaRootAction } from "./actions";
 import { MangaRootEditDialog } from "./manga-root-edit-dialog";
 import { SystemRootPathDialog } from "./system-root-path-dialog";
 import { MangaRootDialog } from "./manga-root-dialog";
+import { PathMigrationDialog } from "./path-migration-dialog";
 
 interface PathsPanelProps {
   mangaRoots: MangaRootWithStats[];
   scanSessions: ScanSessionRecord[];
+  runtimeProfile: RuntimeProfile;
 }
 
-export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
+export function PathsPanel({ mangaRoots, scanSessions, runtimeProfile }: PathsPanelProps) {
   const [search, setSearch] = useAdminTabState("search", "");
   const [openingRootId, setOpeningRootId] = useState<string | null>(null);
 
@@ -31,7 +34,10 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
 
     return mangaRoots.filter(
       (root) =>
-        root.absolutePath.toLowerCase().includes(query) || (root.displayName ?? "").toLowerCase().includes(query),
+        [root.absolutePath, root.displayName ?? "", ...root.locations.map((location) => location.absolutePath)]
+          .join(" ")
+          .toLowerCase()
+          .includes(query),
     );
   }, [mangaRoots, search]);
 
@@ -64,7 +70,7 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
             漫画路径管理
           </Text>
           <Text size="sm" c="ink.5">
-            管理漫画扫描路径，添加本地目录，系统会手动扫描并同步漫画。
+            当前运行环境：{runtimeProfile}。管理逻辑漫画根目录的位置映射，系统只更新映射，不移动真实文件。
           </Text>
         </Box>
       </Box>
@@ -90,7 +96,10 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
             },
           }}
         />
-        <MangaRootDialog />
+        <Group gap="sm">
+          <PathMigrationDialog currentProfile={runtimeProfile} />
+          <MangaRootDialog />
+        </Group>
       </Group>
 
       <Box style={{ overflow: "hidden", borderRadius: 10, border: "1px solid var(--mantine-color-pink-2)" }}>
@@ -118,20 +127,23 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {filteredRoots.map((root) => (
+            {filteredRoots.map((root) => {
+              const rootUnavailable = root.currentLocation?.verificationStatus === "offline" || root.currentLocation?.verificationStatus === "invalid";
+
+              return (
               <Table.Tr key={root.id}>
                 <Table.Td>
-                  <Text
-                    component="code"
-                    size="sm"
-                    style={{
-                      fontFamily: "var(--mantine-font-family-monospace)",
-                      overflowWrap: "anywhere",
-                      color: "#201422",
-                    }}
-                  >
-                    {root.absolutePath}
+                  <Text component="code" size="sm" style={{ fontFamily: "var(--mantine-font-family-monospace)", overflowWrap: "anywhere", color: "#201422" }}>
+                    {root.currentLocation?.absolutePath ?? root.absolutePath}
                   </Text>
+                  <Text size="xs" c="ink.5" mt={4}>
+                    {root.runtimeProfile} · {root.currentLocation ? "当前 profile 位置" : "未配置当前 profile 位置"}
+                  </Text>
+                  {root.locations.filter((location) => location.runtimeProfile !== root.runtimeProfile).map((location) => (
+                    <Text key={location.id} size="xs" c="ink.5" mt={2} style={{ overflowWrap: "anywhere" }}>
+                      {location.runtimeProfile}：{location.absolutePath}
+                    </Text>
+                  ))}
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
@@ -148,7 +160,10 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                   </Group>
                 </Table.Td>
                 <Table.Td>
-                  <StatusBadge enabled={root.isEnabled} />
+                  <Group gap={6} wrap="wrap">
+                    <StatusBadge enabled={root.isEnabled} />
+                    <LocationBadge status={root.currentLocation?.verificationStatus ?? "unconfigured"} />
+                  </Group>
                 </Table.Td>
                 <Table.Td>
                   <Text size="sm" fw={600}>
@@ -176,8 +191,8 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                     </Tooltip>
                     <form action={scanMangaRootAction}>
                       <input name="mangaRootId" type="hidden" value={root.id} />
-                      <Tooltip label="重新扫描" withArrow>
-                        <ActionIcon variant="subtle" color="pink" size="md" type="submit" aria-label={`扫描 ${root.absolutePath}`}>
+                      <Tooltip label={rootUnavailable ? "根目录当前不可用，修复 location 后再扫描" : "重新扫描"} withArrow>
+                        <ActionIcon variant="subtle" color="pink" size="md" type="submit" disabled={rootUnavailable} aria-label={`扫描 ${root.absolutePath}`}>
                           <RefreshCcw size={15} />
                         </ActionIcon>
                       </Tooltip>
@@ -229,7 +244,8 @@ export function PathsPanel({ mangaRoots, scanSessions }: PathsPanelProps) {
                   </Group>
                 </Table.Td>
               </Table.Tr>
-            ))}
+              );
+            })}
             {filteredRoots.length === 0 && (
               <Table.Tr>
                 <Table.Td colSpan={6}>
@@ -288,6 +304,22 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
       }}
     >
       {enabled ? "启用" : "停用"}
+    </Box>
+  );
+}
+
+function LocationBadge({ status }: { status: "unconfigured" | "unverified" | "available" | "offline" | "invalid" }) {
+  const config = {
+    unconfigured: { label: "未配置", background: "var(--mantine-color-yellow-0)", color: "var(--mantine-color-yellow-8)" },
+    unverified: { label: "待验证", background: "var(--mantine-color-gray-1)", color: "var(--mantine-color-gray-7)" },
+    available: { label: "可访问", background: "var(--mantine-color-green-0)", color: "var(--mantine-color-green-8)" },
+    offline: { label: "根目录离线", background: "var(--mantine-color-orange-0)", color: "var(--mantine-color-orange-8)" },
+    invalid: { label: "路径无效", background: "var(--mantine-color-red-0)", color: "var(--mantine-color-red-8)" },
+  }[status];
+
+  return (
+    <Box component="span" style={{ display: "inline-flex", alignItems: "center", height: 26, paddingInline: 10, borderRadius: 999, background: config.background, color: config.color, fontSize: 12, fontWeight: 700 }}>
+      {config.label}
     </Box>
   );
 }

@@ -12,6 +12,7 @@ import type { FileMaintenanceIssueRecord } from "@/modules/local-files";
 
 const ISSUE_CONFIG: Record<FileMaintenanceIssueRecord["issueType"], { label: string; bg: string; color: string }> = {
   missing: { label: "文件缺失", bg: "#ffe1e1", color: "#ec3c45" },
+  root_offline: { label: "根目录离线", bg: "#fff1d6", color: "#b86b00" },
 };
 const STATUS_LABELS: Record<DuplicateCandidateGroupRecord["candidates"][number]["status"], string> = {
   deleted: "已删除",
@@ -62,6 +63,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
   }, [duplicateItems, search]);
 
   const missing = items.filter((issue) => issue.issueType === "missing").length;
+  const offlineRoots = items.filter((issue) => issue.issueType === "root_offline").length;
   const duplicateCandidateCount = duplicateItems.length;
 
   function openRepair(issue: FileMaintenanceIssueRecord) {
@@ -238,6 +240,7 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
 
       <Group gap="xl" mb="lg" px="md" py="sm" style={{ background: "var(--mantine-color-pink-0)", borderRadius: 10 }}>
         <Stat label="文件缺失" value={missing} color="#ec3c45" />
+        <Stat label="根目录离线" value={offlineRoots} color="#b86b00" />
         <Stat label="文件变更" value={0} color="#b87a00" />
         <Stat label="疑似重复" value={duplicateCandidateCount} color="#4f46e5" />
         <Stat label="孤立文件" value={0} color="#7c3aed" />
@@ -348,23 +351,27 @@ export function FilesPanel({ duplicateGroups, issues }: { duplicateGroups: Dupli
                 </Table.Td>
                 <Table.Td>
                   <Group gap={4} wrap="nowrap">
-                    <Tooltip label="修复路径" withArrow>
-                      <ActionIcon variant="subtle" color="pink" size="md" onClick={() => openRepair(issue)} aria-label="修复路径">
-                        <Wrench size={15} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label="忽略此问题" withArrow>
-                      <ActionIcon
-                        variant="subtle"
-                        color="ink"
-                        size="md"
-                        loading={pendingIgnoreId === issue.id}
-                        onClick={() => ignoreIssue(issue)}
-                        aria-label="忽略此问题"
-                      >
-                        <FileWarning size={15} />
-                      </ActionIcon>
-                    </Tooltip>
+                    {issue.issueType === "missing" ? (
+                      <>
+                        <Tooltip label="修复路径" withArrow>
+                          <ActionIcon variant="subtle" color="pink" size="md" onClick={() => openRepair(issue)} aria-label="修复路径">
+                            <Wrench size={15} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="忽略此问题" withArrow>
+                          <ActionIcon
+                            variant="subtle"
+                            color="ink"
+                            size="md"
+                            loading={pendingIgnoreId === issue.id}
+                            onClick={() => ignoreIssue(issue)}
+                            aria-label="忽略此问题"
+                          >
+                            <FileWarning size={15} />
+                          </ActionIcon>
+                        </Tooltip>
+                      </>
+                    ) : null}
                   </Group>
                 </Table.Td>
               </Table.Tr>

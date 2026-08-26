@@ -11,7 +11,13 @@ export interface SqliteBackupDownload {
   sizeBytes: number;
 }
 
-export async function createSqliteBackupDownload(): Promise<SqliteBackupDownload> {
+export interface SqliteBackupArtifact {
+  path: string;
+  filename: string;
+  sizeBytes: number;
+}
+
+export async function createSqliteBackupFile(): Promise<SqliteBackupArtifact> {
   bootstrapDatabase();
 
   const sqlite = getSqlite();
@@ -21,17 +27,28 @@ export async function createSqliteBackupDownload(): Promise<SqliteBackupDownload
   const destination = path.join(backupDirectory, filename);
 
   await mkdir(backupDirectory, { recursive: true });
+  await sqlite.backup(destination);
+  const data = await readFile(destination);
+
+  return {
+    path: destination,
+    filename,
+    sizeBytes: data.byteLength,
+  };
+}
+
+export async function createSqliteBackupDownload(): Promise<SqliteBackupDownload> {
+  const artifact = await createSqliteBackupFile();
 
   try {
-    await sqlite.backup(destination);
-    const data = await readFile(destination);
+    const data = await readFile(artifact.path);
 
     return {
       data,
-      filename,
+      filename: artifact.filename,
       sizeBytes: data.byteLength,
     };
   } finally {
-    await rm(destination, { force: true });
+    await rm(artifact.path, { force: true });
   }
 }

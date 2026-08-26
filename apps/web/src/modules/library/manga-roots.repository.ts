@@ -3,8 +3,10 @@ import path from "node:path";
 
 import { bootstrapDatabase, getDb } from "@/modules/core/db";
 import { localFiles, mangaRoots, scanSessions } from "@/modules/core/db/schema";
+import { detectCurrentRuntimeEnvironment } from "@/modules/core/runtime-paths";
 
 import { DOWNLOAD_IMPORT_DIRECTORY_NAME } from "@/modules/local-files";
+import { createMangaRootLocationRepository } from "@/modules/local-files/manga-root-locations.repository";
 
 import { createMangaRootRecord, type MangaRootDraft, type MangaRootRecord, type MangaRootWithStats } from "./manga-roots";
 
@@ -40,9 +42,11 @@ export function createMangaRootRepository(): MangaRootRepository {
       bootstrapDatabase();
       const db = getDb();
       const rows = db.select().from(mangaRoots).orderBy(asc(mangaRoots.createdAt)).all();
+      const runtimeProfile = detectCurrentRuntimeEnvironment().profile;
+      const locationRepository = createMangaRootLocationRepository();
 
       // Keep download-import root for downloads module (caller can filter further); include all here.
-      return rows.map(toMangaRootRecord);
+      return rows.map((row) => toMangaRootRecord(row, locationRepository.getForProfile(row.id, runtimeProfile)?.absolutePath));
     },
 
     async listWithStats() {
@@ -65,20 +69,29 @@ export function createMangaRootRepository(): MangaRootRepository {
         .groupBy(mangaRoots.id)
         .orderBy(asc(mangaRoots.createdAt))
         .all();
+      const runtimeProfile = detectCurrentRuntimeEnvironment().profile;
+      const locationRepository = createMangaRootLocationRepository();
 
       // Path management UI: hide download staging root so it is not treated as a user library path.
       return rows
         .filter((row) => row.kind === "pixiv" || !isDownloadImportRoot(row))
-        .map((row) => ({
-          id: row.id,
-          absolutePath: row.absolutePath,
-          displayName: row.displayName,
-          scanMode: row.scanMode,
-          kind: row.kind,
-          isEnabled: row.isEnabled,
-          lastScanSessionId: row.lastScanSessionId,
-          comicCount: Number(row.comicCount),
-        }));
+        .map((row) => {
+          const locations = locationRepository.listForRoot(row.id);
+          const currentLocation = locations.find((location) => location.runtimeProfile === runtimeProfile) ?? null;
+          return {
+            id: row.id,
+            absolutePath: currentLocation?.absolutePath ?? row.absolutePath,
+            displayName: row.displayName,
+            scanMode: row.scanMode,
+            kind: row.kind,
+            isEnabled: row.isEnabled,
+            lastScanSessionId: row.lastScanSessionId,
+            comicCount: Number(row.comicCount),
+            runtimeProfile,
+            currentLocation,
+            locations,
+          };
+        });
     },
 
     async create(input) {
@@ -101,6 +114,8 @@ export function createMangaRootRepository(): MangaRootRepository {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }).run();
+
+      ensureCurrentLocation(record.id, record.absolutePath);
 
       return record;
     },
@@ -129,6 +144,7 @@ export function createMangaRootRepository(): MangaRootRepository {
           .set({ kind: "pixiv", displayName: input.displayName.trim() || null, isEnabled: true, updatedAt: now })
           .where(eq(mangaRoots.id, existingAtPath.id))
           .run();
+        ensureCurrentLocation(existingAtPath.id, record.absolutePath);
         return toMangaRootRecord({ ...existingAtPath, kind: "pixiv", displayName: input.displayName.trim() || null, isEnabled: true });
       }
 
@@ -151,6 +167,8 @@ export function createMangaRootRepository(): MangaRootRepository {
             .run();
         }
 
+        ensureCurrentLocation(currentPixivRoot.id, record.absolutePath);
+
         return toMangaRootRecord({
           ...currentPixivRoot,
           absolutePath: record.absolutePath,
@@ -172,6 +190,8 @@ export function createMangaRootRepository(): MangaRootRepository {
           updatedAt: now,
         })
         .run();
+
+      ensureCurrentLocation(record.id, record.absolutePath);
 
       return record;
     },
@@ -243,6 +263,14 @@ export function createMangaRootRepository(): MangaRootRepository {
   };
 }
 
+function ensureCurrentLocation(mangaRootId: string, absolutePath: string) {
+  createMangaRootLocationRepository().upsert({
+    mangaRootId,
+    runtimeProfile: detectCurrentRuntimeEnvironment().profile,
+    absolutePath,
+  });
+}
+
 function toMangaRootRecord(row: {
   id: string;
   absolutePath: string;
@@ -251,10 +279,10 @@ function toMangaRootRecord(row: {
   kind: "user" | "system" | "pixiv";
   isEnabled: boolean;
   updatedAt?: string;
-}): MangaRootRecord {
+}, currentAbsolutePath = row.absolutePath): MangaRootRecord {
   return {
     id: row.id,
-    absolutePath: row.absolutePath,
+    absolutePath: currentAbsolutePath,
     displayName: row.displayName,
     scanMode: row.scanMode,
     kind: row.kind,

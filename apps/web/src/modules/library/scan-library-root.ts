@@ -17,7 +17,13 @@ import {
   readingProgress,
   scanSessions,
 } from "@/modules/core/db";
-import { DOWNLOAD_IMPORT_DIRECTORY_NAME, enumerateMangaRootChildren } from "@/modules/local-files";
+import { detectCurrentRuntimeEnvironment } from "@/modules/core/runtime-paths";
+import {
+  DOWNLOAD_IMPORT_DIRECTORY_NAME,
+  createMangaRootLocationRepository,
+  createRootLocationService,
+  enumerateMangaRootChildren,
+} from "@/modules/local-files";
 import { normalizeSortTitle } from "@/modules/library/title-utils";
 
 export interface LibraryScanResult {
@@ -56,8 +62,31 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
       throw new Error("这个漫画根目录已停用。");
     }
 
-    const entries = await enumerateMangaRootChildren(root.absolutePath);
-    const scannedPaths = new Set(entries.map((entry) => entry.relativePath));
+    const runtimeProfile = detectCurrentRuntimeEnvironment().profile;
+    const locationRepository = createMangaRootLocationRepository();
+    if (!locationRepository.getForProfile(mangaRootId, runtimeProfile)) {
+      // Roots created by older versions (or direct maintenance tooling) only
+      // have the legacy path. Backfill the current profile before scanning;
+      // a missing configured location remains visible as unconfigured to the
+      // location service and admin workflow.
+      locationRepository.upsert({
+        mangaRootId,
+        runtimeProfile,
+        absolutePath: root.absolutePath,
+      });
+    }
+
+    const rootLocation = await createRootLocationService().resolveMangaRoot(mangaRootId);
+    if (rootLocation.status !== "available") {
+      throw new Error(
+        rootLocation.status === "unconfigured"
+          ? "当前运行环境没有配置漫画根目录位置。"
+          : rootLocation.reason,
+      );
+    }
+
+    const entries = await enumerateMangaRootChildren(rootLocation.absolutePath, { cacheIdentity: mangaRootId });
+    const scannedPaths = new Set<string>(entries.map((entry) => entry.relativePath));
     const now = new Date().toISOString();
 
     const result = db.transaction((tx) => {
@@ -170,6 +199,20 @@ export async function scanMangaRoot(mangaRootId: string): Promise<LibraryScanRes
         }
 
         if (existingLocalFile) {
+          tx.update(localFiles)
+            .set({
+              absolutePath: entry.absolutePath,
+              sizeBytes: entry.sizeBytes,
+              mtimeMs: entry.mtimeMs,
+              isMissing: false,
+              missingSince: null,
+              isIgnored: false,
+              ignoredAt: null,
+              updatedAt: now,
+            })
+            .where(eq(localFiles.id, existingLocalFile.id))
+            .run();
+
           if (
             existingLocalFile.comicId &&
             matchedComic &&

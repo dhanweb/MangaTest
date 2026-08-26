@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { DEFAULT_SCAN_MODE } from "@/modules/core/config";
+import type { RuntimeProfile } from "@/modules/core/runtime-paths";
+import type { MangaRootLocationRecord } from "@/modules/local-files/manga-root-locations.repository";
 import { validateAbsolutePath } from "@/modules/local-files/path-safety";
 
 export type MangaRootKind = "user" | "system" | "pixiv";
@@ -24,6 +26,9 @@ export interface MangaRootRecord {
 export interface MangaRootWithStats extends MangaRootRecord {
   comicCount: number;
   lastScanSessionId: string | null;
+  runtimeProfile: RuntimeProfile;
+  currentLocation: MangaRootLocationRecord | null;
+  locations: MangaRootLocationRecord[];
 }
 
 export function createMangaRootRecord(input: MangaRootDraft): MangaRootRecord {

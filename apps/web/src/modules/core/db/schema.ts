@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
+import { runtimeProfiles } from "../runtime-paths";
+
 const timestamps = {
   createdAt: text("created_at")
     .notNull()
@@ -48,6 +50,7 @@ export const settings = sqliteTable("settings", {
 });
 
 export const mangaRootKinds = ["user", "system", "pixiv"] as const;
+export const rootLocationStatuses = ["unverified", "available", "offline", "invalid"] as const;
 
 export const mangaRoots = sqliteTable(
   "manga_roots",
@@ -63,6 +66,26 @@ export const mangaRoots = sqliteTable(
   },
   (table) => ({
     pathIdx: uniqueIndex("manga_roots_absolute_path_idx").on(table.absolutePath),
+  }),
+);
+
+export const mangaRootLocations = sqliteTable(
+  "manga_root_locations",
+  {
+    id: text("id").primaryKey(),
+    mangaRootId: text("manga_root_id")
+      .notNull()
+      .references(() => mangaRoots.id, { onDelete: "cascade" }),
+    runtimeProfile: text("runtime_profile", { enum: runtimeProfiles }).notNull(),
+    absolutePath: text("absolute_path").notNull(),
+    verificationStatus: text("verification_status", { enum: rootLocationStatuses }).notNull().default("unverified"),
+    lastVerifiedAt: text("last_verified_at"),
+    lastError: text("last_error"),
+    ...timestamps,
+  },
+  (table) => ({
+    rootProfileIdx: uniqueIndex("manga_root_locations_root_profile_idx").on(table.mangaRootId, table.runtimeProfile),
+    profilePathIdx: uniqueIndex("manga_root_locations_profile_path_idx").on(table.runtimeProfile, table.absolutePath),
   }),
 );
 
@@ -798,6 +821,7 @@ export const operationLogs = sqliteTable(
         "soft_delete",
         "restore",
         "path_repair",
+        "path_migration",
         "merge_chapter",
         "merge_video_episode",
         "switch_primary_file",

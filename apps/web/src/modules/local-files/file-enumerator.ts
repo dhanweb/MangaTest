@@ -9,6 +9,7 @@ import yauzl from "yauzl";
 import { bootstrapDatabase, cacheEntries, getDb } from "@/modules/core/db";
 import { getRuntimeSettings } from "@/modules/core/settings";
 
+import { toPortableRelativePath, type PortableRelativePath } from "./portable-relative-path";
 import type { LocalFileKind } from ".";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"]);
@@ -22,7 +23,7 @@ const pathCollator = new Intl.Collator(undefined, {
 export interface LocalComicEntry {
   kind: LocalFileKind;
   absolutePath: string;
-  relativePath: string;
+  relativePath: PortableRelativePath;
   fileTitle: string;
   sizeBytes: number | null;
   mtimeMs: number | null;
@@ -40,7 +41,7 @@ export interface LocalComicPage {
 /** Staging folder for downloads under a manga root — never treat as a comic title. */
 export const DOWNLOAD_IMPORT_DIRECTORY_NAME = "下载入库";
 
-export async function enumerateMangaRootChildren(rootPath: string): Promise<LocalComicEntry[]> {
+export async function enumerateMangaRootChildren(rootPath: string, options?: { cacheIdentity?: string }): Promise<LocalComicEntry[]> {
   const rootStat = await fs.stat(rootPath).catch(() => null);
 
   if (!rootStat?.isDirectory()) {
@@ -68,7 +69,7 @@ export async function enumerateMangaRootChildren(rootPath: string): Promise<Loca
     }
 
     if (child.isFile() && ARCHIVE_EXTENSIONS.has(path.extname(child.name).toLowerCase())) {
-      entries.push(await createArchiveComicEntry(rootPath, absolutePath));
+      entries.push(await createArchiveComicEntry(rootPath, absolutePath, options?.cacheIdentity));
     }
   }
 
@@ -82,7 +83,7 @@ async function createDirectoryComicEntry(rootPath: string, absolutePath: string)
   return {
     kind: "directory",
     absolutePath,
-    relativePath: path.relative(rootPath, absolutePath),
+    relativePath: toPortableRelativePath(path.relative(rootPath, absolutePath)),
     fileTitle: path.basename(absolutePath),
     sizeBytes: null,
     mtimeMs: Math.trunc(stat.mtimeMs),
@@ -90,18 +91,19 @@ async function createDirectoryComicEntry(rootPath: string, absolutePath: string)
   };
 }
 
-async function createArchiveComicEntry(rootPath: string, absolutePath: string): Promise<LocalComicEntry> {
+async function createArchiveComicEntry(rootPath: string, absolutePath: string, cacheIdentity?: string): Promise<LocalComicEntry> {
   const stat = await fs.stat(absolutePath);
   const ext = path.extname(absolutePath).toLowerCase();
+  const relativePath = toPortableRelativePath(path.relative(rootPath, absolutePath));
 
   return {
     kind: ext === ".cbz" ? "cbz" : "zip",
     absolutePath,
-    relativePath: path.relative(rootPath, absolutePath),
+    relativePath,
     fileTitle: path.basename(absolutePath, ext),
     sizeBytes: stat.size,
     mtimeMs: Math.trunc(stat.mtimeMs),
-    pages: await getCachedArchivePages(absolutePath, stat),
+    pages: await getCachedArchivePages(absolutePath, stat, cacheIdentity ? `${cacheIdentity}:${relativePath}` : `relative:${relativePath}`),
   };
 }
 
@@ -127,7 +129,7 @@ async function enumerateDirectoryPages(rootPath: string): Promise<LocalComicPage
         const dimensions = await readImageDimensions(absolutePath).catch(() => null);
         pages.push({
           sourceKind: "filesystem",
-          internalPath: toPortablePath(path.relative(rootPath, absolutePath)),
+          internalPath: toPortableRelativePath(path.relative(rootPath, absolutePath)),
           archiveIndex: null,
           width: dimensions?.width ?? null,
           height: dimensions?.height ?? null,
@@ -214,12 +216,12 @@ function enumerateArchivePages(absolutePath: string): Promise<LocalComicPage[]> 
   });
 }
 
-async function getCachedArchivePages(absolutePath: string, stat: { size: number; mtimeMs: number }) {
+async function getCachedArchivePages(absolutePath: string, stat: { size: number; mtimeMs: number }, cacheIdentity: string) {
   bootstrapDatabase();
 
   const db = getDb();
   const now = new Date().toISOString();
-  const cacheKey = createArchiveFileListCacheKey(absolutePath, stat);
+  const cacheKey = createArchiveFileListCacheKey(cacheIdentity, stat);
   const cached = db.select().from(cacheEntries).where(eq(cacheEntries.cacheKey, cacheKey)).get();
 
   if (cached?.metadataJson) {
@@ -267,8 +269,8 @@ async function getCachedArchivePages(absolutePath: string, stat: { size: number;
   return pages;
 }
 
-function createArchiveFileListCacheKey(absolutePath: string, stat: { size: number; mtimeMs: number }) {
-  return `archive_file_list:${path.resolve(absolutePath)}:${Math.trunc(stat.mtimeMs)}:${stat.size}`;
+function createArchiveFileListCacheKey(cacheIdentity: string, stat: { size: number; mtimeMs: number }) {
+  return `archive_file_list:${cacheIdentity}:${Math.trunc(stat.mtimeMs)}:${stat.size}`;
 }
 
 function parseCachedArchivePages(metadataJson: string) {
@@ -352,7 +354,7 @@ async function readImageDimensionsFromStream(stream: NodeJS.ReadableStream): Pro
 }
 
 function toPortablePath(input: string) {
-  return input.split(path.sep).join("/");
+  return input.replaceAll("\\", "/");
 }
 
 function addDays(isoDate: string, days: number) {

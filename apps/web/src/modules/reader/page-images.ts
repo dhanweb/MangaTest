@@ -6,6 +6,8 @@ import { and, eq } from "drizzle-orm";
 import yauzl from "yauzl";
 
 import { bootstrapDatabase, chapters, comics, getDb, localFiles, pages } from "@/modules/core/db";
+import { createRootLocationService } from "@/modules/local-files";
+import { parsePortableRelativePath, resolvePortableChild } from "@/modules/local-files/portable-relative-path";
 
 const IMAGE_CONTENT_TYPES = new Map([
   [".jpg", "image/jpeg"],
@@ -33,7 +35,8 @@ export async function readReaderPageImage(pageId: string): Promise<ReaderPageIma
       sourceKind: pages.sourceKind,
       internalPath: pages.internalPath,
       localFileKind: localFiles.kind,
-      localFilePath: localFiles.absolutePath,
+      mangaRootId: localFiles.mangaRootId,
+      localFileRelativePath: localFiles.relativePath,
       isMissing: localFiles.isMissing,
     })
     .from(pages)
@@ -52,8 +55,19 @@ export async function readReaderPageImage(pageId: string): Promise<ReaderPageIma
     return null;
   }
 
+  if (!page.mangaRootId) {
+    return null;
+  }
+
+  const localFilePath = await createRootLocationService()
+    .resolveMangaFile(page.mangaRootId, page.localFileRelativePath)
+    .catch(() => null);
+  if (!localFilePath) {
+    return null;
+  }
+
   if (page.sourceKind === "filesystem" && page.localFileKind === "directory") {
-    const imagePath = resolveSafeChildPath(page.localFilePath, page.internalPath);
+    const imagePath = resolveSafeChildPath(localFilePath, page.internalPath);
     if (!imagePath) {
       return null;
     }
@@ -70,7 +84,7 @@ export async function readReaderPageImage(pageId: string): Promise<ReaderPageIma
   }
 
   if (page.sourceKind === "archive" && (page.localFileKind === "zip" || page.localFileKind === "cbz")) {
-    const data = await readArchiveEntry(page.localFilePath, page.internalPath);
+    const data = await readArchiveEntry(localFilePath, page.internalPath);
     return data ? { data, contentType, fileName: path.basename(page.internalPath) } : null;
   }
 
@@ -78,15 +92,11 @@ export async function readReaderPageImage(pageId: string): Promise<ReaderPageIma
 }
 
 function resolveSafeChildPath(rootPath: string, internalPath: string) {
-  const root = path.resolve(rootPath);
-  const target = path.resolve(root, internalPath);
-  const relative = path.relative(root, target);
-
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+  try {
+    return resolvePortableChild(rootPath, parsePortableRelativePath(internalPath.replaceAll("\\", "/")));
+  } catch {
     return null;
   }
-
-  return target;
 }
 
 function readArchiveEntry(archivePath: string, internalPath: string): Promise<Buffer | null> {

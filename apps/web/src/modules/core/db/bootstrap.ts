@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
+import { detectCurrentRuntimeEnvironment } from "../runtime-paths";
+
 import { getSqlite } from "./client";
 
 let bootstrapped = false;
@@ -36,6 +38,24 @@ export function bootstrapDatabase() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS manga_roots_absolute_path_idx
       ON manga_roots (absolute_path);
+
+    CREATE TABLE IF NOT EXISTS manga_root_locations (
+      id TEXT PRIMARY KEY NOT NULL,
+      manga_root_id TEXT NOT NULL REFERENCES manga_roots(id) ON DELETE CASCADE,
+      runtime_profile TEXT NOT NULL,
+      absolute_path TEXT NOT NULL,
+      verification_status TEXT NOT NULL DEFAULT 'unverified',
+      last_verified_at TEXT,
+      last_error TEXT,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS manga_root_locations_root_profile_idx
+      ON manga_root_locations (manga_root_id, runtime_profile);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS manga_root_locations_profile_path_idx
+      ON manga_root_locations (runtime_profile, absolute_path);
 
     CREATE TABLE IF NOT EXISTS video_roots (
       id TEXT PRIMARY KEY NOT NULL,
@@ -807,7 +827,45 @@ export function bootstrapDatabase() {
     ).run(randomUUID(), systemRootPath, "系统默认目录", "children_as_comics", "system", 1, now, now);
   }
 
+  backfillCurrentMangaRootLocations(sqlite);
+
   bootstrapped = true;
+}
+
+function backfillCurrentMangaRootLocations(sqlite: ReturnType<typeof getSqlite>) {
+  const runtimeProfile = detectCurrentRuntimeEnvironment().profile;
+  const now = new Date().toISOString();
+  const roots = sqlite.prepare("SELECT id, absolute_path FROM manga_roots").all() as Array<{
+    id: string;
+    absolute_path: string;
+  }>;
+
+  const insert = sqlite.prepare(
+    `
+      INSERT OR IGNORE INTO manga_root_locations
+        (id, manga_root_id, runtime_profile, absolute_path, verification_status, created_at, updated_at)
+      VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'unverified', ?, ?)
+      `,
+  );
+
+  for (const root of roots) {
+    // A database copied from another runtime can still have a legacy path in
+    // the other platform's syntax. Keep that root unconfigured until the
+    // destination runtime supplies and verifies its own location; writing
+    // `D:\\...` as a WSL location would turn a recoverable migration into an
+    // apparently offline root.
+    if (!isAbsolutePathForRuntime(root.absolute_path, runtimeProfile)) {
+      continue;
+    }
+
+    insert.run(root.id, runtimeProfile, root.absolute_path, now, now);
+  }
+}
+
+function isAbsolutePathForRuntime(value: string, runtimeProfile: "windows" | "wsl" | "linux") {
+  return runtimeProfile === "windows"
+    ? path.win32.isAbsolute(value)
+    : path.posix.isAbsolute(value) && !/^[A-Za-z]:[\\/]/.test(value);
 }
 
 function ensureColumn(tableName: string, columnName: string, definition: string) {

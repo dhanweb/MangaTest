@@ -348,7 +348,7 @@ export async function getReaderThumbnail(input: ReaderThumbnailRequest): Promise
   const now = new Date().toISOString();
   const sourceVersion =
     pageIdentity.localFileContentHash ?? `${pageIdentity.localFileMtimeMs ?? "unknown-mtime"}:${pageIdentity.localFileSizeBytes ?? "unknown-size"}`;
-  const sourceIdentity = `${pageIdentity.localFileId}:${pageIdentity.internalPath}:${sourceVersion}`;
+  const sourceIdentity = `page:${pageIdentity.pageId}:${pageIdentity.localFileId}:${pageIdentity.internalPath}:${sourceVersion}`;
   const cacheKey = createThumbnailCacheKey({
     sourceIdentity,
     width,
